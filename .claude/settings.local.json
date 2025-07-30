@@ -11,7 +11,27 @@
       "Bash(docker-compose up:*)",
       "Bash(npm install:*)",
       "Bash(pip3 install:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "mcp__serena__check_onboarding_performed",
+      "mcp__serena__list_dir",
+      "mcp__serena__write_memory",
+      "mcp__serena__summarize_changes",
+      "mcp__serena__think_about_collected_information",
+      "mcp__serena__initial_instructions",
+      "mcp__serena__get_current_config",
+      "mcp__serena__find_symbol",
+      "mcp__serena__get_symbols_overview",
+      "mcp__serena__replace_regex",
+      "mcp__serena__search_for_pattern",
+      "Bash(docker compose:*)",
+      "mcp__serena__list_memories",
+      "mcp__serena__read_memory",
+      "mcp__context7__get-library-docs",
+      "mcp__context7__resolve-library-id",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "mcp__serena__replace_symbol_body",
+      "mcp__serena__insert_after_symbol"
     ],
     "deny": []
   }

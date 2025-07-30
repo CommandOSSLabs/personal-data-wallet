@@ -142,10 +142,10 @@ export function useChatSessions() {
 
   const getCurrentSession = (): ChatSession | null => {
     console.log('getCurrentSession - currentSessionId:', currentSessionId)
-    console.log('getCurrentSession - available sessions:', sessions.map(s => s.id))
+    console.log('getCurrentSession - available sessions:', sessions.map((s: any) => s.id))
     
     if (!currentSessionId) return null
-    const session = sessions.find(session => session.id === currentSessionId)
+    const session = sessions.find((session: any) => session.id === currentSessionId)
     console.log('getCurrentSession - found session:', session)
     return session || null
   }

@@ -44,3 +44,7 @@ env/
 
 # Sui
 .sui/
+
+# Serena coding agent
+serena/
+.serena/

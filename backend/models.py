@@ -113,3 +113,37 @@ class MemoryObject(BaseModel):
     vector_index_cert: Optional[str] = None
     graph_cert: Optional[str] = None
     last_updated: str
+
+# Walrus-Quilt Models
+class QuiltBlob(BaseModel):
+    identifier: str
+    data: bytes
+    metadata: Dict[str, str] = {}
+
+class QuiltPatchInfo(BaseModel):
+    patch_id: str
+    identifier: str
+    size: int
+
+class QuiltResponse(BaseModel):
+    quilt_id: str
+    patches: List[QuiltPatchInfo]
+    total_cost: Optional[int] = None
+
+class WalrusBlobResponse(BaseModel):
+    blob_id: str
+    object_id: str
+    registered_epoch: int
+    certified_epoch: Optional[int] = None
+    size: int
+    storage_cost: Optional[int] = None
+
+class EmbeddingQuiltData(BaseModel):
+    user_id: str
+    embeddings: List[EmbeddingResult]
+    metadata: Dict[str, Any] = {}
+
+class VectorIndexQuiltData(BaseModel):
+    user_id: str
+    index_files: Dict[str, bytes]  # filename -> file content
+    metadata: Dict[str, Any] = {}
