@@ -2,14 +2,15 @@
 
 import { useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-
-const API_BASE = 'http://localhost:8000'
+import { chatApi } from '@/app/api'
 
 interface StreamingChatRequest {
   text: string
   userId: string
   sessionId?: string
   model?: string
+  originalUserMessage?: string
+  memoryContext?: string
 }
 
 interface StreamChunk {
@@ -47,17 +48,13 @@ export function useStreamingChat() {
         error: null
       })
 
-      const response = await fetch(`${API_BASE}/chat/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: request.text,
-          user_id: request.userId,
-          session_id: request.sessionId,
-          model: request.model || 'gemini'
-        })
+      const response = await chatApi.streamChat({
+        text: request.text,
+        user_id: request.userId,
+        session_id: request.sessionId,
+        model: request.model || 'gemini',
+        originalUserMessage: request.originalUserMessage,
+        memoryContext: request.memoryContext
       })
 
       if (!response.ok) {

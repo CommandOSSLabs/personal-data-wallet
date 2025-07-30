@@ -1,0 +1,46 @@
+{
+  "memories": {
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753868505260": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753868505260",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: working, not",
+      "raw_text": "not working",
+      "type": "fact",
+      "category": "work",
+      "created_at": "2025-07-30 16:41:45.260783",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753867850266"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753871714416": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753871714416",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: nguyen, is, bui, hoang, my, name",
+      "raw_text": "my name is bui nguyen hoang",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-30 17:35:14.416367",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753871679903"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753873012875": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753873012875",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: nguyen, name, honag, bui, my, is",
+      "raw_text": "my name is bui nguyen honag",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-30 17:56:52.875769",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753872987135"
+      ],
+      "metadata": {}
+    }
+  },
+  "metadata": {
+    "last_updated": "2025-07-30T17:56:52.876361"
+  }
+}

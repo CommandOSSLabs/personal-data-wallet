@@ -18,6 +18,9 @@ from services.memory_manager import MemoryManager
 from services.chat_storage import ChatStorage
 from services.memory_storage import MemoryStorage
 from services.gemini_chat import GeminiChatService
+from services.two_stage_query import TwoStageQueryService
+from services.google_embeddings import GoogleEmbeddingService
+from services.sui_chat_sessions import SuiChatSessionsService
 
 # Configure logging
 logging.basicConfig(level=getattr(logging, settings.log_level))
@@ -30,6 +33,9 @@ memory_manager = MemoryManager()
 chat_storage = ChatStorage()
 memory_storage = MemoryStorage()
 gemini_chat = GeminiChatService()
+query_service = TwoStageQueryService()
+embedding_service = GoogleEmbeddingService()
+sui_chat_sessions = SuiChatSessionsService()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -71,7 +77,7 @@ async def ingest_message(request: IngestRequest):
         
         # Add user message to chat session if session_id provided
         if request.session_id:
-            chat_storage.add_message(request.session_id, request.user_id, request.text, "user")
+            chat_storage.add_message(request.user_id, request.session_id, request.text, "user")
         
         # Step A: Classification
         classification = classifier.classify_intent(request.text)
@@ -134,7 +140,7 @@ async def ingest_message(request: IngestRequest):
         
         # Add assistant response to chat session if session_id provided
         if request.session_id:
-            chat_storage.add_message(request.session_id, request.user_id, response_text, "assistant")
+            chat_storage.add_message(request.user_id, request.session_id, response_text, "assistant")
         
         return IngestResponse(
             response=response_text,
@@ -149,24 +155,52 @@ async def ingest_message(request: IngestRequest):
 
 @app.post("/chat/stream")
 async def stream_chat(request: IngestRequest):
-    """Streaming chat endpoint with Gemini integration"""
+    """Streaming chat endpoint with Gemini integration and Sui session support"""
     try:
         logger.info(f"Processing streaming chat request for user: {request.user_id}")
-        
-        # Add user message to chat session if session_id provided
+
+        # Add user message to Sui chat session if session_id provided
         if request.session_id:
-            chat_storage.add_message(request.session_id, request.user_id, request.text, "user")
-        
+            try:
+                # Use originalUserMessage if provided, otherwise fall back to text
+                user_message_content = request.originalUserMessage or request.text
+
+                await sui_chat_sessions.add_message(
+                    session_id=request.session_id,
+                    user_address=request.user_id,
+                    message_content=user_message_content,
+                    message_type="user"
+                )
+                logger.info(f"Added user message to Sui session: {request.session_id}")
+                logger.debug(f"User message content: {user_message_content[:100]}...")
+            except Exception as e:
+                logger.warning(f"Failed to add user message to Sui session: {e}")
+
         # Step A: Classification
         classification = classifier.classify_intent(request.text)
         logger.info(f"Classification result: {classification.intent} (confidence: {classification.confidence})")
-        
-        # Get memory context for better responses
-        stored_memories = memory_storage.search_memories(request.user_id, request.text)
-        context = gemini_chat.build_context_from_memory(
-            [mem.dict() for mem in stored_memories], 
-            classification.intent.value
-        )
+
+        # Use memory context from frontend if provided, otherwise get from backend
+        if request.memoryContext:
+            context = request.memoryContext
+            logger.info("Using memory context from frontend")
+        else:
+            # Fallback to backend memory retrieval
+            try:
+                # For now, simulate user signature
+                user_signature = "simulated_signature"
+
+                context_result = await query_service.full_query_with_context(
+                    query_text=request.text,
+                    user_address=request.user_id,  # Using user_id as address for now
+                    user_signature=user_signature,
+                    k=5
+                )
+                context = context_result.get("context", "")
+                logger.info("Using memory context from backend")
+            except Exception as e:
+                logger.warning(f"Failed to get memory context: {e}")
+                context = ""
         
         async def generate_stream():
             collected_response = ""
@@ -211,9 +245,18 @@ async def stream_chat(request: IngestRequest):
                     )
                     entities = knowledge_graph
             
-            # Add assistant response to chat session
+            # Add assistant response to Sui chat session
             if request.session_id:
-                chat_storage.add_message(request.session_id, request.user_id, collected_response, "assistant")
+                try:
+                    await sui_chat_sessions.add_message(
+                        session_id=request.session_id,
+                        user_address=request.user_id,
+                        message_content=collected_response,
+                        message_type="assistant"
+                    )
+                    logger.info(f"Added assistant response to Sui session: {request.session_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to add assistant response to Sui session: {e}")
             
             # Send completion metadata
             yield f"data: {json.dumps({'type': 'end', 'intent': classification.intent, 'entities': entities.dict() if entities else None})}\n\n"
@@ -496,6 +539,259 @@ async def clear_user_memory(user_id: str):
         return {"message": f"Memory cleared for user {user_id}"}
     except Exception as e:
         logger.error(f"Error clearing user memory: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# New Advanced Memory API Endpoints
+
+@app.post("/api/memories")
+async def store_memory(request: dict):
+    """Store a new memory using the advanced two-stage system."""
+    try:
+        content = request.get("content")
+        category = request.get("category", "general")
+        user_address = request.get("userAddress")
+
+        if not all([content, user_address]):
+            raise HTTPException(status_code=400, detail="Missing required fields")
+
+        # For now, simulate user signature
+        user_signature = "simulated_signature"
+
+        embedding_id = await query_service.store_new_memory(
+            text=content,
+            category=category,
+            user_address=user_address,
+            user_signature=user_signature
+        )
+
+        if embedding_id:
+            return {
+                "success": True,
+                "embeddingId": embedding_id,
+                "message": "Memory stored successfully"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to store memory")
+
+    except Exception as e:
+        logger.error(f"Error storing memory: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/memories")
+async def get_memories(user: str):
+    """Get user's memories (metadata only for privacy)."""
+    try:
+        # This would typically return metadata from the indexer
+        # For now, return empty list
+        return {"memories": []}
+    except Exception as e:
+        logger.error(f"Error getting memories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/memories/search")
+async def search_memories(request: dict):
+    """Search memories using the two-stage query system."""
+    try:
+        query = request.get("query")
+        user_address = request.get("userAddress")
+        category = request.get("category")
+
+        if not all([query, user_address]):
+            raise HTTPException(status_code=400, detail="Missing required fields")
+
+        # For now, simulate user signature
+        user_signature = "simulated_signature"
+
+        # Perform stage 1 search (metadata only)
+        results = await query_service.stage1_metadata_search(
+            query_text=query,
+            k=10,
+            category_filter=category,
+            owner_filter=user_address
+        )
+
+        # Convert results to API format
+        api_results = []
+        for result in results:
+            api_results.append({
+                "id": result.embedding_id,
+                "content": result.preview,
+                "category": result.category,
+                "similarity": result.similarity_score,
+                "timestamp": result.timestamp,
+                "isEncrypted": True,
+                "owner": result.owner
+            })
+
+        return {"results": api_results}
+
+    except Exception as e:
+        logger.error(f"Error searching memories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/memories/{memory_id}")
+async def delete_memory(memory_id: str, request: dict):
+    """Delete a memory (placeholder - would need Sui integration)."""
+    try:
+        user_address = request.get("userAddress")
+        if not user_address:
+            raise HTTPException(status_code=400, detail="Missing user address")
+
+        # This would call Sui to remove the embedding
+        # For now, just return success
+        return {"success": True, "message": "Memory deleted"}
+
+    except Exception as e:
+        logger.error(f"Error deleting memory: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/chat/context")
+async def get_chat_context(request: dict):
+    """Get relevant context for chat using the two-stage query system."""
+    try:
+        query = request.get("query")
+        user_address = request.get("userAddress")
+
+        if not all([query, user_address]):
+            raise HTTPException(status_code=400, detail="Missing required fields")
+
+        # For now, simulate user signature
+        user_signature = "simulated_signature"
+
+        # Get context using full query system
+        context_result = await query_service.full_query_with_context(
+            query_text=query,
+            user_address=user_address,
+            user_signature=user_signature,
+            k=5
+        )
+
+        return context_result
+
+    except Exception as e:
+        logger.error(f"Error getting chat context: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Sui Chat Sessions API Endpoints
+
+@app.post("/api/chat/sessions")
+async def create_chat_session(request: dict):
+    """Create a new chat session on Sui."""
+    try:
+        user_address = request.get("userAddress")
+        title = request.get("title", "New Chat")
+
+        if not user_address:
+            raise HTTPException(status_code=400, detail="Missing user address")
+
+        session_data = await sui_chat_sessions.create_session(
+            user_address=user_address,
+            title=title
+        )
+
+        return {
+            "success": True,
+            "session": session_data
+        }
+
+    except Exception as e:
+        logger.error(f"Error creating chat session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/chat/sessions")
+async def get_chat_sessions(userAddress: str):
+    """Get all chat sessions for a user."""
+    try:
+        if not userAddress:
+            raise HTTPException(status_code=400, detail="Missing user address")
+
+        sessions = await sui_chat_sessions.get_user_sessions(userAddress)
+
+        return {
+            "success": True,
+            "sessions": sessions
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting chat sessions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/chat/sessions/{session_id}")
+async def get_chat_session(session_id: str, userAddress: str):
+    """Get a specific chat session."""
+    try:
+        if not userAddress:
+            raise HTTPException(status_code=400, detail="Missing user address")
+
+        session = await sui_chat_sessions.get_session(session_id, userAddress)
+
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        return {
+            "success": True,
+            "session": session
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting chat session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/chat/sessions/{session_id}/messages")
+async def add_message_to_session(session_id: str, request: dict):
+    """Add a message to a chat session."""
+    try:
+        user_address = request.get("userAddress")
+        content = request.get("content")
+        message_type = request.get("type", "user")
+
+        logger.info(f"Adding message to session {session_id} for user {user_address}")
+
+        if not all([user_address, content]):
+            raise HTTPException(status_code=400, detail="Missing required fields")
+
+        # Check if session exists first
+        session = await sui_chat_sessions.get_session(session_id, user_address)
+        if not session:
+            logger.error(f"Session {session_id} not found for user {user_address}")
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        success = await sui_chat_sessions.add_message(
+            session_id=session_id,
+            user_address=user_address,
+            message_content=content,
+            message_type=message_type
+        )
+
+        if success:
+            return {"success": True, "message": "Message added"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to add message")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding message: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/chat/sessions/{session_id}")
+async def delete_chat_session(session_id: str, request: dict):
+    """Delete a chat session."""
+    try:
+        user_address = request.get("userAddress")
+
+        if not user_address:
+            raise HTTPException(status_code=400, detail="Missing user address")
+
+        success = await sui_chat_sessions.delete_session(session_id, user_address)
+
+        if success:
+            return {"success": True, "message": "Session deleted"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete session")
+
+    except Exception as e:
+        logger.error(f"Error deleting session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

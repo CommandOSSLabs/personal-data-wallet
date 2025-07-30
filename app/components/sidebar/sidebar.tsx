@@ -2,19 +2,30 @@
 
 import { useState } from 'react'
 import { ChatSession, MemoryItem } from '@/app/types'
-import { Button } from '@/app/components/ui/button'
-import { 
-  MessageSquare, 
-  Plus, 
-  Trash2, 
-  Brain, 
-  Clock, 
-  Tag,
-  Search,
-  ChevronDown,
-  ChevronRight
-} from 'lucide-react'
-import { clsx } from 'clsx'
+import {
+  Stack,
+  Button,
+  Tabs,
+  ScrollArea,
+  Group,
+  Text,
+  ActionIcon,
+  Collapse,
+  Badge,
+  Divider,
+  Box
+} from '@mantine/core'
+import {
+  IconMessageCircle,
+  IconPlus,
+  IconTrash,
+  IconBrain,
+  IconClock,
+  IconTag,
+  IconSearch,
+  IconChevronDown,
+  IconChevronRight
+} from '@tabler/icons-react'
 
 interface SidebarProps {
   sessions: ChatSession[]
@@ -58,182 +69,185 @@ export function Sidebar({
   }, {} as Record<string, MemoryItem[]>)
 
   return (
-    <div className="w-64 bg-gray-50 border-r border-gray-200 flex flex-col h-full">
+    <Stack h="100%" gap={0}>
       {/* Header */}
-      <div className="p-4 border-b border-gray-200">
+      <Box p="md">
         <Button
           onClick={onNewChat}
-          className="w-full justify-start"
-          variant="outline"
+          fullWidth
+          leftSection={<IconPlus size={16} />}
+          variant="light"
         >
-          <Plus className="w-4 h-4 mr-2" />
           New Chat
         </Button>
-      </div>
+      </Box>
+
+      <Divider />
 
       {/* Tab Navigation */}
-      <div className="flex border-b border-gray-200">
-        <button
-          onClick={() => setActiveTab('chats')}
-          className={clsx(
-            'flex-1 px-4 py-2 text-sm font-medium transition-colors',
-            activeTab === 'chats'
-              ? 'text-gray-900 border-b-2 border-gray-900'
-              : 'text-gray-600 hover:text-gray-900'
-          )}
-        >
-          <MessageSquare className="w-4 h-4 inline mr-2" />
-          Chats
-        </button>
-        <button
-          onClick={() => setActiveTab('memories')}
-          className={clsx(
-            'flex-1 px-4 py-2 text-sm font-medium transition-colors',
-            activeTab === 'memories'
-              ? 'text-gray-900 border-b-2 border-gray-900'
-              : 'text-gray-600 hover:text-gray-900'
-          )}
-        >
-          <Brain className="w-4 h-4 inline mr-2" />
-          Memory
-        </button>
-      </div>
+      <Tabs value={activeTab} onChange={(value) => setActiveTab(value as 'chats' | 'memories')}>
+        <Tabs.List grow>
+          <Tabs.Tab value="chats" leftSection={<IconMessageCircle size={16} />}>
+            Chats
+          </Tabs.Tab>
+          <Tabs.Tab value="memories" leftSection={<IconBrain size={16} />}>
+            Memory
+          </Tabs.Tab>
+        </Tabs.List>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        {activeTab === 'chats' ? (
-          <div className="p-2">
-            {sessions.length === 0 ? (
-              <div className="text-center text-gray-500 py-8">
-                <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No chat history yet</p>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {sessions.map((session) => (
-                  <div
+        {/* Content */}
+        <Tabs.Panel value="chats">
+          <ScrollArea style={{ height: 'calc(100vh - 200px)' }}>
+            <Stack gap="xs" p="sm">
+              {sessions.length === 0 ? (
+                <Stack align="center" gap="sm" py="xl">
+                  <IconMessageCircle size={32} opacity={0.5} />
+                  <Text size="sm" c="dimmed">No chat history yet</Text>
+                </Stack>
+              ) : (
+                sessions.map((session) => (
+                  <Group
                     key={session.id}
-                    className={clsx(
-                      'group flex items-center justify-between p-2 rounded-md cursor-pointer transition-colors',
-                      currentSessionId === session.id
-                        ? 'bg-gray-200'
-                        : 'hover:bg-gray-100'
-                    )}
+                    justify="space-between"
+                    p="sm"
+                    style={{
+                      borderRadius: 'var(--mantine-radius-md)',
+                      cursor: 'pointer',
+                      backgroundColor: currentSessionId === session.id ? 'var(--mantine-color-gray-1)' : 'transparent'
+                    }}
                     onClick={() => onSelectSession(session.id)}
+                    className="hover:bg-gray-50"
                   >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
+                    <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+                      <Text size="sm" fw={500} truncate>
                         {session.title}
-                      </p>
-                      <p className="text-xs text-gray-500 flex items-center mt-1">
-                        <Clock className="w-3 h-3 mr-1" />
-                        {session.updatedAt.toLocaleDateString()}
-                      </p>
-                    </div>
-                    <Button
-                      variant="ghost"
+                      </Text>
+                      <Group gap="xs">
+                        <IconClock size={12} />
+                        <Text size="xs" c="dimmed">
+                          {session.updatedAt.toLocaleDateString()}
+                        </Text>
+                      </Group>
+                    </Stack>
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
                       size="sm"
-                      className="opacity-0 group-hover:opacity-100 p-1 h-auto"
                       onClick={(e) => {
                         e.stopPropagation()
                         onDeleteSession(session.id)
                       }}
                     >
-                      <Trash2 className="w-4 h-4 text-red-500" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="p-2">
-            {/* Memory Stats */}
-            <div className="mb-4 p-3 bg-white rounded-lg border border-gray-200">
-              <div className="text-sm text-gray-600 mb-2">Memory Overview</div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="text-center">
-                  <div className="font-semibold text-gray-900">{memories.length}</div>
-                  <div className="text-gray-500">Total Items</div>
-                </div>
-                <div className="text-center">
-                  <div className="font-semibold text-gray-900">{Object.keys(memoriesByCategory).length}</div>
-                  <div className="text-gray-500">Categories</div>
-                </div>
-              </div>
-            </div>
+                      <IconTrash size={14} />
+                    </ActionIcon>
+                  </Group>
+                ))
+              )}
+            </Stack>
+          </ScrollArea>
+        </Tabs.Panel>
+        <Tabs.Panel value="memories">
+          <ScrollArea style={{ height: 'calc(100vh - 200px)' }}>
+            <Stack gap="md" p="sm">
+              {/* Memory Stats */}
+              <Box p="md" bg="gray.0" style={{ borderRadius: 'var(--mantine-radius-md)' }}>
+                <Text size="sm" c="dimmed" mb="sm">Memory Overview</Text>
+                <Group grow>
+                  <Stack align="center" gap={2}>
+                    <Text fw={600}>{memories.length}</Text>
+                    <Text size="xs" c="dimmed">Total Items</Text>
+                  </Stack>
+                  <Stack align="center" gap={2}>
+                    <Text fw={600}>{Object.keys(memoriesByCategory).length}</Text>
+                    <Text size="xs" c="dimmed">Categories</Text>
+                  </Stack>
+                </Group>
+              </Box>
 
-            {/* Memory Categories */}
-            {Object.keys(memoriesByCategory).length === 0 ? (
-              <div className="text-center text-gray-500 py-8">
-                <Brain className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No memories stored yet</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {Object.entries(memoriesByCategory).map(([category, items]) => (
-                  <div key={category} className="border border-gray-200 rounded-md">
-                    <button
-                      onClick={() => toggleCategory(category)}
-                      className="w-full flex items-center justify-between p-3 text-left hover:bg-gray-50"
-                    >
-                      <div className="flex items-center">
-                        <Tag className="w-4 h-4 mr-2 text-gray-400" />
-                        <span className="text-sm font-medium text-gray-900 capitalize">
-                          {category}
-                        </span>
-                        <span className="ml-2 text-xs text-gray-500">
-                          ({items.length})
-                        </span>
-                      </div>
-                      {expandedCategories.has(category) ? (
-                        <ChevronDown className="w-4 h-4 text-gray-400" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4 text-gray-400" />
-                      )}
-                    </button>
-                    
-                    {expandedCategories.has(category) && (
-                      <div className="border-t border-gray-200 p-2 space-y-2">
-                        {items.map((memory) => (
-                          <div
-                            key={memory.id}
-                            className="p-2 bg-gray-50 rounded text-xs"
-                          >
-                            <div className="font-medium text-gray-900 mb-1">
-                              {memory.content.substring(0, 100)}
-                              {memory.content.length > 100 && '...'}
-                            </div>
-                            <div className="text-gray-500 flex items-center justify-between">
-                              <span className="capitalize">{memory.type}</span>
-                              <span>{memory.createdAt.toLocaleDateString()}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+              {/* Memory Categories */}
+              {Object.keys(memoriesByCategory).length === 0 ? (
+                <Stack align="center" gap="sm" py="xl">
+                  <IconBrain size={32} opacity={0.5} />
+                  <Text size="sm" c="dimmed">No memories stored yet</Text>
+                </Stack>
+              ) : (
+                <Stack gap="xs">
+                  {Object.entries(memoriesByCategory).map(([category, items]) => (
+                    <Box key={category} style={{ border: '1px solid var(--mantine-color-gray-3)', borderRadius: 'var(--mantine-radius-md)' }}>
+                      <Group
+                        justify="space-between"
+                        p="md"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => toggleCategory(category)}
+                        className="hover:bg-gray-50"
+                      >
+                        <Group gap="sm">
+                          <IconTag size={16} color="gray" />
+                          <Text size="sm" fw={500} tt="capitalize">
+                            {category}
+                          </Text>
+                          <Badge size="xs" variant="light">
+                            {items.length}
+                          </Badge>
+                        </Group>
+                        {expandedCategories.has(category) ? (
+                          <IconChevronDown size={16} />
+                        ) : (
+                          <IconChevronRight size={16} />
+                        )}
+                      </Group>
 
-            {/* Memory Actions */}
-            {memories.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-gray-200">
-                <Button
-                  onClick={onClearMemories}
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-red-600 border-red-200 hover:bg-red-50"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Clear All Memories
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+                      <Collapse in={expandedCategories.has(category)}>
+                        <Divider />
+                        <Stack gap="xs" p="sm">
+                          {items.map((memory) => (
+                            <Box
+                              key={memory.id}
+                              p="sm"
+                              bg="gray.0"
+                              style={{ borderRadius: 'var(--mantine-radius-sm)' }}
+                            >
+                              <Text size="xs" fw={500} mb="xs">
+                                {memory.content.substring(0, 100)}
+                                {memory.content.length > 100 && '...'}
+                              </Text>
+                              <Group justify="space-between">
+                                <Badge size="xs" variant="dot" tt="capitalize">
+                                  {memory.type}
+                                </Badge>
+                                <Text size="xs" c="dimmed">
+                                  {memory.createdAt.toLocaleDateString()}
+                                </Text>
+                              </Group>
+                            </Box>
+                          ))}
+                        </Stack>
+                      </Collapse>
+                    </Box>
+                  ))}
+                </Stack>
+              )}
+
+              {/* Memory Actions */}
+              {memories.length > 0 && (
+                <>
+                  <Divider />
+                  <Button
+                    onClick={onClearMemories}
+                    variant="light"
+                    color="red"
+                    size="sm"
+                    fullWidth
+                    leftSection={<IconTrash size={16} />}
+                  >
+                    Clear All Memories
+                  </Button>
+                </>
+              )}
+            </Stack>
+          </ScrollArea>
+        </Tabs.Panel>
+      </Tabs>
+    </Stack>
   )
 }

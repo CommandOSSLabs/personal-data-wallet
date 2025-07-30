@@ -80,6 +80,8 @@ class IngestRequest(BaseModel):
     user_id: str = "default-user"
     session_id: Optional[str] = None
     model: ModelType = ModelType.GEMINI
+    originalUserMessage: Optional[str] = None  # The actual user message without context
+    memoryContext: Optional[str] = None  # Memory context for AI
 
 class QueryRequest(BaseModel):
     text: str

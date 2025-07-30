@@ -2,7 +2,7 @@ export interface Message {
   id: string
   content: string
   type: 'user' | 'assistant'
-  timestamp: Date
+  timestamp: string // ISO string for consistency with backend
 }
 
 export interface ChatSession {

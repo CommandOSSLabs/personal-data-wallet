@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useCurrentAccount, useConnectWallet, useDisconnectWallet, useSuiClient } from '@mysten/dapp-kit'
+import { useWallet } from '@suiet/wallet-kit'
 
 const DEV_MODE = process.env.NODE_ENV === 'development'
 
@@ -13,10 +13,7 @@ interface AuthState {
 }
 
 export function useSuiAuth() {
-  const currentAccount = useCurrentAccount()
-  const { mutate: connect } = useConnectWallet()
-  const { mutate: disconnect } = useDisconnectWallet()
-  const suiClient = useSuiClient()
+  const wallet = useWallet()
   
   const [authState, setAuthState] = useState<AuthState>({
     isAuthenticated: false,
@@ -27,10 +24,10 @@ export function useSuiAuth() {
 
   // Update auth state when wallet connection changes
   useEffect(() => {
-    if (currentAccount) {
+    if (wallet.connected && wallet.account) {
       setAuthState({
         isAuthenticated: true,
-        userAddress: currentAccount.address,
+        userAddress: wallet.account.address,
         loading: false,
         error: null
       })
@@ -53,19 +50,19 @@ export function useSuiAuth() {
         })
       }
     }
-  }, [currentAccount])
+  }, [wallet.connected, wallet.account])
 
   const login = async () => {
     try {
       setAuthState(prev => ({ ...prev, loading: true, error: null }))
 
       // Development mode - skip wallet connection
-      if (DEV_MODE && !currentAccount) {
+      if (DEV_MODE && !wallet.connected) {
         // Simulate a user address for development
         const devAddress = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
-        
+
         localStorage.setItem('dev-sui-address', devAddress)
-        
+
         setAuthState({
           isAuthenticated: true,
           userAddress: devAddress,
@@ -76,23 +73,18 @@ export function useSuiAuth() {
       }
 
       // Connect wallet if not already connected
-      if (!currentAccount) {
-        connect(
-          { wallet: { name: 'Sui Wallet' } },
-          {
-            onSuccess: () => {
-              console.log('Wallet connected successfully')
-            },
-            onError: (error) => {
-              console.error('Wallet connection failed:', error)
-              setAuthState(prev => ({
-                ...prev,
-                loading: false,
-                error: 'Failed to connect wallet'
-              }))
-            }
-          }
-        )
+      if (!wallet.connected) {
+        try {
+          await wallet.select('Sui Wallet')
+          console.log('Wallet connected successfully')
+        } catch (error) {
+          console.error('Wallet connection failed:', error)
+          setAuthState(prev => ({
+            ...prev,
+            loading: false,
+            error: 'Failed to connect wallet'
+          }))
+        }
       }
 
     } catch (error) {
@@ -105,18 +97,18 @@ export function useSuiAuth() {
     }
   }
 
-  const handleCallback = async (jwt: string) => {
+  const handleCallback = async (_jwt: string) => {
     // Not needed for wallet connection
     return Promise.resolve()
   }
 
   const logout = () => {
-    if (currentAccount) {
-      disconnect()
+    if (wallet.connected) {
+      wallet.disconnect()
     }
-    
+
     localStorage.removeItem('dev-sui-address')
-    
+
     setAuthState({
       isAuthenticated: false,
       userAddress: null,
@@ -135,6 +127,6 @@ export function useSuiAuth() {
     logout,
     handleCallback,
     getUserId,
-    suiClient
+    wallet
   }
 }

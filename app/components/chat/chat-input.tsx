@@ -1,9 +1,14 @@
 'use client'
 
 import { useState } from 'react'
-import { Button } from '@/app/components/ui/button'
-import { Input } from '@/app/components/ui/input'
-import { Send, Loader2 } from 'lucide-react'
+import {
+  Group,
+  TextInput,
+  ActionIcon,
+  Box,
+  Loader
+} from '@mantine/core'
+import { IconSend } from '@tabler/icons-react'
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void
@@ -30,28 +35,35 @@ export function ChatInput({ onSendMessage, isLoading, disabled }: ChatInputProps
   }
 
   return (
-    <div className="border-t border-gray-200 bg-white px-4 py-4">
-      <form onSubmit={handleSubmit} className="flex gap-2">
-        <Input
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyPress={handleKeyPress}
-          placeholder="Message Personal Data Wallet..."
-          disabled={disabled || isLoading}
-          className="flex-1"
-        />
-        <Button 
-          type="submit" 
-          disabled={disabled || isLoading || !message.trim()}
-          size="default"
-        >
-          {isLoading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Send className="h-4 w-4" />
-          )}
-        </Button>
+    <Box p="md" style={{ borderTop: '1px solid var(--mantine-color-gray-3)' }}>
+      <form onSubmit={handleSubmit}>
+        <Group gap="sm" align="flex-end">
+          <TextInput
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={handleKeyPress}
+            placeholder="Message Personal Data Wallet..."
+            disabled={disabled || isLoading}
+            style={{ flex: 1 }}
+            size="md"
+            radius="md"
+          />
+          <ActionIcon
+            type="submit"
+            disabled={disabled || isLoading || !message.trim()}
+            size="lg"
+            radius="md"
+            variant="filled"
+            color="blue"
+          >
+            {isLoading ? (
+              <Loader size={16} />
+            ) : (
+              <IconSend size={16} />
+            )}
+          </ActionIcon>
+        </Group>
       </form>
-    </div>
+    </Box>
   )
 }

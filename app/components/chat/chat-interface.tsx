@@ -1,53 +1,81 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { ChatWindow } from './chat-window'
 import { ChatInput } from './chat-input'
 import { ModelSelector, ModelType } from './model-selector'
 import { Sidebar } from '@/app/components/sidebar/sidebar'
-import { useSendMessage } from '@/app/hooks/use-send-message'
+
 import { useStreamingChat } from '@/app/hooks/use-streaming-chat'
-import { useChatSessions } from '@/app/hooks/use-chat-sessions'
+import { useSuiChatSessions } from '@/app/hooks/use-sui-chat-sessions'
 import { useSuiAuth } from '@/app/hooks/use-sui-auth'
 import { Message } from '@/app/types'
-import { LogOut, User } from 'lucide-react'
+import { memoryIntegrationService } from '@/app/services/memoryIntegration'
+import { MemoryIndicator, useMemoryIndicator } from '@/app/components/memory/memory-indicator'
+import {
+  AppShell,
+  Group,
+  Title,
+  Text,
+  ActionIcon,
+  Badge,
+  Loader,
+  Center,
+  Stack,
+  Modal
+} from '@mantine/core'
+import { IconLogout, IconUser, IconBrain } from '@tabler/icons-react'
+import { useDisclosure } from '@mantine/hooks'
+import { MemoryManager } from '@/app/components/memory/memory-manager'
 
 export function ChatInterface() {
   const [selectedModel, setSelectedModel] = useState<ModelType>('gemini')
-  
+  const queryClient = useQueryClient()
+
+  // Memory indicator state
+  const memoryIndicator = useMemoryIndicator()
+
+  // Memory manager modal
+  const [memoryModalOpened, { open: openMemoryModal, close: closeMemoryModal }] = useDisclosure(false)
+
+  const { logout, userAddress } = useSuiAuth()
+
   const {
     sessions,
     currentSessionId,
-    memories,
     sessionsLoading,
-    memoriesLoading,
     getCurrentSession,
     createNewSession,
     addMessageToSession,
     deleteSession,
-    selectSession,
-    addFactMemory,
-    clearMemories
-  } = useChatSessions()
+    selectSession
+  } = useSuiChatSessions(userAddress)
 
-  const { logout, userAddress } = useSuiAuth()
-  const sendMessageMutation = useSendMessage()
+  // Placeholder for memories - will be integrated with the new memory system
+  const memories: any[] = []
+  const memoriesLoading = false
+  const clearMemories = () => {
+    console.log('Clear memories - to be implemented with new memory system')
+  }
+
+
   const { sendStreamingMessage, isStreaming, currentResponse, resetStreaming } = useStreamingChat()
   const currentSession = getCurrentSession()
 
   // State for streaming message
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
+  const [streamingMessage, setStreamingMessage] = useState<Message | null>(null)
 
-  // Create initial session if none exists and data is loaded
-  useEffect(() => {
-    if (!sessionsLoading && sessions.length === 0 && !currentSessionId) {
-      createNewSession().catch(console.error)
-    }
-  }, [sessions.length, currentSessionId, createNewSession, sessionsLoading])
+  // State for temporary user message (shown immediately, replaced by backend data)
+  const [tempUserMessage, setTempUserMessage] = useState<Message | null>(null)
+
+  // Don't auto-create sessions - let user initiate first chat
+  // This prevents unwanted session creation on page reload
 
   const handleSendMessage = async (messageText: string) => {
     console.log('handleSendMessage called with:', messageText)
-    
+
     // Ensure we have an active session
     let sessionId = currentSessionId
     if (!sessionId) {
@@ -55,91 +83,198 @@ export function ChatInterface() {
       try {
         sessionId = await createNewSession()
         console.log('Created new session with ID:', sessionId)
+
+        if (!sessionId) {
+          console.error('Session creation returned empty ID')
+          alert('Failed to create chat session. Please try again.')
+          return
+        }
       } catch (error) {
         console.error('Failed to create session:', error)
-        sessionId = `temp_${Date.now()}` // Fallback to temp ID
-        selectSession(sessionId)
+        // Show user-friendly error message
+        alert('Failed to create chat session. Please try again.')
+        return
       }
     }
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      content: messageText,
-      type: 'user',
-      timestamp: new Date(),
+    console.log('Using session ID:', sessionId)
+
+    // Process message for memory detection and storage (non-blocking, with full error isolation)
+    const processMemoryAsync = async () => {
+      try {
+        memoryIndicator.reset()
+        memoryIndicator.startProcessing()
+
+        const memoryResult = await memoryIntegrationService.processMessage(
+          messageText,
+          userAddress!,
+          undefined // TODO: Add user signature when available
+        )
+
+        memoryIndicator.setDetected(memoryResult.detectionResult.memories.length)
+        memoryIndicator.setStored(memoryResult.storedMemories.length)
+
+        if (memoryResult.storedMemories.length > 0) {
+          console.log(`Stored ${memoryResult.storedMemories.length} memories:`, memoryResult.storedMemories)
+        }
+
+        if (memoryResult.errors.length > 0) {
+          console.warn('Memory storage errors:', memoryResult.errors)
+          memoryResult.errors.forEach(error => memoryIndicator.addError(error))
+        }
+      } catch (error) {
+        console.error('Memory processing completely failed, but chat will continue:', error)
+        memoryIndicator.addError('Memory system unavailable')
+      }
     }
 
-    addMessageToSession(sessionId, userMessage)
-    console.log('Added user message to session:', sessionId)
+    // Start memory processing in background - completely isolated from chat flow
+    processMemoryAsync().catch(error => {
+      console.error('Memory processing promise rejected:', error)
+    })
+
+    // Create temporary user message for immediate display (will be replaced by backend data)
+    const userMessageId = Date.now().toString()
+    const tempUserMessage: Message = {
+      id: userMessageId,
+      content: messageText,
+      type: 'user',
+      timestamp: new Date().toISOString(),
+    }
 
     // Create a placeholder message for streaming
     const assistantMessageId = (Date.now() + 1).toString()
-    setStreamingMessageId(assistantMessageId)
-    
-    const initialAssistantMessage: Message = {
+    const streamingMsg: Message = {
       id: assistantMessageId,
       content: '',
       type: 'assistant',
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(), // Use ISO string for consistency
     }
 
-    addMessageToSession(sessionId, initialAssistantMessage)
+    // Set both temporary user message and streaming assistant message
+    setStreamingMessageId(assistantMessageId)
+    setStreamingMessage(streamingMsg)
+
+    // Add temporary user message to display immediately
+    setTempUserMessage(tempUserMessage)
 
     // Reset streaming state
     resetStreaming()
 
+    // Get memory context for enhanced AI responses (with timeout and fallback)
+    let memoryContext = ''
     try {
+      // Add timeout to prevent hanging
+      const contextPromise = memoryIntegrationService.generateChatContext(
+        messageText,
+        currentSession?.messages?.map(m => `${m.type}: ${m.content}`) || [],
+        userAddress!,
+        'dummy_signature' // TODO: Use real signature when available
+      )
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Memory context timeout')), 3000)
+      )
+
+      const contextResult = await Promise.race([contextPromise, timeoutPromise]) as any
+      memoryContext = contextResult.fullContext || ''
+      console.log('Memory context for AI:', memoryContext)
+    } catch (error) {
+      console.error('Failed to get memory context, continuing without context:', error)
+      // Don't let memory context failure break the chat
+      memoryContext = ''
+    }
+
+    try {
+      // Send the user message and context separately to avoid double injection
+      const streamingRequest = {
+        text: messageText, // Send clean user message
+        userId: userAddress!,
+        sessionId: sessionId,
+        model: selectedModel,
+        // Add the original user message so backend can save it correctly
+        originalUserMessage: messageText,
+        // Send context separately so backend can properly format the prompt
+        memoryContext: memoryContext
+      }
+
+      console.log('Sending streaming request with context for AI')
+      console.log('User message:', messageText)
+      console.log('Memory context:', memoryContext)
+
       await sendStreamingMessage(
-        {
-          text: messageText,
-          userId: 'default-user',
-          sessionId: sessionId,
-          model: selectedModel,
-        },
+        streamingRequest,
         // On chunk received
-        (chunk: string) => {
+        (_chunk: string) => {
           // The currentResponse is managed by the streaming hook
           // We don't need to manually update here as it's handled by the streaming state
         },
         // On complete
-        (fullResponse: string, intent?: string, entities?: any) => {
+        async (fullResponse: string, intent?: string, entities?: any) => {
           console.log('Streaming complete:', { fullResponse, intent, entities })
-          setStreamingMessageId(null)
-          
-          // Update with final response
-          addMessageToSession(sessionId, {
-            ...initialAssistantMessage,
-            content: fullResponse
-          })
+
+          // Update the streaming message with the final content
+          if (streamingMessage) {
+            const finalMessage: Message = {
+              ...streamingMessage,
+              content: fullResponse
+            }
+            setStreamingMessage(finalMessage)
+          }
+
+          // Don't save the response here - the streaming endpoint already saves it
+          // This prevents duplicate messages
+
+          // Refresh the session to get the latest messages
+          await queryClient.invalidateQueries({ queryKey: ['sui-chat-sessions', userAddress] })
+
+          // Now clear the streaming state and temp user message after session is refreshed
+          setTimeout(() => {
+            setStreamingMessageId(null)
+            setStreamingMessage(null)
+            setTempUserMessage(null) // Clear temporary user message
+          }, 1000) // Increased delay to ensure session is refreshed
         },
         // On error
-        (error: string) => {
+        async (error: string) => {
           console.error('Streaming error:', error)
           setStreamingMessageId(null)
+          setStreamingMessage(null)
+          setTempUserMessage(null)
           
           const errorMessage: Message = {
             id: assistantMessageId,
             content: 'Sorry, there was an error processing your message. Please try again.',
             type: 'assistant',
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
           }
           
-          addMessageToSession(sessionId, errorMessage)
+          try {
+            await addMessageToSession(sessionId, errorMessage.content, 'assistant')
+          } catch (error) {
+            console.error('Failed to save error message:', error)
+          }
         }
       )
 
     } catch (error) {
       console.error('Failed to start streaming:', error)
       setStreamingMessageId(null)
+      setStreamingMessage(null)
+      setTempUserMessage(null)
       
       const errorMessage: Message = {
         id: assistantMessageId,
         content: 'Sorry, there was an error processing your message. Please try again.',
         type: 'assistant',
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
       }
 
-      addMessageToSession(sessionId, errorMessage)
+      try {
+        await addMessageToSession(sessionId, errorMessage.content, 'assistant')
+      } catch (error) {
+        console.error('Failed to save error message:', error)
+      }
     }
   }
 
@@ -157,84 +292,130 @@ export function ChatInterface() {
 
   if (sessionsLoading || memoriesLoading) {
     return (
-      <div className="flex h-screen bg-gray-50 items-center justify-center">
-        <div className="text-gray-600">Loading...</div>
-      </div>
+      <Center h="100vh">
+        <Stack align="center" gap="md">
+          <Loader size="lg" />
+          <Text c="dimmed">Loading...</Text>
+        </Stack>
+      </Center>
     )
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Sidebar */}
-      <Sidebar
-        sessions={sessions}
-        currentSessionId={currentSessionId}
-        memories={memories}
-        onNewChat={handleNewChat}
-        onSelectSession={handleSelectSession}
-        onDeleteSession={handleDeleteSession}
-        onClearMemories={clearMemories}
-      />
+    <AppShell
+      navbar={{ width: 300, breakpoint: 'sm' }}
+      header={{ height: 70 }}
+      padding="md"
+    >
+      <AppShell.Navbar p="md">
+        <Sidebar
+          sessions={sessions}
+          currentSessionId={currentSessionId}
+          memories={memories}
+          onNewChat={handleNewChat}
+          onSelectSession={handleSelectSession}
+          onDeleteSession={handleDeleteSession}
+          onClearMemories={clearMemories}
+        />
+      </AppShell.Navbar>
 
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <header className="bg-white border-b border-gray-200 px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-semibold text-gray-900">
-                {currentSession?.title || 'Personal Data Wallet'}
-              </h1>
-              <p className="text-sm text-gray-600">
-                Your decentralized memory layer
-              </p>
-            </div>
-            
-            <div className="flex items-center space-x-4">
-              <ModelSelector 
-                selectedModel={selectedModel}
-                onModelChange={setSelectedModel}
-              />
-              
-              <div className="text-sm text-gray-500">
-                {memories.length} memories stored
-              </div>
-              
-              <div className="flex items-center space-x-2">
-                <div className="flex items-center space-x-2 text-sm text-gray-600">
-                  <User className="h-4 w-4" />
-                  <span className="font-mono text-xs">
-                    {userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : 'User'}
-                  </span>
-                </div>
-                
-                <button
-                  onClick={logout}
-                  className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
-                  title="Logout"
-                >
-                  <LogOut className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </header>
-        
-        {/* Chat Content */}
-        <div className="flex-1 flex flex-col bg-white">
-          <ChatWindow 
-            messages={currentSession?.messages || []} 
-            isLoading={isStreaming}
-            streamingMessageId={streamingMessageId}
-            streamingContent={currentResponse}
-          />
-          
-          <ChatInput
-            onSendMessage={handleSendMessage}
-            isLoading={isStreaming}
-          />
-        </div>
-      </div>
-    </div>
+      <AppShell.Header>
+        <Group h="100%" px="md" justify="space-between">
+          <Stack gap={0}>
+            <Title order={3}>
+              {currentSession?.title || 'Personal Data Wallet'}
+            </Title>
+            <Text size="sm" c="dimmed">
+              Your decentralized memory layer
+            </Text>
+          </Stack>
+
+          <Group gap="md">
+            <ModelSelector
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
+            />
+
+            <Badge variant="light" color="blue">
+              {memories.length} memories
+            </Badge>
+
+            <MemoryIndicator
+              isProcessing={memoryIndicator.isProcessing}
+              memoriesDetected={memoryIndicator.memoriesDetected}
+              memoriesStored={memoryIndicator.memoriesStored}
+              errors={memoryIndicator.errors}
+              onViewDetails={openMemoryModal}
+            />
+
+            <Group gap="xs">
+              <ActionIcon
+                variant="subtle"
+                color="blue"
+                onClick={openMemoryModal}
+                title="Memory Manager"
+              >
+                <IconBrain size={16} />
+              </ActionIcon>
+
+              <Group gap="xs">
+                <IconUser size={16} />
+                <Text size="xs" ff="monospace">
+                  {userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : 'User'}
+                </Text>
+              </Group>
+
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                onClick={logout}
+                title="Logout"
+              >
+                <IconLogout size={16} />
+              </ActionIcon>
+            </Group>
+          </Group>
+        </Group>
+      </AppShell.Header>
+
+      <AppShell.Main style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 70px)' }}>
+        <ChatWindow
+          messages={[
+            ...(currentSession?.messages || []),
+            ...(tempUserMessage ? [tempUserMessage] : []),
+            ...(streamingMessage ? [streamingMessage] : [])
+          ].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())}
+          isLoading={isStreaming}
+          streamingMessageId={streamingMessageId}
+          streamingContent={currentResponse}
+          userAddress={userAddress || ''}
+        />
+
+        <ChatInput
+          onSendMessage={handleSendMessage}
+          isLoading={isStreaming}
+        />
+      </AppShell.Main>
+
+      {/* Memory Manager Modal */}
+      <Modal
+        opened={memoryModalOpened}
+        onClose={closeMemoryModal}
+        title="Memory Manager"
+        size="lg"
+      >
+        <MemoryManager
+          userAddress={userAddress || ''}
+          onMemoryAdded={(memory) => {
+            // Optionally refresh memories or update state
+            console.log('Memory added:', memory)
+          }}
+          onMemoryDeleted={(memoryId) => {
+            // Optionally refresh memories or update state
+            console.log('Memory deleted:', memoryId)
+          }}
+        />
+      </Modal>
+    </AppShell>
   )
 }

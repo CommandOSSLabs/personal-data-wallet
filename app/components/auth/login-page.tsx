@@ -1,104 +1,102 @@
 'use client'
 
 import { useSuiAuth } from '@/app/hooks/use-sui-auth'
-import { useWallets } from '@mysten/dapp-kit'
-import { Wallet, LogIn, Loader2 } from 'lucide-react'
+import { ConnectButton } from '@suiet/wallet-kit'
+import {
+  Container,
+  Paper,
+  Stack,
+  Title,
+  Text,
+  Alert,
+  Group,
+  ThemeIcon,
+  Center
+} from '@mantine/core'
+import { IconWallet, IconShield, IconBrain, IconHistory } from '@tabler/icons-react'
 
 export function LoginPage() {
-  const { login, loading, error } = useSuiAuth()
-  const wallets = useWallets()
+  const { error } = useSuiAuth()
   const isDev = process.env.NODE_ENV === 'development'
-  const hasSuiWallet = wallets.some(wallet => wallet.name.includes('Sui'))
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <div className="mx-auto h-12 w-12 flex items-center justify-center rounded-full bg-blue-100">
-            <Wallet className="h-6 w-6 text-blue-600" />
-          </div>
-          <h2 className="mt-6 text-3xl font-bold text-gray-900">
-            Personal Data Wallet
-          </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Your decentralized memory layer powered by Sui
-          </p>
-        </div>
+    <Center h="100vh" bg="gray.0">
+      <Container size="xs">
+        <Paper shadow="md" p="xl" radius="md">
+          <Stack align="center" gap="lg">
+            {/* Header */}
+            <Stack align="center" gap="sm">
+              <ThemeIcon size="xl" radius="xl" color="blue">
+                <IconWallet size={24} />
+              </ThemeIcon>
+              <Title order={2} ta="center">
+                Personal Data Wallet
+              </Title>
+              <Text size="sm" c="dimmed" ta="center">
+                Your decentralized memory layer powered by Sui
+              </Text>
+            </Stack>
 
-        <div className="mt-8 space-y-6">
-          {error && (
-            <div className="rounded-md bg-red-50 p-4">
-              <div className="text-sm text-red-700">{error}</div>
-            </div>
-          )}
-
-          <div>
-            <button
-              onClick={login}
-              disabled={loading}
-              className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <>
-                  <LogIn className="h-5 w-5 mr-2" />
-                  {isDev ? 'Continue (Dev Mode)' : hasSuiWallet ? 'Connect Sui Wallet' : 'Continue (Dev Mode)'}
-                </>
-              )}
-            </button>
-          </div>
-
-          <div className="text-center">
-            {isDev && !hasSuiWallet ? (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
-                <p className="text-xs text-yellow-800 font-medium">Development Mode</p>
-                <p className="text-xs text-yellow-700 mt-1">
-                  Install Sui Wallet extension or use dev mode for testing
-                </p>
-              </div>
-            ) : hasSuiWallet ? (
-              <>
-                <p className="text-xs text-gray-500">
-                  Connect your Sui wallet to continue
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Your data stays private and decentralized
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="text-xs text-gray-500">
-                  Secure authentication powered by Sui
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Your data stays private and decentralized
-                </p>
-              </>
+            {/* Error Alert */}
+            {error && (
+              <Alert color="red" radius="md" w="100%">
+                {error}
+              </Alert>
             )}
-          </div>
-        </div>
 
-        <div className="mt-8 border-t border-gray-200 pt-6">
-          <div className="text-center">
-            <h3 className="text-sm font-medium text-gray-900 mb-4">Features</h3>
-            <div className="grid grid-cols-1 gap-3 text-xs text-gray-600">
-              <div className="flex items-center justify-center">
-                <div className="w-2 h-2 bg-green-400 rounded-full mr-2"></div>
-                Decentralized memory storage
-              </div>
-              <div className="flex items-center justify-center">
-                <div className="w-2 h-2 bg-blue-400 rounded-full mr-2"></div>
-                AI-powered knowledge graphs
-              </div>
-              <div className="flex items-center justify-center">
-                <div className="w-2 h-2 bg-purple-400 rounded-full mr-2"></div>
-                Chat history and memory management
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+            {/* Connect Button */}
+            <ConnectButton style={{ width: '100%' }}>
+              Connect Wallet
+            </ConnectButton>
+
+            {/* Development Mode Info */}
+            {isDev ? (
+              <Alert color="yellow" radius="md" w="100%">
+                <Stack gap="xs">
+                  <Text size="sm" fw={500}>Development Mode</Text>
+                  <Text size="xs">
+                    Connect any supported Sui wallet or use dev mode for testing
+                  </Text>
+                </Stack>
+              </Alert>
+            ) : (
+              <Stack align="center" gap="xs">
+                <Text size="xs" c="dimmed" ta="center">
+                  Connect your Sui wallet to continue
+                </Text>
+                <Text size="xs" c="dimmed" ta="center">
+                  Supports Sui Wallet, Suiet, Ethos, and more
+                </Text>
+              </Stack>
+            )}
+
+            {/* Features */}
+            <Stack gap="md" w="100%" mt="md">
+              <Text size="sm" fw={500} ta="center">Features</Text>
+              <Stack gap="sm">
+                <Group gap="sm" justify="center">
+                  <ThemeIcon size="sm" color="green" radius="xl">
+                    <IconShield size={12} />
+                  </ThemeIcon>
+                  <Text size="xs">Decentralized memory storage</Text>
+                </Group>
+                <Group gap="sm" justify="center">
+                  <ThemeIcon size="sm" color="blue" radius="xl">
+                    <IconBrain size={12} />
+                  </ThemeIcon>
+                  <Text size="xs">AI-powered knowledge graphs</Text>
+                </Group>
+                <Group gap="sm" justify="center">
+                  <ThemeIcon size="sm" color="violet" radius="xl">
+                    <IconHistory size={12} />
+                  </ThemeIcon>
+                  <Text size="xs">Chat history and memory management</Text>
+                </Group>
+              </Stack>
+            </Stack>
+          </Stack>
+        </Paper>
+      </Container>
+    </Center>
   )
 }

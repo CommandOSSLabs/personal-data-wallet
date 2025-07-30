@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ChatSession, Message, MemoryItem } from '@/app/types'
 import { useSuiAuth } from './use-sui-auth'
 
-const API_BASE = 'http://localhost:8000'
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
 
 export function useChatSessions() {
   const { getUserId } = useSuiAuth()

@@ -1,0 +1,225 @@
+{
+  "nodes": [
+    "not",
+    "nguyen",
+    "name",
+    "working",
+    "honag",
+    "bui",
+    "my",
+    "is",
+    "hoang"
+  ],
+  "edges": [
+    {
+      "source": "honag",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "nguyen",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "honag",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "honag",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "nguyen",
+      "label": "related_to"
+    },
+    {
+      "source": "nguyen",
+      "target": "bui",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "bui",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "bui",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "bui",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "nguyen",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "nguyen",
+      "label": "related_to"
+    },
+    {
+      "source": "bui",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "not",
+      "target": "working",
+      "label": "related_to"
+    },
+    {
+      "source": "nguyen",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "honag",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "nguyen",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "honag",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "nguyen",
+      "target": "honag",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "bui",
+      "label": "related_to"
+    },
+    {
+      "source": "honag",
+      "target": "nguyen",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "honag",
+      "label": "related_to"
+    },
+    {
+      "source": "bui",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "nguyen",
+      "label": "related_to"
+    },
+    {
+      "source": "bui",
+      "target": "honag",
+      "label": "related_to"
+    },
+    {
+      "source": "bui",
+      "target": "nguyen",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "bui",
+      "label": "related_to"
+    },
+    {
+      "source": "working",
+      "target": "not",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "bui",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "nguyen",
+      "label": "related_to"
+    },
+    {
+      "source": "honag",
+      "target": "bui",
+      "label": "related_to"
+    }
+  ]
+}
