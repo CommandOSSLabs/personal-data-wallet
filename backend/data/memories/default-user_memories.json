@@ -1,0 +1,20 @@
+{
+  "memories": {
+    "default-user_1753809103852": {
+      "id": "default-user_1753809103852",
+      "user_id": "default-user",
+      "content": "Entities: cooking, me, help, my, with, please, recipe",
+      "raw_text": "please help me with my cooking recipe",
+      "type": "fact",
+      "category": "general",
+      "created_at": "2025-07-30 00:11:43.852965",
+      "related_sessions": [
+        "temp_1753788073934"
+      ],
+      "metadata": {}
+    }
+  },
+  "metadata": {
+    "last_updated": "2025-07-30T00:11:43.853551"
+  }
+}

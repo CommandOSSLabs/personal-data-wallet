@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: pdw-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+  # Python FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pdw-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - SUI_NETWORK=testnet
+      - SUI_RPC_URL=https://fullnode.testnet.sui.io:443
+      - WALRUS_PUBLISHER_URL=https://publisher.walrus-testnet.walrus.space
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/.env:/app/.env:ro
+    depends_on:
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Next.js Frontend
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: pdw-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+      - NODE_ENV=production
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Local Sui Node (for development)
+  sui-node:
+    image: mysten/sui-tools:testnet
+    container_name: pdw-sui-node
+    ports:
+      - "9000:9000"
+      - "9184:9184"
+    volumes:
+      - sui_data:/root/.sui
+    command: sui start --network.bind-address 0.0.0.0
+    restart: unless-stopped
+    profiles:
+      - local-sui
+
+volumes:
+  redis_data:
+    driver: local
+  sui_data:
+    driver: local
+
+networks:
+  default:
+    name: pdw-network

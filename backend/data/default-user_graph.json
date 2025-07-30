@@ -1,0 +1,223 @@
+{
+  "nodes": [
+    "cooking",
+    "recipe",
+    "me",
+    "help",
+    "with",
+    "please",
+    "my"
+  ],
+  "edges": [
+    {
+      "source": "with",
+      "target": "me",
+      "label": "related_to"
+    },
+    {
+      "source": "cooking",
+      "target": "please",
+      "label": "related_to"
+    },
+    {
+      "source": "cooking",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "me",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "please",
+      "label": "related_to"
+    },
+    {
+      "source": "cooking",
+      "target": "recipe",
+      "label": "related_to"
+    },
+    {
+      "source": "me",
+      "target": "please",
+      "label": "related_to"
+    },
+    {
+      "source": "help",
+      "target": "cooking",
+      "label": "related_to"
+    },
+    {
+      "source": "me",
+      "target": "recipe",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "recipe",
+      "label": "related_to"
+    },
+    {
+      "source": "recipe",
+      "target": "cooking",
+      "label": "related_to"
+    },
+    {
+      "source": "please",
+      "target": "cooking",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "me",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "please",
+      "label": "related_to"
+    },
+    {
+      "source": "recipe",
+      "target": "me",
+      "label": "related_to"
+    },
+    {
+      "source": "cooking",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "recipe",
+      "target": "please",
+      "label": "related_to"
+    },
+    {
+      "source": "cooking",
+      "target": "help",
+      "label": "related_to"
+    },
+    {
+      "source": "please",
+      "target": "me",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "help",
+      "label": "related_to"
+    },
+    {
+      "source": "please",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "help",
+      "target": "please",
+      "label": "related_to"
+    },
+    {
+      "source": "help",
+      "target": "me",
+      "label": "related_to"
+    },
+    {
+      "source": "help",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "please",
+      "target": "recipe",
+      "label": "related_to"
+    },
+    {
+      "source": "recipe",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "me",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "recipe",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "help",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "cooking",
+      "label": "related_to"
+    },
+    {
+      "source": "help",
+      "target": "recipe",
+      "label": "related_to"
+    },
+    {
+      "source": "me",
+      "target": "help",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "cooking",
+      "label": "related_to"
+    },
+    {
+      "source": "me",
+      "target": "cooking",
+      "label": "related_to"
+    },
+    {
+      "source": "please",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "help",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "recipe",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "please",
+      "target": "help",
+      "label": "related_to"
+    },
+    {
+      "source": "recipe",
+      "target": "help",
+      "label": "related_to"
+    },
+    {
+      "source": "cooking",
+      "target": "me",
+      "label": "related_to"
+    }
+  ]
+}

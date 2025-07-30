@@ -1,0 +1,28 @@
+{
+  "sessions": {
+    "test-user2": {
+      "id": "test-user2",
+      "user_id": "test-session2",
+      "title": "My name is Sarah and I love pizza",
+      "messages": [
+        {
+          "id": "test-user2_1753799315476",
+          "content": "My name is Sarah and I love pizza",
+          "type": "user",
+          "timestamp": "2025-07-29 21:28:35.476450"
+        },
+        {
+          "id": "test-user2_1753799316925",
+          "content": "Hi Sarah!  It's nice to meet you.  Pizza is awesome! What's your favorite kind?\n",
+          "type": "assistant",
+          "timestamp": "2025-07-29 21:28:36.925876"
+        }
+      ],
+      "created_at": "2025-07-29T21:28:35.476448",
+      "updated_at": "2025-07-29T21:28:36.925898"
+    }
+  },
+  "metadata": {
+    "last_updated": "2025-07-29T21:28:36.925905"
+  }
+}
