@@ -143,6 +143,39 @@ class EmbeddingQuiltData(BaseModel):
     embeddings: List[EmbeddingResult]
     metadata: Dict[str, Any] = {}
 
+# Mem0-inspired storage separation models
+class EntityInfo(BaseModel):
+    entity_type: str  # Person, Location, Event, etc.
+    creation_timestamp: str
+    semantic_meaning: str
+    confidence_score: float
+
+class RelationshipTriplet(BaseModel):
+    source_entity: str
+    relationship_type: str
+    destination_entity: str
+    confidence_score: float
+    temporal_context: Optional[str] = None
+
+class MemoryStorageComponents(BaseModel):
+    """Mem0-inspired separation of storage components"""
+    vector_index_data: bytes  # Dense embeddings for similarity search
+    entity_metadata: Dict[str, EntityInfo]  # Entity information
+    relationship_graph: List[RelationshipTriplet]  # Relationship triplets
+    temporal_metadata: Dict[str, str]  # Time-based info
+    retrieval_config: Dict[str, Any]  # Similarity thresholds, indexing params
+
+class EnhancedEmbeddingQuiltData(BaseModel):
+    """Enhanced embedding storage following mem0 patterns"""
+    user_id: str
+    embeddings: List[EmbeddingResult]
+    # Separate metadata concerns like mem0
+    entity_metadata: Dict[str, EntityInfo] = {}
+    relationship_metadata: List[RelationshipTriplet] = []
+    retrieval_metadata: Dict[str, Any] = {}
+    temporal_metadata: Dict[str, str] = {}
+    storage_layer: str = "external_context"  # main_context or external_context
+
 class VectorIndexQuiltData(BaseModel):
     user_id: str
     index_files: Dict[str, bytes]  # filename -> file content

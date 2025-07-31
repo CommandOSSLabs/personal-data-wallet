@@ -1,8 +1,13 @@
 import httpx
 import json
+from datetime import datetime
 from typing import Dict, Any, Optional, List
 from config import settings
-from models import QuiltBlob, QuiltResponse, QuiltPatchInfo, EmbeddingResult, EmbeddingQuiltData, VectorIndexQuiltData
+from models import (
+    QuiltBlob, QuiltResponse, QuiltPatchInfo, EmbeddingResult, 
+    EmbeddingQuiltData, VectorIndexQuiltData, MemoryStorageComponents,
+    EnhancedEmbeddingQuiltData, EntityInfo, RelationshipTriplet
+)
 
 class WalrusClient:
     def __init__(self):
@@ -230,6 +235,314 @@ class WalrusClient:
             
         except Exception as e:
             print(f"Error storing HNSW index quilt: {e}")
+            return None
+
+    async def store_memory_components_quilt(self, components: MemoryStorageComponents, 
+                                          user_id: str, epochs: int = 200) -> Optional[str]:
+        """Store memory components as separate blobs in a quilt following mem0 patterns"""
+        try:
+            blobs = []
+            
+            # 1. Vector Index Data (dense embeddings - like mem0's vector database layer)
+            blobs.append(QuiltBlob(
+                identifier=f"vector_index_{user_id}",
+                data=components.vector_index_data,
+                metadata={
+                    "component_type": "vector_index",
+                    "user_id": user_id,
+                    "mem0_layer": "dense_embeddings",
+                    "storage_priority": "external_context",
+                    "timestamp": datetime.now().isoformat()
+                }
+            ))
+            
+            # 2. Entity Metadata (entity information - like mem0's entity graph)
+            entity_data = json.dumps({
+                entity_id: entity_info.dict() 
+                for entity_id, entity_info in components.entity_metadata.items()
+            }).encode('utf-8')
+            
+            blobs.append(QuiltBlob(
+                identifier=f"entity_metadata_{user_id}",
+                data=entity_data,
+                metadata={
+                    "component_type": "entity_metadata",
+                    "user_id": user_id,
+                    "mem0_layer": "entity_graph",
+                    "entity_count": str(len(components.entity_metadata)),
+                    "timestamp": datetime.now().isoformat()
+                }
+            ))
+            
+            # 3. Relationship Graph (triplets - like mem0's relationship store)
+            relationship_data = json.dumps([
+                triplet.dict() for triplet in components.relationship_graph
+            ]).encode('utf-8')
+            
+            blobs.append(QuiltBlob(
+                identifier=f"relationship_graph_{user_id}",
+                data=relationship_data,
+                metadata={
+                    "component_type": "relationship_graph",
+                    "user_id": user_id,
+                    "mem0_layer": "relationship_triplets",
+                    "triplet_count": str(len(components.relationship_graph)),
+                    "timestamp": datetime.now().isoformat()
+                }
+            ))
+            
+            # 4. Temporal Metadata (time-based information)
+            temporal_data = json.dumps(components.temporal_metadata).encode('utf-8')
+            
+            blobs.append(QuiltBlob(
+                identifier=f"temporal_metadata_{user_id}",
+                data=temporal_data,
+                metadata={
+                    "component_type": "temporal_metadata",
+                    "user_id": user_id,
+                    "mem0_layer": "temporal_context",
+                    "timestamp": datetime.now().isoformat()
+                }
+            ))
+            
+            # 5. Retrieval Configuration (similarity thresholds, indexing params)
+            config_data = json.dumps(components.retrieval_config).encode('utf-8')
+            
+            blobs.append(QuiltBlob(
+                identifier=f"retrieval_config_{user_id}",
+                data=config_data,
+                metadata={
+                    "component_type": "retrieval_config",
+                    "user_id": user_id,
+                    "mem0_layer": "config",
+                    "timestamp": datetime.now().isoformat()
+                }
+            ))
+            
+            # Store with long-term epochs for persistent memory storage
+            result = await self.store_quilt(blobs, epochs=epochs)
+            return result.quilt_id if result else None
+            
+        except Exception as e:
+            print(f"Error storing memory components on Walrus: {e}")
+            return None
+
+    async def retrieve_memory_components_from_quilt(self, quilt_id: str, 
+                                                  user_id: str) -> Optional[MemoryStorageComponents]:
+        """Retrieve memory components from quilt following mem0 separation"""
+        try:
+            components = {}
+            
+            # Retrieve each component by identifier
+            component_identifiers = [
+                f"vector_index_{user_id}",
+                f"entity_metadata_{user_id}",
+                f"relationship_graph_{user_id}",
+                f"temporal_metadata_{user_id}",
+                f"retrieval_config_{user_id}"
+            ]
+            
+            for identifier in component_identifiers:
+                try:
+                    data = await self.retrieve_from_quilt_by_id(quilt_id, identifier)
+                    if data:
+                        components[identifier] = data
+                except:
+                    continue  # Component might not exist
+            
+            # Parse components
+            vector_index_data = components.get(f"vector_index_{user_id}", b"")
+            
+            entity_metadata = {}
+            if f"entity_metadata_{user_id}" in components:
+                entity_json = json.loads(components[f"entity_metadata_{user_id}"].decode('utf-8'))
+                entity_metadata = {
+                    entity_id: EntityInfo(**entity_info) 
+                    for entity_id, entity_info in entity_json.items()
+                }
+            
+            relationship_graph = []
+            if f"relationship_graph_{user_id}" in components:
+                relationship_json = json.loads(components[f"relationship_graph_{user_id}"].decode('utf-8'))
+                relationship_graph = [RelationshipTriplet(**triplet) for triplet in relationship_json]
+            
+            temporal_metadata = {}
+            if f"temporal_metadata_{user_id}" in components:
+                temporal_metadata = json.loads(components[f"temporal_metadata_{user_id}"].decode('utf-8'))
+            
+            retrieval_config = {}
+            if f"retrieval_config_{user_id}" in components:
+                retrieval_config = json.loads(components[f"retrieval_config_{user_id}"].decode('utf-8'))
+            
+            return MemoryStorageComponents(
+                vector_index_data=vector_index_data,
+                entity_metadata=entity_metadata,
+                relationship_graph=relationship_graph,
+                temporal_metadata=temporal_metadata,
+                retrieval_config=retrieval_config
+            )
+            
+        except Exception as e:
+            print(f"Error retrieving memory components from quilt: {e}")
+            return None
+
+    async def store_enhanced_embeddings_quilt(self, enhanced_data: EnhancedEmbeddingQuiltData, 
+                                            epochs: int = 200) -> Optional[str]:
+        """Store enhanced embeddings following mem0 hierarchical patterns"""
+        try:
+            # Determine storage strategy based on mem0 patterns
+            if enhanced_data.storage_layer == "main_context":
+                # For main context: store with shorter epochs, optimize for speed
+                epochs = min(epochs, 50)
+            else:
+                # For external context: store with longer epochs, optimize for durability
+                epochs = max(epochs, 100)
+            
+            blobs = []
+            
+            # Store embeddings with enhanced metadata
+            for i, embedding in enumerate(enhanced_data.embeddings):
+                embedding_json = {
+                    "vector": embedding.vector,
+                    "text": embedding.text,
+                    "user_id": enhanced_data.user_id,
+                    "index": i,
+                    "storage_layer": enhanced_data.storage_layer
+                }
+                
+                blob_data = json.dumps(embedding_json).encode('utf-8')
+                identifier = f"enhanced_embedding_{i:06d}"
+                
+                # Mem0-inspired metadata structure
+                metadata = {
+                    "type": "enhanced_embedding",
+                    "user_id": enhanced_data.user_id,
+                    "index": str(i),
+                    "storage_layer": enhanced_data.storage_layer,
+                    "mem0_type": "dense_embedding",
+                    "text_length": str(len(embedding.text))
+                }
+                
+                # Add entity metadata if available
+                if enhanced_data.entity_metadata:
+                    metadata["has_entities"] = "true"
+                    metadata["entity_count"] = str(len(enhanced_data.entity_metadata))
+                
+                # Add relationship metadata if available
+                if enhanced_data.relationship_metadata:
+                    metadata["has_relationships"] = "true"
+                    metadata["relationship_count"] = str(len(enhanced_data.relationship_metadata))
+                
+                metadata.update(enhanced_data.retrieval_metadata)
+                
+                blobs.append(QuiltBlob(
+                    identifier=identifier,
+                    data=blob_data,
+                    metadata=metadata
+                ))
+            
+            # Store entities and relationships as separate blobs (mem0 pattern)
+            if enhanced_data.entity_metadata:
+                entity_blob_data = json.dumps({
+                    entity_id: entity_info.dict() 
+                    for entity_id, entity_info in enhanced_data.entity_metadata.items()
+                }).encode('utf-8')
+                
+                blobs.append(QuiltBlob(
+                    identifier="entity_graph",
+                    data=entity_blob_data,
+                    metadata={
+                        "type": "entity_graph",
+                        "user_id": enhanced_data.user_id,
+                        "mem0_component": "entity_metadata",
+                        "entity_count": str(len(enhanced_data.entity_metadata))
+                    }
+                ))
+            
+            if enhanced_data.relationship_metadata:
+                relationship_blob_data = json.dumps([
+                    triplet.dict() for triplet in enhanced_data.relationship_metadata
+                ]).encode('utf-8')
+                
+                blobs.append(QuiltBlob(
+                    identifier="relationship_triplets",
+                    data=relationship_blob_data,
+                    metadata={
+                        "type": "relationship_triplets",
+                        "user_id": enhanced_data.user_id,
+                        "mem0_component": "relationship_graph",
+                        "triplet_count": str(len(enhanced_data.relationship_metadata))
+                    }
+                ))
+            
+            result = await self.store_quilt(blobs, epochs=epochs)
+            return result.quilt_id if result else None
+            
+        except Exception as e:
+            print(f"Error storing enhanced embeddings quilt: {e}")
+            return None
+
+    async def retrieve_enhanced_embeddings_from_quilt(self, quilt_id: str, 
+                                                    user_id: str) -> Optional[EnhancedEmbeddingQuiltData]:
+        """Retrieve enhanced embeddings with mem0 separation"""
+        try:
+            embeddings = []
+            entity_metadata = {}
+            relationship_metadata = []
+            retrieval_metadata = {}
+            temporal_metadata = {}
+            
+            # Retrieve embeddings (similar to existing method but enhanced)
+            for i in range(1000):  # Max attempt limit
+                identifier = f"enhanced_embedding_{i:06d}"
+                
+                try:
+                    data = await self.retrieve_from_quilt_by_id(quilt_id, identifier)
+                    if data is None:
+                        break
+                    
+                    embedding_json = json.loads(data.decode('utf-8'))
+                    embeddings.append(EmbeddingResult(
+                        vector=embedding_json["vector"],
+                        text=embedding_json["text"]
+                    ))
+                    
+                except:
+                    break
+            
+            # Retrieve entity graph
+            try:
+                entity_data = await self.retrieve_from_quilt_by_id(quilt_id, "entity_graph")
+                if entity_data:
+                    entity_json = json.loads(entity_data.decode('utf-8'))
+                    entity_metadata = {
+                        entity_id: EntityInfo(**entity_info) 
+                        for entity_id, entity_info in entity_json.items()
+                    }
+            except:
+                pass
+            
+            # Retrieve relationship triplets
+            try:
+                relationship_data = await self.retrieve_from_quilt_by_id(quilt_id, "relationship_triplets")
+                if relationship_data:
+                    relationship_json = json.loads(relationship_data.decode('utf-8'))
+                    relationship_metadata = [RelationshipTriplet(**triplet) for triplet in relationship_json]
+            except:
+                pass
+            
+            return EnhancedEmbeddingQuiltData(
+                user_id=user_id,
+                embeddings=embeddings,
+                entity_metadata=entity_metadata,
+                relationship_metadata=relationship_metadata,
+                retrieval_metadata=retrieval_metadata,
+                temporal_metadata=temporal_metadata,
+                storage_layer="external_context"
+            ) if embeddings else None
+            
+        except Exception as e:
+            print(f"Error retrieving enhanced embeddings from quilt: {e}")
             return None
 
     async def retrieve_embeddings_from_quilt(self, quilt_id: str) -> Optional[List[EmbeddingResult]]:
