@@ -1,7 +1,6 @@
 // Memory Integration Service
-// Handles the complete memory storage pipeline: detection → storage → retrieval
+// Simplified service for memory context retrieval (detection now handled by backend)
 
-import { memoryDetectionService, type DetectionResult, type MemoryCandidate } from './memoryDetection'
 import { memoryApi } from '@/app/api'
 
 export interface MemoryContext {
@@ -10,9 +9,25 @@ export interface MemoryContext {
   totalMemories: number
 }
 
+// Types for compatibility (detection now handled by backend)
+export interface DetectionResult {
+  shouldStore: boolean
+  memories: MemoryCandidate[]
+  reasoning: string
+}
+
+export interface MemoryCandidate {
+  content: string
+  category: string
+  confidence: number
+  extractedInfo?: { key: string; value: string }[]
+}
+
 class MemoryIntegrationService {
   /**
    * Process a user message for memory detection and storage
+   * Note: Memory detection is now handled automatically by the backend
+   * This method is kept for compatibility but returns empty results
    */
   async processMessage(
     message: string, 
@@ -23,59 +38,18 @@ class MemoryIntegrationService {
     storedMemories: string[]
     errors: string[]
   }> {
-    const storedMemories: string[] = []
-    const errors: string[] = []
-
-    try {
-      // Step 1: Detect potential memories
-      const detectionResult = memoryDetectionService.analyzeMessage(message)
-      
-      console.log('Memory detection result:', detectionResult)
-
-      // Step 2: Store memories if detected
-      if (detectionResult.shouldStore && detectionResult.memories.length > 0) {
-        for (const memory of detectionResult.memories) {
-          try {
-            const formattedMemory = memoryDetectionService.formatMemoryForStorage(
-              memory, 
-              userAddress
-            )
-
-            // Use the regular storage endpoint (secure endpoints don't exist yet)
-            const response = await memoryApi.createMemory({
-              content: formattedMemory.content,
-              category: formattedMemory.category,
-              userAddress: formattedMemory.userAddress,
-              userSignature
-            })
-
-            if (response.success && response.embeddingId) {
-              storedMemories.push(response.embeddingId)
-              console.log(`Stored memory: ${response.embeddingId} in category: ${memory.category}`)
-            }
-          } catch (error) {
-            console.error('Failed to store memory:', error)
-            errors.push(`Failed to store ${memory.category} memory: ${error}`)
-          }
-        }
-      }
-
-      return {
-        detectionResult,
-        storedMemories,
-        errors
-      }
-    } catch (error) {
-      console.error('Memory processing error:', error)
-      return {
-        detectionResult: {
-          shouldStore: false,
-          memories: [],
-          reasoning: 'Error during memory detection'
-        },
-        storedMemories: [],
-        errors: [`Memory processing failed: ${error}`]
-      }
+    // Memory detection is now handled automatically by the backend
+    // during chat streaming, so this method returns empty results
+    console.log('Memory detection now handled by backend automatically')
+    
+    return {
+      detectionResult: {
+        shouldStore: false,
+        memories: [],
+        reasoning: 'Memory detection moved to backend'
+      },
+      storedMemories: [],
+      errors: []
     }
   }
 
@@ -222,7 +196,7 @@ class MemoryIntegrationService {
 
   /**
    * Analyze conversation for memory opportunities
-   * This can be called periodically to find missed memories
+   * Note: Memory detection is now handled automatically by the backend
    */
   async analyzeConversationHistory(
     messages: string[],
@@ -232,38 +206,13 @@ class MemoryIntegrationService {
     potentialMemories: MemoryCandidate[]
     recommendations: string[]
   }> {
-    const potentialMemories: MemoryCandidate[] = []
-    const recommendations: string[] = []
-
-    try {
-      for (const message of messages) {
-        const result = memoryDetectionService.analyzeMessage(message)
-        if (result.shouldStore) {
-          potentialMemories.push(...result.memories)
-        }
-      }
-
-      // Generate recommendations
-      if (potentialMemories.length > 0) {
-        const categories = [...new Set(potentialMemories.map(m => m.category))]
-        recommendations.push(
-          `Found ${potentialMemories.length} potential memories in categories: ${categories.join(', ')}`
-        )
-        recommendations.push(
-          'Consider reviewing and storing these memories for better personalization.'
-        )
-      }
-
-      return {
-        potentialMemories,
-        recommendations
-      }
-    } catch (error) {
-      console.error('Failed to analyze conversation history:', error)
-      return {
-        potentialMemories: [],
-        recommendations: ['Error analyzing conversation history']
-      }
+    // Memory detection is now handled automatically by the backend
+    // during chat streaming, so this method returns empty results
+    console.log('Memory detection now handled by backend automatically')
+    
+    return {
+      potentialMemories: [],
+      recommendations: ['Memory detection moved to backend - no manual analysis needed']
     }
   }
 }

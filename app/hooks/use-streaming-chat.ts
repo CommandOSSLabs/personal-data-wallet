@@ -18,6 +18,8 @@ interface StreamChunk {
   content?: string
   intent?: string
   entities?: any
+  memoryStored?: boolean
+  memoryId?: string
 }
 
 interface StreamingState {
@@ -38,7 +40,7 @@ export function useStreamingChat() {
   const sendStreamingMessage = useCallback(async (
     request: StreamingChatRequest,
     onChunk?: (chunk: string) => void,
-    onComplete?: (fullResponse: string, intent?: string, entities?: any) => void,
+    onComplete?: (fullResponse: string, intent?: string, entities?: any, memoryStored?: boolean, memoryId?: string) => void,
     onError?: (error: string) => void
   ) => {
     try {
@@ -98,6 +100,17 @@ export function useStreamingChat() {
                 } else if (data.type === 'end') {
                   entities = data.entities
                   console.log('Stream ended, entities:', entities)
+                  
+                  // Call completion handler immediately with memory info from backend
+                  if (onComplete) {
+                    await onComplete(
+                      fullResponse, 
+                      intent, 
+                      entities, 
+                      data.memoryStored || false,
+                      data.memoryId || null
+                    )
+                  }
                 }
               } catch (parseError) {
                 console.warn('Failed to parse SSE data:', line)
@@ -115,11 +128,10 @@ export function useStreamingChat() {
         error: null
       })
 
-      // Invalidate queries to refresh data
-      queryClient.invalidateQueries({ queryKey: ['memories', request.userId] })
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions', request.userId] })
+      // Don't invalidate queries here - let the chat interface handle it
+      // This prevents duplicate invalidations and race conditions
       
-      onComplete?.(fullResponse, intent, entities)
+      // onComplete is now called when we receive the 'end' chunk above
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'

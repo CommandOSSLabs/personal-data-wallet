@@ -1,24 +1,69 @@
 {
   "nodes": [
+    "phone",
+    "software",
+    "number",
+    "bui",
+    "to",
+    "food",
+    "Microsoft",
+    "working",
+    "name",
+    "love",
+    "on",
+    "weekends",
+    "sushi",
+    "is",
+    "hhff",
+    "traveling",
+    "want",
+    "playing",
+    "see",
+    "hoang",
     "not",
     "nguyen",
-    "name",
-    "working",
     "honag",
-    "bui",
+    "am",
+    "and",
+    "you",
+    "Japan",
     "my",
-    "is",
-    "hoang"
+    "engineer",
+    "tennis",
+    "teo",
+    "at",
+    "favorite",
+    "My"
   ],
   "edges": [
     {
-      "source": "honag",
-      "target": "name",
+      "source": "and",
+      "target": "love",
       "label": "related_to"
     },
     {
-      "source": "nguyen",
-      "target": "my",
+      "source": "playing",
+      "target": "software",
+      "label": "related_to"
+    },
+    {
+      "source": "playing",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "sushi",
+      "label": "related_to"
+    },
+    {
+      "source": "engineer",
+      "target": "Microsoft",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "to",
       "label": "related_to"
     },
     {
@@ -27,8 +72,293 @@
       "label": "related_to"
     },
     {
+      "source": "at",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "Japan",
+      "target": "favorite",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "honag",
+      "label": "related_to"
+    },
+    {
+      "source": "to",
+      "target": "favorite",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "nguyen",
+      "label": "related_to"
+    },
+    {
+      "source": "software",
+      "target": "engineer",
+      "label": "related_to"
+    },
+    {
+      "source": "Microsoft",
+      "target": "on",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "Japan",
+      "label": "related_to"
+    },
+    {
+      "source": "engineer",
+      "target": "am",
+      "label": "related_to"
+    },
+    {
+      "source": "favorite",
+      "target": "Japan",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "teo",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "software",
+      "label": "related_to"
+    },
+    {
+      "source": "to",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "traveling",
+      "target": "favorite",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "bui",
+      "label": "related_to"
+    },
+    {
       "source": "name",
       "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "weekends",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "engineer",
+      "label": "related_to"
+    },
+    {
+      "source": "playing",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "food",
+      "target": "favorite",
+      "label": "related_to"
+    },
+    {
+      "source": "to",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "phone",
+      "target": "number",
+      "label": "related_to"
+    },
+    {
+      "source": "tennis",
+      "target": "on",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "favorite",
+      "label": "related_to"
+    },
+    {
+      "source": "food",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "traveling",
+      "label": "related_to"
+    },
+    {
+      "source": "bui",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "weekends",
+      "target": "Microsoft",
+      "label": "related_to"
+    },
+    {
+      "source": "engineer",
+      "target": "on",
+      "label": "related_to"
+    },
+    {
+      "source": "sushi",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "phone",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "software",
+      "label": "related_to"
+    },
+    {
+      "source": "playing",
+      "target": "tennis",
+      "label": "related_to"
+    },
+    {
+      "source": "software",
+      "target": "Microsoft",
+      "label": "related_to"
+    },
+    {
+      "source": "nguyen",
+      "target": "bui",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "hhff",
+      "label": "related_to"
+    },
+    {
+      "source": "favorite",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "tennis",
+      "target": "playing",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "am",
+      "label": "related_to"
+    },
+    {
+      "source": "sushi",
+      "target": "traveling",
+      "label": "related_to"
+    },
+    {
+      "source": "see",
+      "target": "you",
+      "label": "related_to"
+    },
+    {
+      "source": "hhff",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "software",
+      "target": "am",
+      "label": "related_to"
+    },
+    {
+      "source": "traveling",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "playing",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "am",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "bui",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "phone",
+      "label": "related_to"
+    },
+    {
+      "source": "weekends",
+      "target": "on",
+      "label": "related_to"
+    },
+    {
+      "source": "hhff",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "teo",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "playing",
+      "label": "related_to"
+    },
+    {
+      "source": "honag",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "see",
+      "target": "want",
       "label": "related_to"
     },
     {
@@ -37,63 +367,88 @@
       "label": "related_to"
     },
     {
-      "source": "hoang",
-      "target": "is",
-      "label": "related_to"
-    },
-    {
-      "source": "name",
-      "target": "nguyen",
-      "label": "related_to"
-    },
-    {
-      "source": "nguyen",
-      "target": "bui",
-      "label": "related_to"
-    },
-    {
-      "source": "name",
-      "target": "bui",
-      "label": "related_to"
-    },
-    {
-      "source": "hoang",
-      "target": "name",
-      "label": "related_to"
-    },
-    {
-      "source": "bui",
-      "target": "name",
-      "label": "related_to"
-    },
-    {
-      "source": "my",
-      "target": "hoang",
-      "label": "related_to"
-    },
-    {
-      "source": "bui",
-      "target": "hoang",
-      "label": "related_to"
-    },
-    {
-      "source": "my",
-      "target": "is",
-      "label": "related_to"
-    },
-    {
-      "source": "nguyen",
-      "target": "hoang",
+      "source": "favorite",
+      "target": "sushi",
       "label": "related_to"
     },
     {
       "source": "is",
-      "target": "nguyen",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "sushi",
+      "target": "food",
+      "label": "related_to"
+    },
+    {
+      "source": "on",
+      "target": "Microsoft",
       "label": "related_to"
     },
     {
       "source": "bui",
       "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "software",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "on",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "food",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "food",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "on",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "favorite",
+      "target": "food",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "teo",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "food",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "sushi",
       "label": "related_to"
     },
     {
@@ -102,8 +457,708 @@
       "label": "related_to"
     },
     {
+      "source": "is",
+      "target": "traveling",
+      "label": "related_to"
+    },
+    {
+      "source": "favorite",
+      "target": "traveling",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "engineer",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "food",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "nguyen",
+      "label": "related_to"
+    },
+    {
+      "source": "playing",
+      "target": "engineer",
+      "label": "related_to"
+    },
+    {
+      "source": "food",
+      "target": "to",
+      "label": "related_to"
+    },
+    {
+      "source": "teo",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "Microsoft",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "tennis",
+      "target": "weekends",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "playing",
+      "label": "related_to"
+    },
+    {
+      "source": "on",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "teo",
+      "label": "related_to"
+    },
+    {
+      "source": "Japan",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "to",
+      "label": "related_to"
+    },
+    {
+      "source": "to",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "food",
+      "target": "Japan",
+      "label": "related_to"
+    },
+    {
+      "source": "traveling",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "hhff",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "hhff",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "traveling",
+      "label": "related_to"
+    },
+    {
+      "source": "number",
+      "target": "phone",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "honag",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "favorite",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "Japan",
+      "label": "related_to"
+    },
+    {
+      "source": "Japan",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "weekends",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "traveling",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "Japan",
+      "target": "to",
+      "label": "related_to"
+    },
+    {
+      "source": "tennis",
+      "target": "Microsoft",
+      "label": "related_to"
+    },
+    {
+      "source": "tennis",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "to",
+      "target": "Japan",
+      "label": "related_to"
+    },
+    {
+      "source": "Microsoft",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "traveling",
+      "target": "to",
+      "label": "related_to"
+    },
+    {
+      "source": "on",
+      "target": "weekends",
+      "label": "related_to"
+    },
+    {
+      "source": "engineer",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "nguyen",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "software",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "tennis",
+      "label": "related_to"
+    },
+    {
+      "source": "traveling",
+      "target": "Japan",
+      "label": "related_to"
+    },
+    {
+      "source": "tennis",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "want",
+      "target": "to",
+      "label": "related_to"
+    },
+    {
       "source": "my",
       "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "teo",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "number",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "Microsoft",
+      "label": "related_to"
+    },
+    {
+      "source": "playing",
+      "target": "Microsoft",
+      "label": "related_to"
+    },
+    {
+      "source": "weekends",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "Microsoft",
+      "target": "software",
+      "label": "related_to"
+    },
+    {
+      "source": "Microsoft",
+      "target": "tennis",
+      "label": "related_to"
+    },
+    {
+      "source": "nguyen",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "on",
+      "target": "tennis",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "nguyen",
+      "label": "related_to"
+    },
+    {
+      "source": "food",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "playing",
+      "target": "am",
+      "label": "related_to"
+    },
+    {
+      "source": "engineer",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "bui",
+      "label": "related_to"
+    },
+    {
+      "source": "honag",
+      "target": "nguyen",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "Japan",
+      "target": "sushi",
+      "label": "related_to"
+    },
+    {
+      "source": "you",
+      "target": "see",
+      "label": "related_to"
+    },
+    {
+      "source": "you",
+      "target": "want",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "food",
+      "label": "related_to"
+    },
+    {
+      "source": "sushi",
+      "target": "to",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "playing",
+      "label": "related_to"
+    },
+    {
+      "source": "to",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "playing",
+      "target": "weekends",
+      "label": "related_to"
+    },
+    {
+      "source": "Microsoft",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "weekends",
+      "label": "related_to"
+    },
+    {
+      "source": "on",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "engineer",
+      "target": "software",
+      "label": "related_to"
+    },
+    {
+      "source": "Japan",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "engineer",
+      "target": "tennis",
+      "label": "related_to"
+    },
+    {
+      "source": "want",
+      "target": "you",
+      "label": "related_to"
+    },
+    {
+      "source": "Microsoft",
+      "target": "playing",
+      "label": "related_to"
+    },
+    {
+      "source": "traveling",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "on",
+      "label": "related_to"
+    },
+    {
+      "source": "favorite",
+      "target": "to",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "playing",
+      "target": "on",
+      "label": "related_to"
+    },
+    {
+      "source": "on",
+      "target": "playing",
+      "label": "related_to"
+    },
+    {
+      "source": "software",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "food",
+      "target": "sushi",
+      "label": "related_to"
+    },
+    {
+      "source": "number",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "sushi",
+      "target": "favorite",
+      "label": "related_to"
+    },
+    {
+      "source": "to",
+      "target": "see",
+      "label": "related_to"
+    },
+    {
+      "source": "phone",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "playing",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "sushi",
+      "label": "related_to"
+    },
+    {
+      "source": "weekends",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "nguyen",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "bui",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "Microsoft",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "sushi",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "nguyen",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "to",
+      "label": "related_to"
+    },
+    {
+      "source": "Japan",
+      "target": "traveling",
+      "label": "related_to"
+    },
+    {
+      "source": "want",
+      "target": "see",
+      "label": "related_to"
+    },
+    {
+      "source": "weekends",
+      "target": "playing",
+      "label": "related_to"
+    },
+    {
+      "source": "to",
+      "target": "sushi",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "engineer",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "favorite",
+      "label": "related_to"
+    },
+    {
+      "source": "engineer",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "see",
+      "target": "to",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "weekends",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "Japan",
+      "label": "related_to"
+    },
+    {
+      "source": "software",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "engineer",
+      "target": "playing",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "traveling",
+      "target": "sushi",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "hhff",
+      "label": "related_to"
+    },
+    {
+      "source": "favorite",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "engineer",
+      "label": "related_to"
+    },
+    {
+      "source": "weekends",
+      "target": "tennis",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "nguyen",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "favorite",
+      "label": "related_to"
+    },
+    {
+      "source": "to",
+      "target": "want",
+      "label": "related_to"
+    },
+    {
+      "source": "bui",
+      "target": "nguyen",
+      "label": "related_to"
+    },
+    {
+      "source": "Microsoft",
+      "target": "engineer",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "tennis",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "honag",
+      "target": "bui",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "traveling",
+      "label": "related_to"
+    },
+    {
+      "source": "on",
+      "target": "engineer",
+      "label": "related_to"
+    },
+    {
+      "source": "tennis",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "teo",
+      "label": "related_to"
+    },
+    {
+      "source": "traveling",
+      "target": "food",
+      "label": "related_to"
+    },
+    {
+      "source": "to",
+      "target": "traveling",
+      "label": "related_to"
+    },
+    {
+      "source": "bui",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "teo",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "tennis",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "love",
       "label": "related_to"
     },
     {
@@ -112,93 +1167,73 @@
       "label": "related_to"
     },
     {
-      "source": "nguyen",
-      "target": "name",
-      "label": "related_to"
-    },
-    {
-      "source": "is",
-      "target": "honag",
-      "label": "related_to"
-    },
-    {
-      "source": "name",
-      "target": "hoang",
-      "label": "related_to"
-    },
-    {
-      "source": "name",
-      "target": "is",
-      "label": "related_to"
-    },
-    {
-      "source": "nguyen",
-      "target": "is",
-      "label": "related_to"
-    },
-    {
-      "source": "honag",
-      "target": "my",
-      "label": "related_to"
-    },
-    {
-      "source": "nguyen",
-      "target": "honag",
-      "label": "related_to"
-    },
-    {
-      "source": "is",
-      "target": "bui",
-      "label": "related_to"
-    },
-    {
-      "source": "honag",
-      "target": "nguyen",
-      "label": "related_to"
-    },
-    {
-      "source": "is",
-      "target": "hoang",
+      "source": "tennis",
+      "target": "engineer",
       "label": "related_to"
     },
     {
       "source": "my",
-      "target": "honag",
+      "target": "number",
       "label": "related_to"
     },
     {
-      "source": "bui",
+      "source": "love",
+      "target": "food",
+      "label": "related_to"
+    },
+    {
+      "source": "software",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "Microsoft",
+      "label": "related_to"
+    },
+    {
+      "source": "software",
+      "target": "playing",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "to",
+      "label": "related_to"
+    },
+    {
+      "source": "number",
       "target": "my",
       "label": "related_to"
     },
     {
-      "source": "hoang",
-      "target": "my",
+      "source": "Japan",
+      "target": "food",
       "label": "related_to"
     },
     {
-      "source": "is",
-      "target": "name",
+      "source": "sushi",
+      "target": "love",
       "label": "related_to"
     },
     {
-      "source": "hoang",
-      "target": "nguyen",
+      "source": "My",
+      "target": "and",
       "label": "related_to"
     },
     {
-      "source": "bui",
-      "target": "honag",
+      "source": "to",
+      "target": "food",
       "label": "related_to"
     },
     {
-      "source": "bui",
-      "target": "nguyen",
-      "label": "related_to"
-    },
-    {
-      "source": "hoang",
-      "target": "bui",
+      "source": "love",
+      "target": "am",
       "label": "related_to"
     },
     {
@@ -207,18 +1242,98 @@
       "label": "related_to"
     },
     {
-      "source": "my",
+      "source": "you",
+      "target": "to",
+      "label": "related_to"
+    },
+    {
+      "source": "to",
+      "target": "you",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
       "target": "bui",
       "label": "related_to"
     },
     {
-      "source": "my",
-      "target": "nguyen",
+      "source": "phone",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "sushi",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "Microsoft",
+      "target": "am",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "Microsoft",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "sushi",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "favorite",
+      "target": "love",
       "label": "related_to"
     },
     {
       "source": "honag",
-      "target": "bui",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "bui",
+      "target": "honag",
+      "label": "related_to"
+    },
+    {
+      "source": "nguyen",
+      "target": "honag",
+      "label": "related_to"
+    },
+    {
+      "source": "food",
+      "target": "traveling",
+      "label": "related_to"
+    },
+    {
+      "source": "sushi",
+      "target": "Japan",
+      "label": "related_to"
+    },
+    {
+      "source": "favorite",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "Microsoft",
+      "target": "weekends",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "on",
       "label": "related_to"
     }
   ]

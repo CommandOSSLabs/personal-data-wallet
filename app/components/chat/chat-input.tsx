@@ -35,32 +35,50 @@ export function ChatInput({ onSendMessage, isLoading, disabled }: ChatInputProps
   }
 
   return (
-    <Box p="md" style={{ borderTop: '1px solid var(--mantine-color-gray-3)' }}>
+    <Box p="md" style={{ 
+      background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
+      borderTop: '1px solid #e2e8f0',
+      backdropFilter: 'blur(10px)'
+    }}>
       <form onSubmit={handleSubmit}>
         <Group gap="sm" align="flex-end">
           <TextInput
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyPress}
-            placeholder="Message Personal Data Wallet..."
+            placeholder="💭 Ask me anything or share personal information..."
             disabled={disabled || isLoading}
-            style={{ flex: 1 }}
+            style={{ 
+              flex: 1,
+            }}
+            styles={{
+              input: {
+                border: '2px solid #e2e8f0',
+                borderRadius: '16px',
+                padding: '12px 16px',
+                fontSize: '14px',
+                '&:focus': {
+                  borderColor: '#667eea',
+                  boxShadow: '0 0 0 3px rgba(102, 126, 234, 0.1)'
+                }
+              }
+            }}
             size="md"
-            radius="md"
           />
           <ActionIcon
             type="submit"
-            disabled={disabled || isLoading || !message.trim()}
             size="lg"
-            radius="md"
-            variant="filled"
-            color="blue"
+            disabled={!message.trim() || isLoading || disabled}
+            variant="gradient"
+            gradient={{ from: 'cyan', to: 'indigo' }}
+            radius="xl"
+            style={{
+              boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)',
+              transform: (!message.trim() || isLoading || disabled) ? 'scale(0.95)' : 'scale(1)',
+              transition: 'all 0.2s ease'
+            }}
           >
-            {isLoading ? (
-              <Loader size={16} />
-            ) : (
-              <IconSend size={16} />
-            )}
+            {isLoading ? <Loader size="sm" color="white" /> : <IconSend size={18} />}
           </ActionIcon>
         </Group>
       </form>

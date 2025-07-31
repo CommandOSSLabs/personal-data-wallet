@@ -33,6 +33,7 @@ import {
 } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useDisclosure } from '@mantine/hooks'
+import { memoryApi } from '@/app/api/memoryApi'
 
 interface Memory {
   id: string
@@ -85,9 +86,13 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
   const loadMemories = async () => {
     setLoading(true)
     try {
-      // For now, use empty array since memory endpoints are not implemented yet
-      // TODO: Implement memory endpoints in backend
-      setMemories([])
+      // Use empty query to get all memories for the user
+      const data = await memoryApi.searchMemories({
+        query: '',
+        userAddress,
+        k: 50
+      })
+      setMemories(data.results || [])
     } catch (error) {
       console.error('Failed to load memories:', error)
       notifications.show({
@@ -96,6 +101,7 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
         color: 'red',
         icon: <IconX size={16} />
       })
+      setMemories([])
     } finally {
       setLoading(false)
     }
@@ -106,59 +112,27 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
 
     setAddingMemory(true)
     try {
-      // For now, simulate adding memory since backend endpoints are not implemented yet
-      // TODO: Implement memory endpoints in backend
-      const newMemory: Memory = {
-        id: `mem_${Date.now()}`,
+      const data = await memoryApi.createMemory({
         content: newMemoryContent,
-        category: newMemoryCategory,
-        timestamp: new Date().toISOString(),
-        isEncrypted: true,
-        owner: userAddress
-      }
-
-      setMemories(prev => [newMemory, ...prev])
+        userAddress: userAddress,
+        category: newMemoryCategory
+      })
+      
+      // Refresh the memories list
+      await loadMemories()
+      
       setNewMemoryContent('')
-      setNewMemoryCategory('personal')
+      setNewMemoryCategory('general')
       closeAddModal()
 
-      onMemoryAdded?.(newMemory)
-
       notifications.show({
-        title: 'Added',
-        message: 'Memory saved successfully',
+        title: 'Memory Added',
+        message: `Memory saved successfully! ID: ${data.embeddingId?.slice(0, 8)}...`,
         color: 'green',
         icon: <IconCheck size={16} />
       })
 
-      if (response.ok) {
-        const data = await response.json()
-        const newMemory: Memory = {
-          id: data.embeddingId,
-          content: newMemoryContent,
-          category: newMemoryCategory,
-          timestamp: new Date().toISOString(),
-          isEncrypted: true,
-          walrusHash: data.walrusHash,
-          owner: userAddress
-        }
-
-        setMemories(prev => [newMemory, ...prev])
-        onMemoryAdded?.(newMemory)
-        
-        setNewMemoryContent('')
-        setNewMemoryCategory('general')
-        closeAddModal()
-
-        notifications.show({
-          title: 'Success',
-          message: 'Memory saved securely',
-          color: 'green',
-          icon: <IconCheck size={16} />
-        })
-      } else {
-        throw new Error('Failed to save memory')
-      }
+      onMemoryAdded?.(data)
     } catch (error) {
       console.error('Failed to add memory:', error)
       notifications.show({
@@ -180,13 +154,13 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
 
     setSearching(true)
     try {
-      // For now, simulate search since backend endpoints are not implemented yet
-      // TODO: Implement memory search endpoints in backend
-      const filtered = memories.filter(memory =>
-        memory.content.toLowerCase().includes(searchQuery.toLowerCase()) &&
-        (selectedCategory === 'all' || memory.category === selectedCategory)
-      )
-      setSearchResults(filtered)
+      const data = await memoryApi.searchMemories({
+        query: searchQuery,
+        userAddress,
+        category: selectedCategory || undefined,
+        k: 20
+      })
+      setSearchResults(data.results || [])
     } catch (error) {
       console.error('Search failed:', error)
       notifications.show({
@@ -195,6 +169,7 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
         color: 'red',
         icon: <IconX size={16} />
       })
+      setSearchResults([])
     } finally {
       setSearching(false)
     }
@@ -202,9 +177,12 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
 
   const deleteMemory = async (memoryId: string) => {
     try {
-      // For now, simulate delete since backend endpoints are not implemented yet
-      // TODO: Implement memory delete endpoints in backend
-      setMemories(prev => prev.filter(m => m.id !== memoryId))
+      await memoryApi.deleteMemory(memoryId, userAddress)
+      
+      // Refresh the memories list
+      await loadMemories()
+      
+      // Also remove from search results if present
       setSearchResults(prev => prev.filter(m => m.id !== memoryId))
       onMemoryDeleted?.(memoryId)
 

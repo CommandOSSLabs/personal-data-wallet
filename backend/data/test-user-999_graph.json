@@ -1,0 +1,223 @@
+{
+  "nodes": [
+    "pizza",
+    "name",
+    "Charlie",
+    "love",
+    "My",
+    "and",
+    "is"
+  ],
+  "edges": [
+    {
+      "source": "pizza",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "pizza",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "Charlie",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "pizza",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "pizza",
+      "target": "Charlie",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "Charlie",
+      "target": "pizza",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "pizza",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "Charlie",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "Charlie",
+      "label": "related_to"
+    },
+    {
+      "source": "pizza",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "Charlie",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "pizza",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "Charlie",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "pizza",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "Charlie",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "love",
+      "label": "related_to"
+    },
+    {
+      "source": "Charlie",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "Charlie",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "pizza",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "pizza",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "love",
+      "target": "Charlie",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "pizza",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "Charlie",
+      "target": "and",
+      "label": "related_to"
+    }
+  ]
+}

@@ -1,8 +1,11 @@
 'use client'
 
+import { useState } from 'react'
 import { Message } from '@/app/types'
 import { MarkdownRenderer } from './markdown-renderer'
 import { MemoryExtractionIndicator } from '@/app/components/memory/memory-extraction-indicator'
+import { MemoryIndicatorIcon } from '@/app/components/memory/memory-indicator-icon'
+import { MemoryReviewModal } from '@/app/components/memory/memory-review-modal'
 import {
   Group,
   Avatar,
@@ -23,6 +26,7 @@ interface MessageProps {
 
 export function MessageComponent({ message, isTyping = false, isStreaming = false, userAddress }: MessageProps) {
   const isUser = message.type === 'user'
+  const [memoryModalOpened, setMemoryModalOpened] = useState(false)
 
   return (
     <Group
@@ -33,9 +37,12 @@ export function MessageComponent({ message, isTyping = false, isStreaming = fals
     >
       {!isUser && (
         <Avatar
-          color="blue"
           radius="xl"
           size="sm"
+          style={{
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: 'white'
+          }}
         >
           <IconRobot size={16} />
         </Avatar>
@@ -43,12 +50,18 @@ export function MessageComponent({ message, isTyping = false, isStreaming = fals
 
       <Paper
         p="md"
-        radius="md"
-        shadow="xs"
+        radius="lg"
+        shadow="md"
         style={{
           maxWidth: '80%',
-          backgroundColor: isUser ? 'var(--mantine-color-blue-6)' : 'var(--mantine-color-gray-1)',
-          color: isUser ? 'white' : 'var(--mantine-color-dark-7)'
+          background: isUser 
+            ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' 
+            : 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
+          color: isUser ? 'white' : 'var(--mantine-color-dark-7)',
+          border: isUser ? 'none' : '1px solid #e2e8f0',
+          boxShadow: isUser 
+            ? '0 4px 16px rgba(102, 126, 234, 0.3)' 
+            : '0 2px 8px rgba(0, 0, 0, 0.1)',
         }}
       >
         {isTyping ? (
@@ -60,20 +73,19 @@ export function MessageComponent({ message, isTyping = false, isStreaming = fals
           <Box>
             {isUser ? (
               <Stack gap="xs">
-                <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-                  {message.content}
-                </Text>
-                {userAddress && (
-                  <Group justify="flex-end">
-                    <MemoryExtractionIndicator
-                      message={message.content}
-                      userAddress={userAddress}
-                      onMemoryStored={(count) => {
-                        console.log(`Stored ${count} memories from message`)
-                      }}
+                <Group justify="space-between" align="flex-start" wrap="nowrap">
+                  <Text size="sm" style={{ whiteSpace: 'pre-wrap', flex: 1 }}>
+                    {message.content}
+                  </Text>
+                  {userAddress && message.memoryDetected && (
+                    <MemoryIndicatorIcon
+                      memoryDetected={message.memoryDetected}
+                      memoryId={message.memoryId}
+                      onClick={() => setMemoryModalOpened(true)}
+                      size={18}
                     />
-                  </Group>
-                )}
+                  )}
+                </Group>
               </Stack>
             ) : (
               <Box style={{ position: 'relative' }}>
@@ -102,12 +114,27 @@ export function MessageComponent({ message, isTyping = false, isStreaming = fals
 
       {isUser && (
         <Avatar
-          color="gray"
           radius="xl"
           size="sm"
+          style={{
+            background: 'linear-gradient(135deg, #38bdf8 0%, #0ea5e9 100%)',
+            color: 'white'
+          }}
         >
           <IconUser size={16} />
         </Avatar>
+      )}
+
+      {/* Memory Review Modal */}
+      {userAddress && (
+        <MemoryReviewModal
+          opened={memoryModalOpened}
+          onClose={() => setMemoryModalOpened(false)}
+          messageContent={message.content}
+          messageId={message.id}
+          memoryId={message.memoryId}
+          userAddress={userAddress}
+        />
       )}
     </Group>
   )

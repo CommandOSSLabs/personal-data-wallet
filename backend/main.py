@@ -12,7 +12,7 @@ from models import (
     IntentType, ClassificationResult, CreateChatRequest, AddMessageRequest,
     CreateMemoryRequest, MemoryType, ChatSession, MemoryItem
 )
-from services.classifier import SimpleClassifier
+from services.enhanced_classifier import EnhancedClassifier
 from services.graph_extractor import GraphExtractor
 from services.memory_manager import MemoryManager
 from services.chat_storage import ChatStorage
@@ -21,21 +21,26 @@ from services.gemini_chat import GeminiChatService
 from services.two_stage_query import TwoStageQueryService
 from services.google_embeddings import GoogleEmbeddingService
 from services.sui_chat_sessions import SuiChatSessionsService
+from services.vector_storage import VectorStorageService
 
 # Configure logging
 logging.basicConfig(level=getattr(logging, settings.log_level))
 logger = logging.getLogger(__name__)
 
-# Global services
-classifier = SimpleClassifier()
+# Global services - SHARED INSTANCES to ensure consistency
+classifier = EnhancedClassifier()
 graph_extractor = GraphExtractor()
 memory_manager = MemoryManager()
 chat_storage = ChatStorage()
 memory_storage = MemoryStorage()
 gemini_chat = GeminiChatService()
-query_service = TwoStageQueryService()
 embedding_service = GoogleEmbeddingService()
 sui_chat_sessions = SuiChatSessionsService()
+
+# IMPORTANT: Use single shared VectorStorageService instance for both storage and search
+vector_storage = VectorStorageService()
+query_service = TwoStageQueryService()
+query_service.storage_service = vector_storage  # Use shared instance
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -45,6 +50,8 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Personal Data Wallet Backend")
     await memory_manager.close()
+    await vector_storage.close()
+    await query_service.close()
 
 app = FastAPI(
     title="Personal Data Wallet API",
@@ -193,10 +200,9 @@ async def stream_chat(request: IngestRequest):
                 context_result = await query_service.full_query_with_context(
                     query_text=request.text,
                     user_address=request.user_id,  # Using user_id as address for now
-                    user_signature=user_signature,
-                    k=5
+                    max_memories=5
                 )
-                context = context_result.get("context", "")
+                context = context_result.context_text if hasattr(context_result, 'context_text') else ""
                 logger.info("Using memory context from backend")
             except Exception as e:
                 logger.warning(f"Failed to get memory context: {e}")
@@ -225,13 +231,45 @@ async def stream_chat(request: IngestRequest):
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
                     await asyncio.sleep(0.05)  # Small delay
             
-            # Handle knowledge graph extraction for facts
+            # Enhanced automatic memory detection and storage
             entities = None
+            stored_memory_id = None
+            
+            # Check if message contains information worth storing (regardless of intent)
+            logger.info(f"Checking memory storage for: '{request.text}'")
+            should_store = classifier.should_store_as_memory(request.text)
+            logger.info(f"Memory storage decision: {should_store}")
+            
+            if should_store:
+                try:
+                    logger.info(f"Detected memory-worthy information in message: {request.text[:100]}...")
+                    
+                    # Store in vector storage system (the enhanced system)
+                    storage_result = await vector_storage.store_memory(
+                        text=request.text,
+                        category="auto-detected",  # Will be auto-categorized by the storage service
+                        user_address=request.user_id
+                    )
+                    
+                    if storage_result and storage_result.success:
+                        stored_memory_id = storage_result.embedding_id
+                        logger.info(f"Successfully stored memory: {stored_memory_id}")
+                    else:
+                        error_msg = storage_result.error if storage_result else "Unknown error"
+                        logger.warning(f"Failed to store memory: {error_msg}")
+                        stored_memory_id = None
+                        
+                except Exception as e:
+                    logger.error(f"Error during automatic memory storage: {e}")
+            else:
+                logger.info("No memory-worthy information detected, skipping storage")
+            
+            # Also handle traditional knowledge graph extraction for FACT_ADDITION intent
             if classification.intent == IntentType.FACT_ADDITION:
                 knowledge_graph = graph_extractor.extract_graph(request.text)
                 logger.info(f"Extracted graph with {len(knowledge_graph.nodes)} nodes")
                 
-                # Store in memory systems
+                # Store in legacy memory systems for compatibility
                 await memory_manager.add_fact(request.user_id, request.text, knowledge_graph)
                 
                 if knowledge_graph.nodes:
@@ -258,8 +296,15 @@ async def stream_chat(request: IngestRequest):
                 except Exception as e:
                     logger.warning(f"Failed to add assistant response to Sui session: {e}")
             
-            # Send completion metadata
-            yield f"data: {json.dumps({'type': 'end', 'intent': classification.intent, 'entities': entities.dict() if entities else None})}\n\n"
+            # Send completion metadata including memory storage result
+            completion_data = {
+                'type': 'end', 
+                'intent': classification.intent, 
+                'entities': entities.model_dump() if entities else None,
+                'memoryStored': stored_memory_id is not None,
+                'memoryId': stored_memory_id
+            }
+            yield f"data: {json.dumps(completion_data)}\n\n"
         
         return StreamingResponse(
             generate_stream(),
@@ -592,12 +637,17 @@ async def get_memories(user: str):
 async def search_memories(request: dict):
     """Search memories using the two-stage query system."""
     try:
-        query = request.get("query")
+        query = request.get("query", "")
         user_address = request.get("userAddress")
         category = request.get("category")
+        k = request.get("k", 10)
 
-        if not all([query, user_address]):
-            raise HTTPException(status_code=400, detail="Missing required fields")
+        if not user_address:
+            raise HTTPException(status_code=400, detail="Missing user address")
+
+        # If query is empty, use a broad search to get all memories
+        if not query.strip():
+            query = "memory personal data information"
 
         # For now, simulate user signature
         user_signature = "simulated_signature"
@@ -605,7 +655,7 @@ async def search_memories(request: dict):
         # Perform stage 1 search (metadata only)
         results = await query_service.stage1_metadata_search(
             query_text=query,
-            k=10,
+            k=k,
             category_filter=category,
             owner_filter=user_address
         )
@@ -662,8 +712,7 @@ async def get_chat_context(request: dict):
         context_result = await query_service.full_query_with_context(
             query_text=query,
             user_address=user_address,
-            user_signature=user_signature,
-            k=5
+            max_memories=5
         )
 
         return context_result

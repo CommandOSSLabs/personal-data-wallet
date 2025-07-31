@@ -12,7 +12,7 @@ module personal_data_wallet::vector_index {
     const EInvalidWalrusHash: u64 = 3;
 
     // Struct representing a vector embedding entry in the index
-    struct VectorEmbedding has key, store {
+    public struct VectorEmbedding has key, store {
         id: UID,
         owner: address,
         walrus_hash: String,           // Hash of encrypted main vector on Walrus
@@ -25,19 +25,19 @@ module personal_data_wallet::vector_index {
     }
 
     // Registry to track all embeddings for efficient querying
-    struct VectorRegistry has key {
+    public struct VectorRegistry has key {
         id: UID,
         total_embeddings: u64,
         categories: vector<String>,
     }
 
     // Admin capability for managing the system
-    struct AdminCap has key {
+    public struct AdminCap has key {
         id: UID,
     }
 
     // Events
-    struct EmbeddingAdded has copy, drop {
+    public struct EmbeddingAdded has copy, drop {
         embedding_id: address,
         owner: address,
         walrus_hash: String,
@@ -47,13 +47,13 @@ module personal_data_wallet::vector_index {
         timestamp: u64,
     }
 
-    struct EmbeddingAccessed has copy, drop {
+    public struct EmbeddingAccessed has copy, drop {
         embedding_id: address,
         accessor: address,
         timestamp: u64,
     }
 
-    struct EmbeddingRemoved has copy, drop {
+    public struct EmbeddingRemoved has copy, drop {
         embedding_id: address,
         owner: address,
         timestamp: u64,

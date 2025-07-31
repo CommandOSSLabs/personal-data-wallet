@@ -38,9 +38,256 @@
         "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753872987135"
       ],
       "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753892918084": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753892918084",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: hoang, name, is, my, nguyen, bui",
+      "raw_text": "my name is bui nguyen hoang",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-30 23:28:38.084466",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753892905069"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753892946894": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753892946894",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: hoang, name, is, my, nguyen, bui",
+      "raw_text": "my name is bui nguyen hoang",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-30 23:29:06.894563",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753892905069"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753894951496": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753894951496",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: teo, name, my, is, hoang",
+      "raw_text": "my name is hoang teo",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 00:02:31.496602",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753894936582"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753895294785": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753895294785",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: number, my, is, phone",
+      "raw_text": "my phone number is 0977367899",
+      "type": "fact",
+      "category": "contacts",
+      "created_at": "2025-07-31 00:08:14.785638",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753895269100"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753895316359": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753895316359",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: my, hoang, is, name",
+      "raw_text": "my name is hoang",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 00:08:36.359571",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753895269100"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753896205351": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753896205351",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: my, is, hoang, name, teo",
+      "raw_text": "my name is hoang teo",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 00:23:25.351513",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753896195170"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753927867915": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753927867915",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: phone, my, is, number",
+      "raw_text": "my phone number is 09377321",
+      "type": "fact",
+      "category": "contacts",
+      "created_at": "2025-07-31 09:11:07.915409",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753927854544"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753927904379": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753927904379",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: my, is, hoang, name",
+      "raw_text": "my name is hoang",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 09:11:44.379218",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753927854544"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753928246820": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753928246820",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: is, favorite, sushi, traveling, food, Japan, My, love, to, and",
+      "raw_text": "My favorite food is sushi and I love traveling to Japan",
+      "type": "fact",
+      "category": "preferences",
+      "created_at": "2025-07-31 09:17:26.820054",
+      "related_sessions": [
+        "test_session_123"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753929449772": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753929449772",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: to, My, love, is, Japan, food, traveling, sushi, and, favorite",
+      "raw_text": "My favorite food is sushi and I love traveling to Japan",
+      "type": "fact",
+      "category": "preferences",
+      "created_at": "2025-07-31 09:37:29.772335",
+      "related_sessions": [
+        "test_session_456"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753929541894": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753929541894",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: to, love, My, and, is, traveling, Japan, favorite, food, sushi",
+      "raw_text": "My favorite food is sushi and I love traveling to Japan",
+      "type": "fact",
+      "category": "preferences",
+      "created_at": "2025-07-31 09:39:01.894582",
+      "related_sessions": [
+        "test_session_789"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753931230780": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753931230780",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: traveling, sushi, is, love, and, Japan, My, food, favorite, to",
+      "raw_text": "My favorite food is sushi and I love traveling to Japan",
+      "type": "fact",
+      "category": "preferences",
+      "created_at": "2025-07-31 10:07:10.780269",
+      "related_sessions": [
+        "test_session_final"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753931263478": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753931263478",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: is, My, favorite, and, food, Japan, to, sushi, traveling, love",
+      "raw_text": "My favorite food is sushi and I love traveling to Japan",
+      "type": "fact",
+      "category": "preferences",
+      "created_at": "2025-07-31 10:07:43.478722",
+      "related_sessions": [
+        "test_debug_session"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753931339839": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753931339839",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: tennis, playing, software, at, love, on, weekends, am, Microsoft, engineer, and",
+      "raw_text": "I am a software engineer at Microsoft and I love playing tennis on weekends",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 10:08:59.839343",
+      "related_sessions": [
+        "test_final_check"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753946790782": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753946790782",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: phone, my, is",
+      "raw_text": "my phone is 3213213",
+      "type": "fact",
+      "category": "contacts",
+      "created_at": "2025-07-31 14:26:30.782564",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753933977608"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753947861941": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753947861941",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: see, want, you, to",
+      "raw_text": "i want to see you",
+      "type": "fact",
+      "category": "general",
+      "created_at": "2025-07-31 14:44:21.941805",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753947850079"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753947875655": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753947875655",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: phone, my, is, number",
+      "raw_text": "my phone number is 99932323",
+      "type": "fact",
+      "category": "contacts",
+      "created_at": "2025-07-31 14:44:35.655603",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753947850079"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753947888397": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753947888397",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: hhff, my, is, name",
+      "raw_text": "my name is hhff",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 14:44:48.397289",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753947850079"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753949971937": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753949971937",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: name, hhff, my, is",
+      "raw_text": "my name is hhff",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 15:19:31.937436",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753947850079"
+      ],
+      "metadata": {}
     }
   },
   "metadata": {
-    "last_updated": "2025-07-30T17:56:52.876361"
+    "last_updated": "2025-07-31T15:19:31.938445"
   }
 }

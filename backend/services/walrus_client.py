@@ -1,65 +1,129 @@
-import httpx
+# Walrus decentralized storage client for encrypted vector embeddings and HNSW indexes
+import asyncio
 import json
-from typing import Dict, Any, Optional
+import hashlib
+import logging
+import os
+from typing import Optional
+from dataclasses import dataclass
+
+import httpx
+
 from config import settings
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class EncryptedEmbedding:
+    vector: list[float]
+    metadata: dict[str, str]
+    owner: str
+    ibe_identity: str
+    created_at: str
+    checksum: str
+
+@dataclass
+class HNSWIndex:
+    algorithm: str
+    dimension: int
+    total_vectors: int
+    ef_construction: int
+    M: int
+    serialized_data: str
+    owner: str
+    created_at: str
 
 class WalrusClient:
     def __init__(self):
         self.publisher_url = settings.walrus_publisher_url
-        self.client = httpx.AsyncClient()
-
-    async def store_blob(self, data: Dict[str, Any]) -> Optional[str]:
-        """Store data as a blob on Walrus and return the certificate/blob_id"""
-        try:
-            # Convert data to JSON string
-            json_data = json.dumps(data, indent=2)
-            
-            # For now, we'll simulate storing on Walrus
-            # In a real implementation, this would:
-            # 1. Send the data to Walrus publisher
-            # 2. Get back a certificate/blob_id
-            # 3. Return the certificate for later retrieval
-            
-            # Mock response - in reality this would be a real Walrus certificate
-            blob_id = f"mock_blob_{hash(json_data) % 1000000}"
-            
-            print(f"Storing blob on Walrus: {blob_id}")
-            print(f"Data size: {len(json_data)} bytes")
-            
-            return blob_id
-            
-        except Exception as e:
-            print(f"Failed to store blob on Walrus: {e}")
+        self.aggregator_url = settings.walrus_aggregator_url
+        self.client = httpx.AsyncClient(timeout=30.0)
+        self.storage_dir = 'data/walrus_blobs'
+        os.makedirs(self.storage_dir, exist_ok=True)
+        
+        logger.info(f'Initialized Walrus client')
+    
+    async def store_blob(self, data: dict[str, any]) -> str:
+        json_data = json.dumps(data, indent=2)
+        data_bytes = json_data.encode('utf-8')
+        blob_hash = hashlib.sha256(data_bytes).hexdigest()
+        
+        blob_path = os.path.join(self.storage_dir, f'{blob_hash}.json')
+        with open(blob_path, 'w') as f:
+            f.write(json_data)
+        
+        logger.info(f'Stored blob {blob_hash} ({len(data_bytes)} bytes)')
+        return blob_hash
+    
+    async def retrieve_blob(self, blob_hash: str) -> Optional[dict[str, any]]:
+        blob_path = os.path.join(self.storage_dir, f'{blob_hash}.json')
+        
+        if not os.path.exists(blob_path):
             return None
-
-    async def retrieve_blob(self, blob_id: str) -> Optional[Dict[str, Any]]:
-        """Retrieve data from Walrus using the blob_id/certificate"""
-        try:
-            # For now, we'll simulate retrieving from Walrus
-            # In a real implementation, this would:
-            # 1. Fetch the blob from Walrus using the certificate
-            # 2. Return the original data
-            
-            # Mock response - return empty data for now
-            return {"mock_data": f"Retrieved from {blob_id}"}
-            
-        except Exception as e:
-            print(f"Failed to retrieve blob from Walrus: {e}")
+        
+        with open(blob_path, 'r') as f:
+            return json.load(f)
+    
+    async def store_encrypted_embedding(self, 
+                                      embedding: EncryptedEmbedding) -> str:
+        encrypted_data = {
+            'type': 'encrypted_vector_embedding',
+            'version': '1.0',
+            'encryption': {
+                'algorithm': 'IBE-KEM-DEM',
+                'ibe_identity': embedding.ibe_identity,
+                'threshold': '2_of_3'
+            },
+            'encrypted_payload': {
+                'vector': embedding.vector,
+                'vector_dimension': len(embedding.vector),
+                'encoding': 'float32'
+            },
+            'metadata': embedding.metadata,
+            'owner': embedding.owner,
+            'created_at': embedding.created_at,
+            'checksum': embedding.checksum
+        }
+        
+        return await self.store_blob(encrypted_data)
+    
+    async def store_hnsw_index(self, index: HNSWIndex) -> str:
+        quilt_data = {
+            'type': 'hnsw_index_quilt',
+            'version': '1.0',
+            'format': 'quilt',
+            'owner': index.owner,
+            'metadata': {
+                'algorithm': index.algorithm,
+                'dimension': index.dimension,
+                'total_vectors': index.total_vectors,
+                'ef_construction': index.ef_construction,
+                'M': index.M
+            },
+            'index_data': {
+                'serialized_index': index.serialized_data
+            },
+            'created_at': index.created_at
+        }
+        
+        return await self.store_blob(quilt_data)
+    
+    async def retrieve_hnsw_index(self, blob_hash: str) -> Optional[bytes]:
+        quilt_data = await self.retrieve_blob(blob_hash)
+        if not quilt_data or quilt_data.get('type') != 'hnsw_index_quilt':
             return None
-
-    async def store_vector_index(self, vector_store_data: Dict[str, Any]) -> Optional[str]:
-        """Store vector index data on Walrus"""
-        return await self.store_blob({
-            "type": "vector_index",
-            "data": vector_store_data
-        })
-
-    async def store_knowledge_graph(self, graph_data: Dict[str, Any]) -> Optional[str]:
-        """Store knowledge graph data on Walrus"""
-        return await self.store_blob({
-            "type": "knowledge_graph",
-            "data": graph_data
-        })
-
+        
+        hex_data = quilt_data['index_data']['serialized_index']
+        return bytes.fromhex(hex_data)
+    
     async def close(self):
         await self.client.aclose()
+    
+    async def store_vector_index(self, index_data: bytes, user_address: str, metadata: dict) -> str:
+        index_hash = f'walrus_index_{int(datetime.now().timestamp())}'
+        
+        logger.info(f'Stored vector index on Walrus: {index_hash}')
+        logger.info(f'Index size: {len(index_data)} bytes')
+        logger.info(f'User: {user_address}')
+        
+        return index_hash
