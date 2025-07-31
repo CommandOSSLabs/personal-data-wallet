@@ -1,0 +1,13 @@
+Personal Data Wallet - Deployed Sui Package Information
+
+Package ID: 0x0b11c3a0bf3228955c9adc443934e0f231d34f97f53c1a00a9e36db230e447bc
+Network: Sui Testnet
+Deployed: 2025-07-31
+Contract Modules:
+- memory_wallet: Core memory object management
+- vector_index: HNSW vector embedding indexing  
+- seal_access_control: Seal IBE access control with multiple seal_approve functions
+
+Usage:
+This Package ID is configured in the TypeScript Seal service (seal-service/src/seal-client.ts)
+for real Seal IBE encryption operations.

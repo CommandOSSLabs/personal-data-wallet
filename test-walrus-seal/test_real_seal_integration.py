@@ -20,7 +20,7 @@ try:
     from services.hnsw_indexer import HNSWIndexerService
     from config import settings
 except ImportError as e:
-    print(f"❌ Import error: {e}")
+    print(f" Import error: {e}")
     print("Make sure you're running from the project root directory")
     sys.exit(1)
 
@@ -34,13 +34,13 @@ class SealIntegrationTester:
         
     async def initialize(self):
         """Initialize services"""
-        print("🔧 Initializing services...")
+        print(" Initializing services...")
         self.seal_service = SealEncryptionService()
         self.indexer = HNSWIndexerService()
         
         # Check if we should use real Seal
         if not settings.use_real_seal:
-            print("⚠️  Warning: use_real_seal=False in configuration")
+            print("  Warning: use_real_seal=False in configuration")
             print("   Set use_real_seal=True to test real Seal integration")
             print("   Currently testing in simulation mode")
     
@@ -53,7 +53,7 @@ class SealIntegrationTester:
     
     def add_test_result(self, test_name: str, passed: bool, message: str = ""):
         """Add test result"""
-        status = "✅ PASS" if passed else "❌ FAIL"
+        status = " PASS" if passed else " FAIL"
         self.test_results.append({
             "test": test_name,
             "passed": passed,
@@ -267,7 +267,7 @@ class SealIntegrationTester:
             self.add_test_result(
                 "Privacy-Preserving Indexer",
                 overall_success,
-                f"Stored: {len(stored_embeddings)}, Found: {len(search_results)}, Encrypted: {encrypted_count}, Decryption: {'✅' if decryption_success else '❌'}"
+                f"Stored: {len(stored_embeddings)}, Found: {len(search_results)}, Encrypted: {encrypted_count}, Decryption: {'' if decryption_success else ''}"
             )
             
             return overall_success
@@ -328,7 +328,7 @@ class SealIntegrationTester:
             self.add_test_result(
                 "Access Control Policies",
                 access_control_success,
-                f"Policy keys: {'✅' if has_policy_keys else '❌'}, Identity: {'✅' if identity_has_owner and identity_has_category else '❌'}"
+                f"Policy keys: {'' if has_policy_keys else ''}, Identity: {'' if identity_has_owner and identity_has_category else ''}"
             )
             
             return access_control_success
@@ -339,7 +339,7 @@ class SealIntegrationTester:
     
     async def run_all_tests(self):
         """Run all integration tests"""
-        print("🧪 Starting Seal IBE Integration Tests")
+        print(" Starting Seal IBE Integration Tests")
         print("=" * 50)
         
         await self.initialize()
@@ -361,7 +361,7 @@ class SealIntegrationTester:
                     if not result:
                         all_passed = False
                 except Exception as e:
-                    print(f"❌ Test {test_func.__name__} crashed: {e}")
+                    print(f" Test {test_func.__name__} crashed: {e}")
                     self.add_test_result(test_func.__name__, False, f"Test crashed: {e}")
                     all_passed = False
                 
@@ -377,7 +377,7 @@ class SealIntegrationTester:
     
     def print_test_summary(self, all_passed: bool):
         """Print test summary"""
-        print("📊 Test Summary")
+        print(" Test Summary")
         print("=" * 30)
         
         passed_count = sum(1 for result in self.test_results if result["passed"])
@@ -392,7 +392,7 @@ class SealIntegrationTester:
         print(f"Results: {passed_count}/{total_count} tests passed")
         
         if all_passed:
-            print("🎉 All tests passed! Seal integration is working correctly.")
+            print(" All tests passed! Seal integration is working correctly.")
             print()
             print("Next steps:")
             print("1. Deploy Seal service to production")  
@@ -400,7 +400,7 @@ class SealIntegrationTester:
             print("3. Test with real Walrus storage")
             print("4. Enable real Seal mode: use_real_seal=True")
         else:
-            print("❌ Some tests failed. Please check the errors above.")
+            print(" Some tests failed. Please check the errors above.")
             print()
             print("Troubleshooting:")
             print("1. Ensure Seal service is running: cd seal-service && npm run dev")
@@ -418,13 +418,13 @@ def check_seal_service_running():
 
 async def main():
     """Main test function"""
-    print("🔒 Seal IBE Integration Test Suite")
+    print(" Seal IBE Integration Test Suite")
     print("==================================")
     print()
     
     # Check if Seal service is running
     if not check_seal_service_running():
-        print("⚠️  Warning: Seal service is not running at http://localhost:8080")
+        print("  Warning: Seal service is not running at http://localhost:8080")
         print()
         print("To start the Seal service:")
         print("1. cd seal-service")
@@ -445,10 +445,10 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n🛑 Tests interrupted by user")
+        print("\n Tests interrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"\n💥 Test suite crashed: {e}")
+        print(f"\n Test suite crashed: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
