@@ -12,9 +12,22 @@
         "test-session"
       ],
       "metadata": {}
+    },
+    "test-user_1753956009984": {
+      "id": "test-user_1753956009984",
+      "user_id": "test-user",
+      "content": "Entities: hoang, teo, name, my, is",
+      "raw_text": "my name is hoang teo",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 17:00:09.984734",
+      "related_sessions": [
+        "test-session"
+      ],
+      "metadata": {}
     }
   },
   "metadata": {
-    "last_updated": "2025-07-29T20:41:35.706652"
+    "last_updated": "2025-07-31T17:00:09.985193"
   }
 }

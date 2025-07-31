@@ -155,10 +155,11 @@ class MemoryManager:
                 print(f"Successfully triggered Sui ingest for user {user_id}")
                 
                 # Store data on Walrus (simulated)
-                vector_cert = await self.walrus_client.store_vector_index({
-                    "user_id": user_id,
-                    "vector_data": "serialized_vector_store_data"
-                })
+                vector_cert = await self.walrus_client.store_vector_index(
+                    index_data=b"serialized_vector_store_data",
+                    user_address=user_id,
+                    metadata={"user_id": user_id, "type": "vector_store"}
+                )
                 
                 graph_cert = await self.walrus_client.store_knowledge_graph(graph_data)
                 

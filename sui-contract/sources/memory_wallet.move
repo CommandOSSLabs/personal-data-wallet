@@ -11,7 +11,7 @@ module personal_data_wallet::memory_wallet {
     const EInvalidCertificate: u64 = 2;
 
     // Struct representing a user's complete memory
-    struct MemoryObject has key, store {
+    public struct MemoryObject has key, store {
         id: UID,
         owner: address,
         vector_index_cert: String, // Pointer to HNSW index blob on Walrus
@@ -21,12 +21,12 @@ module personal_data_wallet::memory_wallet {
     }
 
     // Admin capability for managing the system
-    struct AdminCap has key {
+    public struct AdminCap has key {
         id: UID,
     }
 
     // Events
-    struct IngestionRequested has copy, drop {
+    public struct IngestionRequested has copy, drop {
         user: address,
         memory_object_id: address,
         graph_json: String,
@@ -34,7 +34,7 @@ module personal_data_wallet::memory_wallet {
         timestamp: u64,
     }
 
-    struct MemoryUpdated has copy, drop {
+    public struct MemoryUpdated has copy, drop {
         user: address,
         memory_object_id: address,
         vector_cert: String,
@@ -42,7 +42,7 @@ module personal_data_wallet::memory_wallet {
         timestamp: u64,
     }
 
-    struct MemoryObjectCreated has copy, drop {
+    public struct MemoryObjectCreated has copy, drop {
         user: address,
         memory_object_id: address,
         timestamp: u64,

@@ -28,6 +28,8 @@ class Message(BaseModel):
     content: str
     type: str  # 'user' or 'assistant'
     timestamp: datetime
+    memory_detected: Optional[bool] = None
+    memory_id: Optional[str] = None
 
 class ChatSession(BaseModel):
     id: str

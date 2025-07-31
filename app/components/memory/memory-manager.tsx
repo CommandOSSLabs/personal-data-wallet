@@ -33,6 +33,9 @@ import {
 } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useDisclosure } from '@mantine/hooks'
+import { memoryApi } from '@/app/api/memoryApi'
+import { MemoryGraph } from './memory-graph'
+import { MemoryDecryptionModal } from './memory-decryption-modal'
 
 interface Memory {
   id: string
@@ -70,6 +73,8 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
   
   // Add memory modal
   const [addModalOpened, { open: openAddModal, close: closeAddModal }] = useDisclosure(false)
+  const [decryptModalOpened, { open: openDecryptModal, close: closeDecryptModal }] = useDisclosure(false)
+  const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null)
   const [newMemoryContent, setNewMemoryContent] = useState('')
   const [newMemoryCategory, setNewMemoryCategory] = useState('general')
   const [addingMemory, setAddingMemory] = useState(false)
@@ -85,9 +90,22 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
   const loadMemories = async () => {
     setLoading(true)
     try {
-      // For now, use empty array since memory endpoints are not implemented yet
-      // TODO: Implement memory endpoints in backend
-      setMemories([])
+      // Use empty query to get all memories for the user
+      const data = await memoryApi.searchMemories({
+        query: '',
+        userAddress,
+        k: 50
+      })
+      console.log('Memory API response:', data)
+      
+      // Handle different response formats
+      const memoryList = data.results || data.memories || []
+      console.log('Processed memories:', memoryList)
+      setMemories(memoryList)
+      
+      if (memoryList.length === 0) {
+        console.log('No memories found for user:', userAddress)
+      }
     } catch (error) {
       console.error('Failed to load memories:', error)
       notifications.show({
@@ -96,6 +114,7 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
         color: 'red',
         icon: <IconX size={16} />
       })
+      setMemories([])
     } finally {
       setLoading(false)
     }
@@ -106,59 +125,27 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
 
     setAddingMemory(true)
     try {
-      // For now, simulate adding memory since backend endpoints are not implemented yet
-      // TODO: Implement memory endpoints in backend
-      const newMemory: Memory = {
-        id: `mem_${Date.now()}`,
+      const data = await memoryApi.createMemory({
         content: newMemoryContent,
-        category: newMemoryCategory,
-        timestamp: new Date().toISOString(),
-        isEncrypted: true,
-        owner: userAddress
-      }
-
-      setMemories(prev => [newMemory, ...prev])
+        userAddress: userAddress,
+        category: newMemoryCategory
+      })
+      
+      // Refresh the memories list
+      await loadMemories()
+      
       setNewMemoryContent('')
-      setNewMemoryCategory('personal')
+      setNewMemoryCategory('general')
       closeAddModal()
 
-      onMemoryAdded?.(newMemory)
-
       notifications.show({
-        title: 'Added',
-        message: 'Memory saved successfully',
+        title: 'Memory Added',
+        message: `Memory saved successfully! ID: ${data.embeddingId?.slice(0, 8)}...`,
         color: 'green',
         icon: <IconCheck size={16} />
       })
 
-      if (response.ok) {
-        const data = await response.json()
-        const newMemory: Memory = {
-          id: data.embeddingId,
-          content: newMemoryContent,
-          category: newMemoryCategory,
-          timestamp: new Date().toISOString(),
-          isEncrypted: true,
-          walrusHash: data.walrusHash,
-          owner: userAddress
-        }
-
-        setMemories(prev => [newMemory, ...prev])
-        onMemoryAdded?.(newMemory)
-        
-        setNewMemoryContent('')
-        setNewMemoryCategory('general')
-        closeAddModal()
-
-        notifications.show({
-          title: 'Success',
-          message: 'Memory saved securely',
-          color: 'green',
-          icon: <IconCheck size={16} />
-        })
-      } else {
-        throw new Error('Failed to save memory')
-      }
+      onMemoryAdded?.(data)
     } catch (error) {
       console.error('Failed to add memory:', error)
       notifications.show({
@@ -180,13 +167,13 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
 
     setSearching(true)
     try {
-      // For now, simulate search since backend endpoints are not implemented yet
-      // TODO: Implement memory search endpoints in backend
-      const filtered = memories.filter(memory =>
-        memory.content.toLowerCase().includes(searchQuery.toLowerCase()) &&
-        (selectedCategory === 'all' || memory.category === selectedCategory)
-      )
-      setSearchResults(filtered)
+      const data = await memoryApi.searchMemories({
+        query: searchQuery,
+        userAddress,
+        category: selectedCategory || undefined,
+        k: 20
+      })
+      setSearchResults(data.results || [])
     } catch (error) {
       console.error('Search failed:', error)
       notifications.show({
@@ -195,6 +182,7 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
         color: 'red',
         icon: <IconX size={16} />
       })
+      setSearchResults([])
     } finally {
       setSearching(false)
     }
@@ -202,9 +190,12 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
 
   const deleteMemory = async (memoryId: string) => {
     try {
-      // For now, simulate delete since backend endpoints are not implemented yet
-      // TODO: Implement memory delete endpoints in backend
-      setMemories(prev => prev.filter(m => m.id !== memoryId))
+      await memoryApi.deleteMemory(memoryId, userAddress)
+      
+      // Refresh the memories list
+      await loadMemories()
+      
+      // Also remove from search results if present
       setSearchResults(prev => prev.filter(m => m.id !== memoryId))
       onMemoryDeleted?.(memoryId)
 
@@ -246,7 +237,16 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
               {MEMORY_CATEGORIES.find(c => c.value === memory.category)?.label || memory.category}
             </Badge>
             {memory.isEncrypted && (
-              <Badge color="blue" variant="outline" size="xs">
+              <Badge 
+                color="blue" 
+                variant="outline" 
+                size="xs"
+                style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  setSelectedMemory(memory)
+                  openDecryptModal()
+                }}
+              >
                 <IconLock size={10} />
               </Badge>
             )}
@@ -305,6 +305,9 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
             </Tabs.Tab>
             <Tabs.Tab value="search" leftSection={<IconSearch size={16} />}>
               Search
+            </Tabs.Tab>
+            <Tabs.Tab value="graph" leftSection={<IconCategory size={16} />}>
+              Graph
             </Tabs.Tab>
           </Tabs.List>
 
@@ -392,6 +395,10 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
               )}
             </Stack>
           </Tabs.Panel>
+
+          <Tabs.Panel value="graph" pt="md">
+            <MemoryGraph memories={memories} />
+          </Tabs.Panel>
         </Tabs>
       </Stack>
 
@@ -440,6 +447,16 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
           </Group>
         </Stack>
       </Modal>
+
+      {/* Memory Decryption Modal */}
+      {selectedMemory && (
+        <MemoryDecryptionModal
+          opened={decryptModalOpened}
+          onClose={closeDecryptModal}
+          memory={selectedMemory}
+          userAddress={userAddress}
+        />
+      )}
     </>
   )
 }

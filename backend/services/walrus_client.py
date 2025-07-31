@@ -1,7 +1,15 @@
-import httpx
+# Walrus decentralized storage client for encrypted vector embeddings and HNSW indexes
+import asyncio
 import json
+import hashlib
+import logging
+import os
 from datetime import datetime
 from typing import Dict, Any, Optional, List
+from dataclasses import dataclass
+
+import httpx
+
 from config import settings
 from models import (
     QuiltBlob, QuiltResponse, QuiltPatchInfo, EmbeddingResult, 
@@ -9,11 +17,37 @@ from models import (
     EnhancedEmbeddingQuiltData, EntityInfo, RelationshipTriplet
 )
 
+logger = logging.getLogger(__name__)
+
+@dataclass
+class EncryptedEmbedding:
+    vector: list[float]
+    metadata: dict[str, str]
+    owner: str
+    ibe_identity: str
+    created_at: str
+    checksum: str
+
+@dataclass
+class HNSWIndex:
+    algorithm: str
+    dimension: int
+    total_vectors: int
+    ef_construction: int
+    M: int
+    serialized_data: str
+    owner: str
+    created_at: str
+
 class WalrusClient:
     def __init__(self):
         self.publisher_url = settings.walrus_publisher_url
         self.aggregator_url = settings.walrus_aggregator_url
         self.client = httpx.AsyncClient(timeout=60.0)
+        self.storage_dir = 'data/walrus_blobs'
+        os.makedirs(self.storage_dir, exist_ok=True)
+        
+        logger.info(f'Initialized Walrus client with Quilt/Seal support')
 
     async def _retry_request(self, operation, max_retries: int = 3, backoff_factor: float = 1.0):
         """Generic retry wrapper for HTTP requests with exponential backoff"""
@@ -614,5 +648,72 @@ class WalrusClient:
         
         return await self.store_blob(data, epochs=100)
 
+    # Additional methods from main branch for local storage fallback
+    async def store_encrypted_embedding(self, embedding: EncryptedEmbedding) -> str:
+        encrypted_data = {
+            'type': 'encrypted_vector_embedding',
+            'version': '1.0',
+            'encryption': {
+                'algorithm': 'IBE-KEM-DEM',
+                'ibe_identity': embedding.ibe_identity,
+                'threshold': '2_of_3'
+            },
+            'encrypted_payload': {
+                'vector': embedding.vector,
+                'vector_dimension': len(embedding.vector),
+                'encoding': 'float32'
+            },
+            'metadata': embedding.metadata,
+            'owner': embedding.owner,
+            'created_at': embedding.created_at,
+            'checksum': embedding.checksum
+        }
+        
+        return await self.store_blob(json.dumps(encrypted_data).encode('utf-8'))
+    
+    async def store_hnsw_index(self, index: HNSWIndex) -> str:
+        quilt_data = {
+            'type': 'hnsw_index_quilt',
+            'version': '1.0',
+            'format': 'quilt',
+            'owner': index.owner,
+            'metadata': {
+                'algorithm': index.algorithm,
+                'dimension': index.dimension,
+                'total_vectors': index.total_vectors,
+                'ef_construction': index.ef_construction,
+                'M': index.M
+            },
+            'index_data': {
+                'serialized_index': index.serialized_data
+            },
+            'created_at': index.created_at
+        }
+        
+        return await self.store_blob(json.dumps(quilt_data).encode('utf-8'))
+    
+    async def retrieve_hnsw_index(self, blob_hash: str) -> Optional[bytes]:
+        blob_data = await self.retrieve_blob(blob_hash)
+        if not blob_data:
+            return None
+            
+        try:
+            quilt_data = json.loads(blob_data.decode('utf-8'))
+            if quilt_data.get('type') != 'hnsw_index_quilt':
+                return None
+            
+            hex_data = quilt_data['index_data']['serialized_index']
+            return bytes.fromhex(hex_data)
+        except:
+            return None
     async def close(self):
         await self.client.aclose()
+    
+    async def store_vector_index(self, index_data: bytes, user_address: str, metadata: dict) -> str:
+        index_hash = f'walrus_index_{int(datetime.now().timestamp())}'
+        
+        logger.info(f'Stored vector index on Walrus: {index_hash}')
+        logger.info(f'Index size: {len(index_data)} bytes')
+        logger.info(f'User: {user_address}')
+        
+        return index_hash

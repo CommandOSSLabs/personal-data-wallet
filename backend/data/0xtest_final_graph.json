@@ -1,0 +1,742 @@
+{
+  "nodes": [
+    "with",
+    "React",
+    "years",
+    "Nodejs",
+    "an",
+    "Next",
+    "in",
+    "am",
+    "Nextjs",
+    "Node",
+    "js",
+    "experience",
+    "TypeScript",
+    "developer",
+    "expert",
+    "and"
+  ],
+  "edges": [
+    {
+      "source": "React",
+      "target": "TypeScript",
+      "label": "related_to"
+    },
+    {
+      "source": "React",
+      "target": "am",
+      "label": "related_to"
+    },
+    {
+      "source": "in",
+      "target": "TypeScript",
+      "label": "related_to"
+    },
+    {
+      "source": "in",
+      "target": "expert",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "TypeScript",
+      "label": "related_to"
+    },
+    {
+      "source": "expert",
+      "target": "developer",
+      "label": "related_to"
+    },
+    {
+      "source": "an",
+      "target": "experience",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "an",
+      "label": "related_to"
+    },
+    {
+      "source": "js",
+      "target": "Node",
+      "label": "related_to"
+    },
+    {
+      "source": "js",
+      "target": "Next",
+      "label": "related_to"
+    },
+    {
+      "source": "TypeScript",
+      "target": "React",
+      "label": "related_to"
+    },
+    {
+      "source": "developer",
+      "target": "expert",
+      "label": "related_to"
+    },
+    {
+      "source": "developer",
+      "target": "am",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "an",
+      "label": "related_to"
+    },
+    {
+      "source": "an",
+      "target": "years",
+      "label": "related_to"
+    },
+    {
+      "source": "in",
+      "target": "js",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "am",
+      "label": "related_to"
+    },
+    {
+      "source": "years",
+      "target": "Next",
+      "label": "related_to"
+    },
+    {
+      "source": "React",
+      "target": "developer",
+      "label": "related_to"
+    },
+    {
+      "source": "years",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "js",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "js",
+      "target": "experience",
+      "label": "related_to"
+    },
+    {
+      "source": "in",
+      "target": "developer",
+      "label": "related_to"
+    },
+    {
+      "source": "TypeScript",
+      "target": "in",
+      "label": "related_to"
+    },
+    {
+      "source": "in",
+      "target": "Node",
+      "label": "related_to"
+    },
+    {
+      "source": "developer",
+      "target": "Node",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "React",
+      "label": "related_to"
+    },
+    {
+      "source": "TypeScript",
+      "target": "js",
+      "label": "related_to"
+    },
+    {
+      "source": "experience",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "developer",
+      "target": "React",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "React",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "in",
+      "label": "related_to"
+    },
+    {
+      "source": "an",
+      "target": "Next",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "expert",
+      "label": "related_to"
+    },
+    {
+      "source": "in",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "experience",
+      "target": "in",
+      "label": "related_to"
+    },
+    {
+      "source": "in",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "React",
+      "target": "expert",
+      "label": "related_to"
+    },
+    {
+      "source": "in",
+      "target": "years",
+      "label": "related_to"
+    },
+    {
+      "source": "developer",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "Node",
+      "target": "an",
+      "label": "related_to"
+    },
+    {
+      "source": "experience",
+      "target": "an",
+      "label": "related_to"
+    },
+    {
+      "source": "experience",
+      "target": "TypeScript",
+      "label": "related_to"
+    },
+    {
+      "source": "TypeScript",
+      "target": "developer",
+      "label": "related_to"
+    },
+    {
+      "source": "experience",
+      "target": "am",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "an",
+      "label": "related_to"
+    },
+    {
+      "source": "an",
+      "target": "TypeScript",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "js",
+      "label": "related_to"
+    },
+    {
+      "source": "an",
+      "target": "am",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "TypeScript",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "expert",
+      "label": "related_to"
+    },
+    {
+      "source": "expert",
+      "target": "React",
+      "label": "related_to"
+    },
+    {
+      "source": "developer",
+      "target": "in",
+      "label": "related_to"
+    },
+    {
+      "source": "TypeScript",
+      "target": "Node",
+      "label": "related_to"
+    },
+    {
+      "source": "Next",
+      "target": "in",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "in",
+      "label": "related_to"
+    },
+    {
+      "source": "developer",
+      "target": "TypeScript",
+      "label": "related_to"
+    },
+    {
+      "source": "Next",
+      "target": "an",
+      "label": "related_to"
+    },
+    {
+      "source": "expert",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "js",
+      "label": "related_to"
+    },
+    {
+      "source": "expert",
+      "target": "in",
+      "label": "related_to"
+    },
+    {
+      "source": "years",
+      "target": "experience",
+      "label": "related_to"
+    },
+    {
+      "source": "TypeScript",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "developer",
+      "label": "related_to"
+    },
+    {
+      "source": "TypeScript",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "Node",
+      "label": "related_to"
+    },
+    {
+      "source": "TypeScript",
+      "target": "years",
+      "label": "related_to"
+    },
+    {
+      "source": "years",
+      "target": "an",
+      "label": "related_to"
+    },
+    {
+      "source": "Node",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "experience",
+      "target": "React",
+      "label": "related_to"
+    },
+    {
+      "source": "js",
+      "target": "an",
+      "label": "related_to"
+    },
+    {
+      "source": "in",
+      "target": "Next",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "developer",
+      "label": "related_to"
+    },
+    {
+      "source": "React",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "Node",
+      "target": "in",
+      "label": "related_to"
+    },
+    {
+      "source": "experience",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "Node",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "Node",
+      "target": "TypeScript",
+      "label": "related_to"
+    },
+    {
+      "source": "experience",
+      "target": "expert",
+      "label": "related_to"
+    },
+    {
+      "source": "React",
+      "target": "in",
+      "label": "related_to"
+    },
+    {
+      "source": "in",
+      "target": "experience",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "years",
+      "label": "related_to"
+    },
+    {
+      "source": "developer",
+      "target": "experience",
+      "label": "related_to"
+    },
+    {
+      "source": "Next",
+      "target": "TypeScript",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "developer",
+      "target": "years",
+      "label": "related_to"
+    },
+    {
+      "source": "developer",
+      "target": "an",
+      "label": "related_to"
+    },
+    {
+      "source": "Next",
+      "target": "years",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "years",
+      "label": "related_to"
+    },
+    {
+      "source": "experience",
+      "target": "js",
+      "label": "related_to"
+    },
+    {
+      "source": "TypeScript",
+      "target": "Next",
+      "label": "related_to"
+    },
+    {
+      "source": "an",
+      "target": "js",
+      "label": "related_to"
+    },
+    {
+      "source": "expert",
+      "target": "experience",
+      "label": "related_to"
+    },
+    {
+      "source": "years",
+      "target": "in",
+      "label": "related_to"
+    },
+    {
+      "source": "Next",
+      "target": "js",
+      "label": "related_to"
+    },
+    {
+      "source": "expert",
+      "target": "years",
+      "label": "related_to"
+    },
+    {
+      "source": "js",
+      "target": "in",
+      "label": "related_to"
+    },
+    {
+      "source": "expert",
+      "target": "an",
+      "label": "related_to"
+    },
+    {
+      "source": "Node",
+      "target": "developer",
+      "label": "related_to"
+    },
+    {
+      "source": "years",
+      "target": "TypeScript",
+      "label": "related_to"
+    },
+    {
+      "source": "years",
+      "target": "expert",
+      "label": "related_to"
+    },
+    {
+      "source": "years",
+      "target": "am",
+      "label": "related_to"
+    },
+    {
+      "source": "experience",
+      "target": "developer",
+      "label": "related_to"
+    },
+    {
+      "source": "TypeScript",
+      "target": "experience",
+      "label": "related_to"
+    },
+    {
+      "source": "js",
+      "target": "TypeScript",
+      "label": "related_to"
+    },
+    {
+      "source": "an",
+      "target": "developer",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "Next",
+      "label": "related_to"
+    },
+    {
+      "source": "experience",
+      "target": "Node",
+      "label": "related_to"
+    },
+    {
+      "source": "Node",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "experience",
+      "target": "Next",
+      "label": "related_to"
+    },
+    {
+      "source": "Node",
+      "target": "experience",
+      "label": "related_to"
+    },
+    {
+      "source": "an",
+      "target": "Node",
+      "label": "related_to"
+    },
+    {
+      "source": "Node",
+      "target": "years",
+      "label": "related_to"
+    },
+    {
+      "source": "React",
+      "target": "experience",
+      "label": "related_to"
+    },
+    {
+      "source": "years",
+      "target": "js",
+      "label": "related_to"
+    },
+    {
+      "source": "an",
+      "target": "React",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "Next",
+      "target": "Node",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "experience",
+      "label": "related_to"
+    },
+    {
+      "source": "React",
+      "target": "years",
+      "label": "related_to"
+    },
+    {
+      "source": "React",
+      "target": "an",
+      "label": "related_to"
+    },
+    {
+      "source": "an",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "in",
+      "target": "an",
+      "label": "related_to"
+    },
+    {
+      "source": "experience",
+      "target": "years",
+      "label": "related_to"
+    },
+    {
+      "source": "am",
+      "target": "experience",
+      "label": "related_to"
+    },
+    {
+      "source": "an",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "years",
+      "label": "related_to"
+    },
+    {
+      "source": "Node",
+      "target": "js",
+      "label": "related_to"
+    },
+    {
+      "source": "an",
+      "target": "expert",
+      "label": "related_to"
+    },
+    {
+      "source": "years",
+      "target": "developer",
+      "label": "related_to"
+    },
+    {
+      "source": "years",
+      "target": "React",
+      "label": "related_to"
+    },
+    {
+      "source": "an",
+      "target": "in",
+      "label": "related_to"
+    },
+    {
+      "source": "Next",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "Next",
+      "target": "experience",
+      "label": "related_to"
+    },
+    {
+      "source": "with",
+      "target": "experience",
+      "label": "related_to"
+    },
+    {
+      "source": "years",
+      "target": "Node",
+      "label": "related_to"
+    },
+    {
+      "source": "expert",
+      "target": "am",
+      "label": "related_to"
+    },
+    {
+      "source": "js",
+      "target": "with",
+      "label": "related_to"
+    },
+    {
+      "source": "js",
+      "target": "years",
+      "label": "related_to"
+    },
+    {
+      "source": "Node",
+      "target": "Next",
+      "label": "related_to"
+    },
+    {
+      "source": "years",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "in",
+      "target": "React",
+      "label": "related_to"
+    },
+    {
+      "source": "TypeScript",
+      "target": "an",
+      "label": "related_to"
+    }
+  ]
+}

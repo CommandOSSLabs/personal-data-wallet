@@ -1,68 +1,71 @@
 {
   "nodes": [
-    "work",
     "Google",
-    "John",
     "My",
+    "work",
+    "hoang",
+    "teo",
+    "John",
+    "and",
     "name",
+    "my",
     "is",
-    "at",
-    "and"
+    "at"
   ],
   "edges": [
     {
-      "source": "and",
+      "source": "my",
+      "target": "teo",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "John",
+      "target": "work",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "John",
+      "label": "related_to"
+    },
+    {
+      "source": "teo",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
       "target": "My",
       "label": "related_to"
     },
     {
       "source": "is",
-      "target": "and",
-      "label": "related_to"
-    },
-    {
-      "source": "My",
-      "target": "and",
+      "target": "name",
       "label": "related_to"
     },
     {
       "source": "is",
-      "target": "work",
+      "target": "Google",
       "label": "related_to"
     },
     {
-      "source": "John",
-      "target": "work",
+      "source": "teo",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "teo",
       "label": "related_to"
     },
     {
       "source": "work",
-      "target": "Google",
-      "label": "related_to"
-    },
-    {
-      "source": "is",
-      "target": "at",
-      "label": "related_to"
-    },
-    {
-      "source": "John",
-      "target": "at",
-      "label": "related_to"
-    },
-    {
-      "source": "My",
-      "target": "John",
-      "label": "related_to"
-    },
-    {
-      "source": "at",
-      "target": "Google",
-      "label": "related_to"
-    },
-    {
-      "source": "is",
-      "target": "John",
+      "target": "and",
       "label": "related_to"
     },
     {
@@ -76,83 +79,58 @@
       "label": "related_to"
     },
     {
-      "source": "work",
-      "target": "and",
-      "label": "related_to"
-    },
-    {
-      "source": "work",
-      "target": "at",
-      "label": "related_to"
-    },
-    {
-      "source": "John",
-      "target": "is",
+      "source": "is",
+      "target": "my",
       "label": "related_to"
     },
     {
       "source": "Google",
-      "target": "and",
-      "label": "related_to"
-    },
-    {
-      "source": "My",
-      "target": "at",
+      "target": "is",
       "label": "related_to"
     },
     {
       "source": "work",
+      "target": "Google",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
       "target": "John",
       "label": "related_to"
     },
     {
-      "source": "John",
-      "target": "My",
+      "source": "work",
+      "target": "name",
       "label": "related_to"
     },
     {
-      "source": "is",
+      "source": "My",
+      "target": "Google",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "My",
       "target": "name",
       "label": "related_to"
     },
     {
       "source": "name",
-      "target": "Google",
-      "label": "related_to"
-    },
-    {
-      "source": "My",
-      "target": "name",
-      "label": "related_to"
-    },
-    {
-      "source": "My",
-      "target": "is",
-      "label": "related_to"
-    },
-    {
-      "source": "Google",
       "target": "work",
       "label": "related_to"
     },
     {
-      "source": "at",
-      "target": "work",
-      "label": "related_to"
-    },
-    {
-      "source": "at",
-      "target": "and",
-      "label": "related_to"
-    },
-    {
-      "source": "Google",
-      "target": "at",
-      "label": "related_to"
-    },
-    {
-      "source": "and",
-      "target": "Google",
+      "source": "John",
+      "target": "My",
       "label": "related_to"
     },
     {
@@ -162,6 +140,81 @@
     },
     {
       "source": "is",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "work",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "Google",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "work",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "John",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "Google",
+      "label": "related_to"
+    },
+    {
+      "source": "John",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "Google",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "teo",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
       "target": "My",
       "label": "related_to"
     },
@@ -171,68 +224,78 @@
       "label": "related_to"
     },
     {
-      "source": "Google",
-      "target": "John",
-      "label": "related_to"
-    },
-    {
-      "source": "at",
-      "target": "John",
-      "label": "related_to"
-    },
-    {
-      "source": "work",
-      "target": "name",
-      "label": "related_to"
-    },
-    {
-      "source": "Google",
-      "target": "name",
-      "label": "related_to"
-    },
-    {
-      "source": "work",
-      "target": "is",
-      "label": "related_to"
-    },
-    {
-      "source": "name",
-      "target": "John",
-      "label": "related_to"
-    },
-    {
-      "source": "name",
+      "source": "and",
       "target": "work",
       "label": "related_to"
     },
     {
-      "source": "Google",
-      "target": "is",
-      "label": "related_to"
-    },
-    {
-      "source": "at",
-      "target": "is",
-      "label": "related_to"
-    },
-    {
-      "source": "work",
+      "source": "name",
       "target": "My",
       "label": "related_to"
     },
     {
-      "source": "at",
+      "source": "My",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "work",
+      "target": "at",
+      "label": "related_to"
+    },
+    {
+      "source": "Google",
+      "target": "John",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "teo",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "Google",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "John",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "Google",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
       "target": "name",
       "label": "related_to"
     },
     {
       "source": "and",
-      "target": "John",
+      "target": "My",
       "label": "related_to"
     },
     {
-      "source": "and",
+      "source": "Google",
       "target": "work",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "my",
       "label": "related_to"
     },
     {
@@ -242,42 +305,47 @@
     },
     {
       "source": "is",
-      "target": "Google",
+      "target": "John",
       "label": "related_to"
     },
     {
-      "source": "name",
+      "source": "My",
       "target": "is",
       "label": "related_to"
     },
     {
-      "source": "John",
-      "target": "Google",
+      "source": "is",
+      "target": "teo",
       "label": "related_to"
     },
     {
       "source": "Google",
-      "target": "My",
-      "label": "related_to"
-    },
-    {
-      "source": "at",
-      "target": "My",
-      "label": "related_to"
-    },
-    {
-      "source": "and",
       "target": "name",
       "label": "related_to"
     },
     {
-      "source": "and",
+      "source": "my",
       "target": "is",
       "label": "related_to"
     },
     {
-      "source": "name",
-      "target": "My",
+      "source": "is",
+      "target": "and",
+      "label": "related_to"
+    },
+    {
+      "source": "at",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "work",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "work",
+      "target": "John",
       "label": "related_to"
     },
     {
@@ -286,8 +354,33 @@
       "label": "related_to"
     },
     {
+      "source": "teo",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
       "source": "My",
+      "target": "John",
+      "label": "related_to"
+    },
+    {
+      "source": "Google",
+      "target": "My",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "work",
+      "label": "related_to"
+    },
+    {
+      "source": "John",
       "target": "Google",
+      "label": "related_to"
+    },
+    {
+      "source": "and",
+      "target": "is",
       "label": "related_to"
     }
   ]

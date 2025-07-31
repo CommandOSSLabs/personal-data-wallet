@@ -1,14 +1,16 @@
-import asyncio
-import json
+# HNSW (Hierarchical Navigable Small World) indexer for fast vector similarity search
 import logging
 import numpy as np
 import hnswlib
-from typing import Dict, List, Optional, Tuple, Any
-from datetime import datetime
 import pickle
 import os
-from dataclasses import dataclass, asdict, field
+import io
+import asyncio
+import json
 import datetime
+from dataclasses import dataclass, asdict, field
+from typing import Dict, List, Optional, Any
+from datetime import datetime
 from services.walrus_client import WalrusClient
 from services.sui_client import SuiClient
 from services.seal_encryption import SealEncryptionService
@@ -27,14 +29,14 @@ class IndexedEmbedding:
     ibe_identity: str
     timestamp: str
     
-    # Enhanced metadata following our architecture
+    # Enhanced metadata following our architecture (Quilt/Seal specific)
     entities: Dict[str, dict] = field(default_factory=dict)  # EntityInfo dicts
     relationships: List[dict] = field(default_factory=list)  # RelationshipTriplet dicts
     temporal_data: Dict[str, str] = field(default_factory=dict)
     storage_layer: str = "external_context"  # main_context or external_context
     similarity_threshold: float = 0.8
     
-    # Privacy layer additions
+    # Privacy layer additions (Seal integration)
     main_vector_encrypted: bool = True  # Whether main vector is encrypted with Seal
     encryption_policy: Dict[str, str] = field(default_factory=dict)  # Access policy info
     
@@ -42,48 +44,43 @@ class IndexedEmbedding:
         return asdict(self)
 
 class HNSWIndexerService:
-    """
-    Service that listens to Sui events and maintains HNSW index for fast metadata search.
-    Implements the indexer component from the architecture flow.
-    """
-    
     def __init__(self,
-             vector_dimension: int = 768,  # Google embedding-001 dimension
-             max_elements: int = 100000,
-             ef_construction: int = 200,
-             m: int = 16):
-    self.vector_dimension = vector_dimension
-    self.max_elements = max_elements
-    self.ef_construction = ef_construction
-    self.m = m
-    
-    # Initialize HNSW index
-    self.index = hnswlib.Index(space='cosine', dim=vector_dimension)
-    self.index.init_index(max_elements=max_elements, ef_construction=ef_construction, M=m)
-    
-    # Enhanced metadata storage (unified indexer approach)
-    self.metadata_store: Dict[int, IndexedEmbedding] = {}
-    self.embedding_id_to_index: Dict[str, int] = {}
-    self.next_index_id = 0
-    
-    # Services
-    self.sui_client = SuiClient()
-    self.walrus_client = WalrusClient()
-    self.seal_service = SealEncryptionService()  # Privacy layer
-    
-    # Configuration
-    self.index_backup_interval = getattr(settings, 'index_backup_interval', 3600)  # 1 hour
-    self.sui_event_poll_interval = getattr(settings, 'sui_event_poll_interval', 5)  # 5 seconds
-    
-    # State
-    self.is_running = False
-    self.last_processed_checkpoint = 0
-    
-    # Unified indexer settings
-    self.default_similarity_threshold = 0.8
-    self.main_context_max_items = 1000  # Items to keep in main context
-    
-    logger.info(f"Initialized Enhanced HNSW indexer with dimension {vector_dimension}")
+                 vector_dimension: int = 768,  # Google embedding-001 dimension
+                 max_elements: int = 100000,
+                 ef_construction: int = 200,
+                 m: int = 16):
+        self.vector_dimension = vector_dimension
+        self.max_elements = max_elements
+        self.ef_construction = ef_construction
+        self.m = m
+        
+        # Initialize HNSW index
+        self.index = hnswlib.Index(space='cosine', dim=vector_dimension)
+        self.index.init_index(max_elements=max_elements, ef_construction=ef_construction, M=m)
+        
+        # Enhanced metadata storage (unified indexer approach - Quilt/Seal specific)
+        self.metadata_store: Dict[int, IndexedEmbedding] = {}
+        self.embedding_id_to_index: Dict[str, int] = {}
+        self.next_index_id = 0
+        
+        # Services (Quilt/Seal integration)
+        self.sui_client = SuiClient()
+        self.walrus_client = WalrusClient()
+        self.seal_service = SealEncryptionService()  # Privacy layer
+        
+        # Configuration
+        self.index_backup_interval = getattr(settings, 'index_backup_interval', 3600)  # 1 hour
+        self.sui_event_poll_interval = getattr(settings, 'sui_event_poll_interval', 5)  # 5 seconds
+        
+        # State
+        self.is_running = False
+        self.last_processed_checkpoint = 0
+        
+        # Unified indexer settings (Quilt architecture)
+        self.default_similarity_threshold = 0.8
+        self.main_context_max_items = 1000  # Items to keep in main context
+        
+        logger.info(f"Initialized Enhanced HNSW indexer with dimension {vector_dimension}")
     
     async def start(self):
         """Start the indexer service."""
@@ -208,7 +205,7 @@ class HNSWIndexerService:
         except Exception as e:
             logger.error(f"Failed to process event: {e}")
     
-    async def add_to_index(self, 
+    async def add_embedding(self,
                           embedding_id: str,
                           owner: str,
                           walrus_hash: str,
@@ -719,65 +716,93 @@ class HNSWIndexerService:
                     k: int = 10,
                     category_filter: Optional[str] = None,
                     owner_filter: Optional[str] = None) -> List[Dict]:
-        """
-        Search the HNSW index for similar embeddings.
-        
-        Args:
-            query_vector: Query vector for similarity search
-            k: Number of results to return
-            category_filter: Optional category filter
-            owner_filter: Optional owner filter
-            
-        Returns:
-            List of search results with metadata
-        """
-        try:
-            # Normalize query vector
-            norm = np.linalg.norm(query_vector)
-            if norm > 0:
-                query_vector = query_vector / norm
-            
-            # Search HNSW index
-            labels, distances = self.index.knn_query(query_vector.reshape(1, -1), k=k*2)  # Get more for filtering
-            
-            results = []
-            for label, distance in zip(labels[0], distances[0]):
-                if label in self.metadata_store:
-                    metadata = self.metadata_store[label]
-                    
-                    # Apply filters
-                    if category_filter and metadata.category != category_filter:
-                        continue
-                    if owner_filter and metadata.owner != owner_filter:
-                        continue
-                    
-                    result = {
-                        "embedding_id": metadata.embedding_id,
-                        "owner": metadata.owner,
-                        "walrus_hash": metadata.walrus_hash,
-                        "category": metadata.category,
-                        "ibe_identity": metadata.ibe_identity,
-                        "timestamp": metadata.timestamp,
-                        "similarity_score": 1.0 - distance,  # Convert distance to similarity
-                        "index_id": label
-                    }
-                    results.append(result)
-                    
-                    if len(results) >= k:
-                        break
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Search failed: {e}")
+        if len(self.metadata_store) == 0:
+            logger.info('HNSW index is empty')
             return []
+        
+        if len(self.metadata_store) < k:
+            k = len(self.metadata_store)
+        
+        norm = np.linalg.norm(query_vector)
+        if norm > 0:
+            query_vector = query_vector / norm
+        
+        search_k = min(k * 2, len(self.metadata_store))
+        labels, distances = self.index.knn_query(query_vector.reshape(1, -1), k=search_k)
+        
+        results = []
+        for label, distance in zip(labels[0], distances[0]):
+            if label in self.metadata_store:
+                metadata = self.metadata_store[label]
+                
+                if category_filter and metadata.category != category_filter:
+                    continue
+                if owner_filter and metadata.owner != owner_filter:
+                    continue
+                
+                result = {
+                    'embedding_id': metadata.embedding_id,
+                    'owner': metadata.owner,
+                    'walrus_hash': metadata.walrus_hash,
+                    'category': metadata.category,
+                    'ibe_identity': metadata.ibe_identity,
+                    'timestamp': metadata.timestamp,
+                    'similarity_score': 1.0 - distance,
+                    'index_id': label
+                }
+                results.append(result)
+                
+                if len(results) >= k:
+                    break
+        
+        return results
     
+    def get_stats(self) -> Dict:
+        return {
+            'total_vectors': len(self.metadata_store),
+            'index_size': self.index.get_current_count() if hasattr(self.index, 'get_current_count') else len(self.metadata_store),
+            'dimension': self.vector_dimension,
+            'max_elements': self.max_elements,
+            'ef_construction': self.ef_construction,
+            'M': self.m
+        }
+    
+    async def serialize_index(self) -> bytes:
+        index_data = {
+            'hnsw_index': self.index,
+            'metadata_store': dict(self.metadata_store),
+            'embedding_id_to_index': dict(self.embedding_id_to_index),
+            'next_index_id': self.next_index_id,
+            'parameters': {
+                'vector_dimension': self.vector_dimension,
+                'max_elements': self.max_elements,
+                'ef_construction': self.ef_construction,
+                'm': self.m
+            }
+        }
+        
+        buffer = io.BytesIO()
+        pickle.dump(index_data, buffer)
+        return buffer.getvalue()
+    
+    async def load_index(self, serialized_data: bytes):
+        buffer = io.BytesIO(serialized_data)
+        index_data = pickle.load(buffer)
+        
+        self.index = index_data['hnsw_index']
+        self.metadata_store = index_data['metadata_store']
+        self.embedding_id_to_index = index_data['embedding_id_to_index']
+        self.next_index_id = index_data['next_index_id']
+        
+        logger.info(f'Loaded HNSW index with {len(self.metadata_store)} vectors')
+
+    # Enhanced Quilt/Seal specific methods preserved
     async def backup_index_to_storage(self):
         """Backup the HNSW index to Walrus storage."""
         try:
             # Serialize index and metadata
             index_data = {
-                "index_state": self.index.get_items(),
+                "index_state": self.index.get_items() if hasattr(self.index, 'get_items') else {},
                 "metadata_store": {k: v.to_dict() for k, v in self.metadata_store.items()},
                 "embedding_id_to_index": self.embedding_id_to_index,
                 "next_index_id": self.next_index_id,
@@ -792,13 +817,35 @@ class HNSWIndexerService:
             with open(backup_path, 'wb') as f:
                 pickle.dump(index_data, f)
             
-            # Upload to Walrus (simulated for now)
-            walrus_hash = await self.walrus_client.store_blob(backup_path)
-            
-            logger.info(f"Backed up index to Walrus: {walrus_hash}")
+            logger.info(f"Backed up index locally: {backup_path}")
             
         except Exception as e:
             logger.error(f"Failed to backup index: {e}")
+
+    async def load_index_from_storage(self):
+        """Load the HNSW index from storage."""
+        try:
+            backup_path = "data/hnsw_index_backup.pkl"
+            
+            if os.path.exists(backup_path):
+                with open(backup_path, 'rb') as f:
+                    index_data = pickle.load(f)
+                    
+                # Restore metadata
+                self.metadata_store = {
+                    k: IndexedEmbedding(**v) if isinstance(v, dict) else v 
+                    for k, v in index_data.get("metadata_store", {}).items()
+                }
+                self.embedding_id_to_index = index_data.get("embedding_id_to_index", {})
+                self.next_index_id = index_data.get("next_index_id", 0)
+                self.last_processed_checkpoint = index_data.get("last_processed_checkpoint", 0)
+                
+                logger.info(f"Loaded index from storage with {len(self.metadata_store)} embeddings")
+            else:
+                logger.info("No existing index backup found, starting fresh")
+                
+        except Exception as e:
+            logger.error(f"Failed to load index from storage: {e}")
 
     async def backup_to_walrus_quilt(self, user_id_filter: str = None) -> Optional[str]:
         """Backup enhanced index to Walrus using Quilt architecture"""
@@ -816,20 +863,6 @@ class HNSWIndexerService:
             if not filtered_metadata:
                 logger.warning("No metadata to backup")
                 return None
-            
-            # Serialize HNSW index
-            import tempfile
-            import os
-            
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_path = os.path.join(temp_dir, "enhanced_index")
-                
-                # Save index temporarily
-                self.index.save_index(f"{temp_path}.hnsw")
-                
-                # Read index data
-                with open(f"{temp_path}.hnsw", 'rb') as f:
-                    vector_index_data = f.read()
             
             # Extract entities and relationships from all metadata
             all_entities = {}
@@ -858,7 +891,7 @@ class HNSWIndexerService:
             
             # Create temporal metadata
             temporal_metadata = {
-                "backup_timestamp": datetime.datetime.now().isoformat(),
+                "backup_timestamp": datetime.now().isoformat(),
                 "total_embeddings": str(len(filtered_metadata)),
                 "vector_dimension": str(self.vector_dimension),
                 "last_processed_checkpoint": str(self.last_processed_checkpoint)
@@ -871,6 +904,9 @@ class HNSWIndexerService:
                 "ef_construction": str(self.ef_construction),
                 "m": str(self.m)
             }
+            
+            # Serialize HNSW index data
+            vector_index_data = await self.serialize_index()
             
             # Create memory components
             components = MemoryStorageComponents(
@@ -895,61 +931,18 @@ class HNSWIndexerService:
             logger.error(f"Failed to backup enhanced index to Walrus: {e}")
             return None
 
-    async def load_from_walrus_quilt(self, quilt_id: str, user_id: str) -> bool:
-        """Load enhanced index from Walrus Quilt"""
-        try:
-            # Retrieve memory components
-            components = await self.walrus_client.retrieve_memory_components_from_quilt(quilt_id, user_id)
-            
-            if not components:
-                logger.error(f"Failed to retrieve components from Quilt {quilt_id}")
-                return False
-            
-            # Restore HNSW index
-            if components.vector_index_data:
-                import tempfile
-                import os
-                
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    temp_path = os.path.join(temp_dir, "restored_index.hnsw")
-                    
-                    # Write index data
-                    with open(temp_path, 'wb') as f:
-                        f.write(components.vector_index_data)
-                    
-                    # Load index
-                    self.index.load_index(temp_path)
-            
-            # Restore enhanced metadata
-            restored_count = 0
-            for entity_id, entity_info in components.entity_metadata.items():
-                # Find corresponding embeddings (simplified approach)
-                # In production, you'd maintain better entity->embedding mapping
-                pass
-            
-            # Update configuration from retrieved config
-            if components.retrieval_config:
-                self.default_similarity_threshold = float(components.retrieval_config.get('similarity_threshold', 0.8))
-            
-            logger.info(f"Loaded enhanced index from Walrus Quilt: {quilt_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to load enhanced index from Walrus: {e}")
-            return False
-
     async def _check_auto_backup(self):
         """Check if auto-backup to Walrus is needed"""
         try:
             # Auto-backup every 1000 embeddings or based on time
             if (len(self.metadata_store) % 1000 == 0 and len(self.metadata_store) > 0) or \
                (hasattr(self, '_last_backup_time') and 
-                (datetime.datetime.now() - self._last_backup_time).seconds > self.index_backup_interval):
+                (datetime.now() - self._last_backup_time).seconds > self.index_backup_interval):
                 
                 logger.info("Performing auto-backup to Walrus Quilt...")
                 quilt_id = await self.backup_to_walrus_quilt()
                 if quilt_id:
-                    self._last_backup_time = datetime.datetime.now()
+                    self._last_backup_time = datetime.now()
                     logger.info(f"Auto-backup completed: {quilt_id}")
                     
         except Exception as e:
@@ -985,54 +978,13 @@ class HNSWIndexerService:
             "storage_layers": storage_layers,
             "total_entities": sum(len(m.entities) for m in self.metadata_store.values()),
             "total_relationships": sum(len(m.relationships) for m in self.metadata_store.values()),
-            "walrus_integration": True
+            "walrus_integration": True,
+            "seal_integration": True
         })
         
         return stats
-    
-    async def load_index_from_storage(self):
-        """Load the HNSW index from storage."""
-        try:
-            backup_path = "data/hnsw_index_backup.pkl"
-            
-            if os.path.exists(backup_path):
-                with open(backup_path, 'rb') as f:
-                    index_data = pickle.load(f)
-                
-                # Restore metadata
-                self.metadata_store = {
-                    k: IndexedEmbedding(**v) for k, v in index_data["metadata_store"].items()
-                }
-                self.embedding_id_to_index = index_data["embedding_id_to_index"]
-                self.next_index_id = index_data["next_index_id"]
-                self.last_processed_checkpoint = index_data.get("last_processed_checkpoint", 0)
-                
-                # Restore index items if any
-                if index_data["index_state"] is not None and len(index_data["index_state"]) > 0:
-                    vectors = []
-                    labels = []
-                    for label, metadata in self.metadata_store.items():
-                        vectors.append(metadata.metadata_vector)
-                        labels.append(label)
-                    
-                    if vectors:
-                        self.index.add_items(np.array(vectors), labels)
-                
-                logger.info(f"Loaded index with {len(self.metadata_store)} embeddings")
-            else:
-                logger.info("No existing index backup found, starting fresh")
-                
-        except Exception as e:
-            logger.error(f"Failed to load index from storage: {e}")
-    
-    def get_stats(self) -> Dict:
-        """Get indexer statistics."""
-        return {
-            "total_embeddings": len(self.metadata_store),
-            "vector_dimension": self.vector_dimension,
-            "max_elements": self.max_elements,
-            "next_index_id": self.next_index_id,
-            "last_processed_checkpoint": self.last_processed_checkpoint,
-            "categories": list(set(m.category for m in self.metadata_store.values())),
-            "is_running": self.is_running
-        }
+
+    # Fix method name from process_event reference
+    async def add_to_index(self, *args, **kwargs):
+        """Alias for add_embedding to maintain compatibility"""
+        return await self.add_embedding(*args, **kwargs)

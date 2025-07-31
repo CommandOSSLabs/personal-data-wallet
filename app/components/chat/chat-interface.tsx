@@ -69,6 +69,9 @@ export function ChatInterface() {
 
   // State for temporary user message (shown immediately, replaced by backend data)
   const [tempUserMessage, setTempUserMessage] = useState<Message | null>(null)
+  
+  // Flag to prevent clearing messages during session refresh
+  const [isRefreshingSession, setIsRefreshingSession] = useState(false)
 
   // Don't auto-create sessions - let user initiate first chat
   // This prevents unwanted session creation on page reload
@@ -99,39 +102,9 @@ export function ChatInterface() {
 
     console.log('Using session ID:', sessionId)
 
-    // Process message for memory detection and storage (non-blocking, with full error isolation)
-    const processMemoryAsync = async () => {
-      try {
-        memoryIndicator.reset()
-        memoryIndicator.startProcessing()
-
-        const memoryResult = await memoryIntegrationService.processMessage(
-          messageText,
-          userAddress!,
-          undefined // TODO: Add user signature when available
-        )
-
-        memoryIndicator.setDetected(memoryResult.detectionResult.memories.length)
-        memoryIndicator.setStored(memoryResult.storedMemories.length)
-
-        if (memoryResult.storedMemories.length > 0) {
-          console.log(`Stored ${memoryResult.storedMemories.length} memories:`, memoryResult.storedMemories)
-        }
-
-        if (memoryResult.errors.length > 0) {
-          console.warn('Memory storage errors:', memoryResult.errors)
-          memoryResult.errors.forEach(error => memoryIndicator.addError(error))
-        }
-      } catch (error) {
-        console.error('Memory processing completely failed, but chat will continue:', error)
-        memoryIndicator.addError('Memory system unavailable')
-      }
-    }
-
-    // Start memory processing in background - completely isolated from chat flow
-    processMemoryAsync().catch(error => {
-      console.error('Memory processing promise rejected:', error)
-    })
+    // Initialize memory indicator (backend now handles detection automatically)
+    memoryIndicator.reset()
+    memoryIndicator.startProcessing()
 
     // Create temporary user message for immediate display (will be replaced by backend data)
     const userMessageId = Date.now().toString()
@@ -210,8 +183,28 @@ export function ChatInterface() {
           // We don't need to manually update here as it's handled by the streaming state
         },
         // On complete
-        async (fullResponse: string, intent?: string, entities?: any) => {
-          console.log('Streaming complete:', { fullResponse, intent, entities })
+        async (fullResponse: string, intent?: string, entities?: any, memoryStored?: boolean, memoryId?: string) => {
+          console.log('Streaming complete:', { fullResponse, intent, entities, memoryStored, memoryId })
+
+          // Update memory indicator with backend results
+          if (memoryStored && memoryId) {
+            memoryIndicator.setDetected(1)
+            memoryIndicator.setStored(1)
+            console.log(`Backend automatically stored memory: ${memoryId}`)
+            
+            // Update temporary user message with memory detection data
+            if (tempUserMessage) {
+              const updatedTempMessage: Message = {
+                ...tempUserMessage,
+                memoryDetected: true,
+                memoryId: memoryId
+              }
+              setTempUserMessage(updatedTempMessage)
+            }
+          } else {
+            memoryIndicator.setDetected(0)
+            memoryIndicator.setStored(0)
+          }
 
           // Update the streaming message with the final content
           if (streamingMessage) {
@@ -226,21 +219,41 @@ export function ChatInterface() {
           // This prevents duplicate messages
 
           // Refresh the session to get the latest messages
-          await queryClient.invalidateQueries({ queryKey: ['sui-chat-sessions', userAddress] })
-
-          // Now clear the streaming state and temp user message after session is refreshed
-          setTimeout(() => {
-            setStreamingMessageId(null)
-            setStreamingMessage(null)
-            setTempUserMessage(null) // Clear temporary user message
-          }, 1000) // Increased delay to ensure session is refreshed
+          console.log('Refreshing session data to get latest messages...')
+          setIsRefreshingSession(true)
+          
+          try {
+            // Invalidate and refetch session data
+            await queryClient.invalidateQueries({ queryKey: ['sui-chat-sessions', userAddress] })
+            await queryClient.refetchQueries({ queryKey: ['sui-chat-sessions', userAddress] })
+            
+            console.log('Session data refreshed successfully')
+            
+            // Wait a moment to ensure the UI has updated with fresh data
+            setTimeout(() => {
+              console.log('Clearing temporary message state')
+              setStreamingMessageId(null)
+              setStreamingMessage(null)
+              setTempUserMessage(null)
+              setIsRefreshingSession(false)
+            }, 100)
+          } catch (error) {
+            console.error('Failed to refresh session data:', error)
+            setIsRefreshingSession(false)
+            
+            // Keep temporary messages longer if refresh failed
+            setTimeout(() => {
+              console.log('Clearing temporary message state after error delay')
+              setStreamingMessageId(null)
+              setStreamingMessage(null)
+              setTempUserMessage(null)
+            }, 3000)
+          }
         },
         // On error
         async (error: string) => {
           console.error('Streaming error:', error)
-          setStreamingMessageId(null)
-          setStreamingMessage(null)
-          setTempUserMessage(null)
+          setIsRefreshingSession(false)
           
           const errorMessage: Message = {
             id: assistantMessageId,
@@ -249,32 +262,53 @@ export function ChatInterface() {
             timestamp: new Date().toISOString(),
           }
           
+          // Replace streaming message with error message
+          setStreamingMessage(errorMessage)
+          
           try {
             await addMessageToSession(sessionId, errorMessage.content, 'assistant')
-          } catch (error) {
-            console.error('Failed to save error message:', error)
+            // Refresh session after saving error message
+            await queryClient.invalidateQueries({ queryKey: ['sui-chat-sessions', userAddress] })
+          } catch (saveError) {
+            console.error('Failed to save error message:', saveError)
           }
+          
+          // Clear state after a delay to show the error message
+          setTimeout(() => {
+            setStreamingMessageId(null)
+            setStreamingMessage(null)
+            setTempUserMessage(null)
+          }, 5000)
         }
       )
 
     } catch (error) {
       console.error('Failed to start streaming:', error)
-      setStreamingMessageId(null)
-      setStreamingMessage(null)
-      setTempUserMessage(null)
+      setIsRefreshingSession(false)
       
       const errorMessage: Message = {
         id: assistantMessageId,
-        content: 'Sorry, there was an error processing your message. Please try again.',
+        content: 'Sorry, there was an error starting the conversation. Please try again.',
         type: 'assistant',
         timestamp: new Date().toISOString(),
       }
 
+      // Show error message
+      setStreamingMessage(errorMessage)
+
       try {
         await addMessageToSession(sessionId, errorMessage.content, 'assistant')
-      } catch (error) {
-        console.error('Failed to save error message:', error)
+        await queryClient.invalidateQueries({ queryKey: ['sui-chat-sessions', userAddress] })
+      } catch (saveError) {
+        console.error('Failed to save error message:', saveError)
       }
+      
+      // Clear state after showing error
+      setTimeout(() => {
+        setStreamingMessageId(null)
+        setStreamingMessage(null)
+        setTempUserMessage(null)
+      }, 5000)
     }
   }
 
@@ -319,14 +353,17 @@ export function ChatInterface() {
         />
       </AppShell.Navbar>
 
-      <AppShell.Header>
+      <AppShell.Header style={{ 
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        borderBottom: '1px solid rgba(255,255,255,0.1)'
+      }}>
         <Group h="100%" px="md" justify="space-between">
           <Stack gap={0}>
-            <Title order={3}>
-              {currentSession?.title || 'Personal Data Wallet'}
+            <Title order={3} style={{ color: 'white', fontWeight: 600 }}>
+              {currentSession?.title || '🧠 Personal Data Wallet'}
             </Title>
-            <Text size="sm" c="dimmed">
-              Your decentralized memory layer
+            <Text size="sm" style={{ color: 'rgba(255,255,255,0.8)' }}>
+              ✨ Your decentralized memory layer powered by SUI & Walrus
             </Text>
           </Stack>
 
@@ -336,8 +373,12 @@ export function ChatInterface() {
               onModelChange={setSelectedModel}
             />
 
-            <Badge variant="light" color="blue">
-              {memories.length} memories
+            <Badge 
+              variant="gradient" 
+              gradient={{ from: 'cyan', to: 'indigo' }}
+              style={{ color: 'white' }}
+            >
+              🗃️ {memories.length} memories
             </Badge>
 
             <MemoryIndicator
@@ -350,26 +391,35 @@ export function ChatInterface() {
 
             <Group gap="xs">
               <ActionIcon
-                variant="subtle"
-                color="blue"
+                variant="gradient"
+                gradient={{ from: 'cyan', to: 'indigo' }}
                 onClick={openMemoryModal}
                 title="Memory Manager"
+                style={{ color: 'white' }}
               >
                 <IconBrain size={16} />
               </ActionIcon>
 
-              <Group gap="xs">
-                <IconUser size={16} />
-                <Text size="xs" ff="monospace">
+              <Group gap="xs" style={{ 
+                background: 'rgba(255,255,255,0.1)', 
+                padding: '4px 8px', 
+                borderRadius: '12px',
+                backdropFilter: 'blur(10px)'
+              }}>
+                <IconUser size={14} style={{ color: 'white' }} />
+                <Text size="xs" ff="monospace" style={{ color: 'white' }}>
                   {userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : 'User'}
                 </Text>
               </Group>
 
               <ActionIcon
                 variant="subtle"
-                color="gray"
                 onClick={logout}
                 title="Logout"
+                style={{ 
+                  color: 'rgba(255,255,255,0.8)',
+                  '&:hover': { backgroundColor: 'rgba(255,255,255,0.1)' }
+                }}
               >
                 <IconLogout size={16} />
               </ActionIcon>
@@ -378,13 +428,56 @@ export function ChatInterface() {
         </Group>
       </AppShell.Header>
 
-      <AppShell.Main style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 70px)' }}>
+      <AppShell.Main style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        height: 'calc(100vh - 70px)',
+        background: 'linear-gradient(145deg, #f0f4f8 0%, #e2e8f0 100%)'
+      }}>
         <ChatWindow
-          messages={[
-            ...(currentSession?.messages || []),
-            ...(tempUserMessage ? [tempUserMessage] : []),
-            ...(streamingMessage ? [streamingMessage] : [])
-          ].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())}
+          messages={(() => {
+            const sessionMessages = currentSession?.messages || []
+            const allMessages = [...sessionMessages]
+            
+            console.log('Rendering messages:', {
+              sessionMessages: sessionMessages.length,
+              tempUserMessage: !!tempUserMessage,
+              streamingMessage: !!streamingMessage,
+              isRefreshingSession
+            })
+            
+            // During session refresh, keep showing temporary messages to prevent flicker
+            if (isRefreshingSession || tempUserMessage) {
+              const isDuplicate = sessionMessages.some(msg => 
+                msg.type === 'user' && 
+                msg.content === tempUserMessage?.content &&
+                Math.abs(new Date(msg.timestamp).getTime() - new Date(tempUserMessage?.timestamp || '').getTime()) < 15000 // Within 15 seconds
+              )
+              if (!isDuplicate && tempUserMessage) {
+                allMessages.push(tempUserMessage)
+              } else if (isDuplicate && tempUserMessage) {
+                // If there's a duplicate from the backend, update the tempUserMessage with backend memory data
+                const backendMessage = sessionMessages.find(msg => 
+                  msg.type === 'user' && 
+                  msg.content === tempUserMessage?.content &&
+                  Math.abs(new Date(msg.timestamp).getTime() - new Date(tempUserMessage?.timestamp || '').getTime()) < 15000
+                )
+                if (backendMessage && backendMessage.memoryDetected !== undefined) {
+                  // Use the backend message instead of temp message since it has memory data
+                  console.log('Using backend message with memory data:', backendMessage.memoryDetected, backendMessage.memoryId)
+                }
+              }
+            }
+            
+            // Always show streaming message if active
+            if (streamingMessage && (isStreaming || isRefreshingSession)) {
+              allMessages.push(streamingMessage)
+            }
+            
+            const sortedMessages = allMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+            console.log('Final message count:', sortedMessages.length)
+            return sortedMessages
+          })()}
           isLoading={isStreaming}
           streamingMessageId={streamingMessageId}
           streamingContent={currentResponse}

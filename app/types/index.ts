@@ -3,6 +3,8 @@ export interface Message {
   content: string
   type: 'user' | 'assistant'
   timestamp: string // ISO string for consistency with backend
+  memoryDetected?: boolean
+  memoryId?: string | null
 }
 
 export interface ChatSession {

@@ -12,7 +12,7 @@ module personal_data_wallet::chat_sessions {
     const EInvalidMessage: u64 = 3;
 
     // Struct representing a chat message
-    struct ChatMessage has store, copy, drop {
+    public struct ChatMessage has store, copy, drop {
         id: String,
         content: String,
         message_type: String, // "user" or "assistant"
@@ -20,7 +20,7 @@ module personal_data_wallet::chat_sessions {
     }
 
     // Struct representing a chat session
-    struct ChatSession has key, store {
+    public struct ChatSession has key, store {
         id: UID,
         owner: address,
         title: String,
@@ -31,26 +31,26 @@ module personal_data_wallet::chat_sessions {
     }
 
     // Registry to track all chat sessions for efficient querying
-    struct ChatSessionRegistry has key {
+    public struct ChatSessionRegistry has key {
         id: UID,
         total_sessions: u64,
         active_sessions: u64,
     }
 
     // Admin capability
-    struct AdminCap has key {
+    public struct AdminCap has key {
         id: UID,
     }
 
     // Events
-    struct SessionCreated has copy, drop {
+    public struct SessionCreated has copy, drop {
         session_id: address,
         owner: address,
         title: String,
         timestamp: u64,
     }
 
-    struct MessageAdded has copy, drop {
+    public struct MessageAdded has copy, drop {
         session_id: address,
         message_id: String,
         owner: address,
@@ -58,14 +58,14 @@ module personal_data_wallet::chat_sessions {
         timestamp: u64,
     }
 
-    struct SessionUpdated has copy, drop {
+    public struct SessionUpdated has copy, drop {
         session_id: address,
         owner: address,
         new_title: String,
         timestamp: u64,
     }
 
-    struct SessionDeleted has copy, drop {
+    public struct SessionDeleted has copy, drop {
         session_id: address,
         owner: address,
         timestamp: u64,

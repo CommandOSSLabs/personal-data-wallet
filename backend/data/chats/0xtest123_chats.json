@@ -1,0 +1,32 @@
+{
+  "sessions": {
+    "memory-test-session": {
+      "id": "memory-test-session",
+      "user_id": "0xtest123",
+      "title": "I am a React developer and I love TypeScript",
+      "messages": [
+        {
+          "id": "memory-test-session_1753968561170",
+          "content": "I am a React developer and I love TypeScript",
+          "type": "user",
+          "timestamp": "2025-07-31 20:29:21.170354",
+          "memory_detected": true,
+          "memory_id": "sui_embedding_1753968559787203"
+        },
+        {
+          "id": "memory-test-session_1753968561170",
+          "content": "That's great!  React and TypeScript are a powerful combination for building robust and maintainable web applications.  To give you a more helpful response, I need some clarification on what you'd like to discuss.  Are you interested in:\n\n* **Specific TypeScript features in React?**  (e.g., type aliases, interfaces, generics, conditional types, mapped types) and how they improve code quality and developer experience.\n\n* **Advanced React concepts with TypeScript?** (e.g., using TypeScript with React Context, Hooks, Redux, or other state management libraries).\n\n* **Best practices and patterns for using TypeScript in React projects?** (e.g., structuring your code, type safety strategies, testing approaches).\n\n* **Tools and resources for React and TypeScript development?** (e.g., linters, formatters, IDE extensions, helpful libraries).\n\n* **Troubleshooting common issues when combining React and TypeScript?** (e.g., type errors, compiler configuration, debugging techniques).\n\n* **Learning resources for improving your skills in either React or TypeScript?** (e.g., online courses, books, documentation).\n\n* **Specific project ideas or challenges you are facing?**  (I can help brainstorm solutions or offer guidance.)\n\nPlease tell me more about what you'd like to explore so I can provide the most relevant and helpful information.\n",
+          "type": "assistant",
+          "timestamp": "2025-07-31 20:29:21.170719",
+          "memory_detected": null,
+          "memory_id": null
+        }
+      ],
+      "created_at": "2025-07-31T20:29:21.170346",
+      "updated_at": "2025-07-31T20:29:21.170735"
+    }
+  },
+  "metadata": {
+    "last_updated": "2025-07-31T20:29:21.170739"
+  }
+}

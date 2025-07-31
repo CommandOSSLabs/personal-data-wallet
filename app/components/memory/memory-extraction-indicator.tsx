@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { ActionIcon, Tooltip, Modal, Stack, Text, Button, Group, Badge } from '@mantine/core'
 import { IconBrain, IconPlus, IconCheck } from '@tabler/icons-react'
 import { useDisclosure } from '@mantine/hooks'
-import { memoryDetectionService, type DetectionResult } from '@/app/services/memoryDetection'
+import { type DetectionResult } from '@/app/services/memoryIntegration'
 import { memoryApi } from '@/app/api'
 
 interface MemoryExtractionIndicatorProps {
@@ -23,16 +23,22 @@ export function MemoryExtractionIndicator({
   const [isStoring, setIsStoring] = useState(false)
   const [storedMemories, setStoredMemories] = useState<string[]>([])
 
-  // Analyze message when component mounts or message changes
+  // Memory detection is now handled by backend automatically
+  // This component shows a simplified indicator
   useEffect(() => {
-    const result = memoryDetectionService.analyzeMessage(message)
-    setDetectionResult(result)
+    // Backend handles detection automatically during chat streaming
+    // This component now shows a basic indicator for manual memory addition
+    setDetectionResult({
+      shouldStore: false,
+      memories: [],
+      reasoning: 'Memory detection moved to backend'
+    })
   }, [message])
 
   const handleIconClick = () => {
-    if (detectionResult?.shouldStore) {
-      open()
-    }
+    // Always allow opening for manual memory addition
+    // since backend handles automatic detection
+    open()
   }
 
   const handleStoreMemories = async () => {

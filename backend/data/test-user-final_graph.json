@@ -1,0 +1,111 @@
+{
+  "nodes": [
+    "name",
+    "teo",
+    "is",
+    "hoang",
+    "my"
+  ],
+  "edges": [
+    {
+      "source": "my",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "teo",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "teo",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "teo",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "teo",
+      "target": "my",
+      "label": "related_to"
+    },
+    {
+      "source": "teo",
+      "target": "is",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "name",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "hoang",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "teo",
+      "target": "hoang",
+      "label": "related_to"
+    },
+    {
+      "source": "teo",
+      "target": "name",
+      "label": "related_to"
+    },
+    {
+      "source": "my",
+      "target": "teo",
+      "label": "related_to"
+    },
+    {
+      "source": "is",
+      "target": "name",
+      "label": "related_to"
+    }
+  ]
+}
