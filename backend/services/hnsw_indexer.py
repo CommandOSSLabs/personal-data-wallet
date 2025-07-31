@@ -11,17 +11,18 @@ from dataclasses import dataclass, asdict, field
 import datetime
 from services.walrus_client import WalrusClient
 from services.sui_client import SuiClient
+from services.seal_encryption import SealEncryptionService
 from config import settings
 
 logger = logging.getLogger(__name__)
 
 @dataclass
 class IndexedEmbedding:
-    """Represents an indexed embedding with enhanced metadata."""
+    """Represents an indexed embedding with enhanced metadata and privacy features."""
     embedding_id: str
     owner: str
-    walrus_hash: str
-    metadata_vector: List[float]
+    walrus_hash: str  # Encrypted main vector blob hash
+    metadata_vector: List[float]  # Public searchable metadata vector
     category: str
     ibe_identity: str
     timestamp: str
@@ -32,6 +33,10 @@ class IndexedEmbedding:
     temporal_data: Dict[str, str] = field(default_factory=dict)
     storage_layer: str = "external_context"  # main_context or external_context
     similarity_threshold: float = 0.8
+    
+    # Privacy layer additions
+    main_vector_encrypted: bool = True  # Whether main vector is encrypted with Seal
+    encryption_policy: Dict[str, str] = field(default_factory=dict)  # Access policy info
     
     def to_dict(self):
         return asdict(self)
@@ -64,6 +69,7 @@ class HNSWIndexerService:
     # Services
     self.sui_client = SuiClient()
     self.walrus_client = WalrusClient()
+    self.seal_service = SealEncryptionService()  # Privacy layer
     
     # Configuration
     self.index_backup_interval = getattr(settings, 'index_backup_interval', 3600)  # 1 hour
@@ -110,6 +116,7 @@ class HNSWIndexerService:
         # Close clients
         await self.sui_client.close()
         await self.walrus_client.close()
+        await self.seal_service.close()
     
     async def event_listener_loop(self):
         """Main loop that listens for Sui events."""
@@ -244,6 +251,202 @@ class HNSWIndexerService:
             logger.error(f"Failed to add embedding to index: {e}")
             raise
 
+    async def add_enhanced_embedding_with_privacy(self,
+                                                embedding_id: str,
+                                                owner: str,
+                                                main_vector: List[float],  # Full vector to be encrypted
+                                                metadata_vector: List[float],  # Searchable metadata vector
+                                                category: str,
+                                                timestamp: str,
+                                                entities: Dict[str, dict] = None,
+                                                relationships: List[dict] = None,
+                                                temporal_data: Dict[str, str] = None,
+                                                storage_layer: str = "external_context",
+                                                additional_policies: List[str] = None) -> int:
+        """
+        Add embedding with privacy-preserving two-layer approach:
+        - Metadata vector: Public, searchable in HNSW index
+        - Main vector: Encrypted with Seal IBE, stored on Walrus
+        """
+        try:
+            # Check if already indexed
+            if embedding_id in self.embedding_id_to_index:
+                logger.warning(f"Embedding {embedding_id} already indexed")
+                return self.embedding_id_to_index[embedding_id]
+            
+            # Step 1: Create access policy for Seal encryption
+            policy = self.seal_service.generate_access_policy(
+                user_address=owner,
+                category=category,
+                additional_policies=additional_policies
+            )
+            
+            # Step 2: Encrypt main vector with Seal IBE
+            main_vector_bytes = json.dumps({
+                "main_vector": main_vector,
+                "embedding_id": embedding_id,
+                "owner": owner,
+                "category": category,
+                "entities": entities or {},
+                "relationships": relationships or [],
+                "temporal_data": temporal_data or {},
+                "timestamp": timestamp
+            }).encode('utf-8')
+            
+            encryption_result = await self.seal_service.encrypt_data(
+                data=main_vector_bytes,
+                policy=policy,
+                object_id=embedding_id
+            )
+            
+            # Step 3: Store encrypted main vector on Walrus
+            walrus_hash = await self.walrus_client.store_blob(
+                data=encryption_result["encrypted_data"].encode('utf-8'),
+                epochs=200 if storage_layer == "external_context" else 50,
+                deletable=False  # Important data, not deletable
+            )
+            
+            if not walrus_hash:
+                raise Exception("Failed to store encrypted vector on Walrus")
+            
+            # Step 4: Add metadata vector to HNSW index (public, searchable)
+            metadata_array = np.array(metadata_vector, dtype=np.float32)
+            
+            # Normalize for cosine similarity
+            norm = np.linalg.norm(metadata_array)
+            if norm > 0:
+                metadata_array = metadata_array / norm
+            
+            index_id = self.next_index_id
+            self.index.add_items(metadata_array.reshape(1, -1), [index_id])
+            
+            # Step 5: Store enhanced metadata with privacy info
+            embedding_metadata = IndexedEmbedding(
+                embedding_id=embedding_id,
+                owner=owner,
+                walrus_hash=walrus_hash,  # Points to encrypted main vector
+                metadata_vector=metadata_vector,  # Public searchable vector
+                category=category,
+                ibe_identity=encryption_result["ibe_identity"],
+                timestamp=timestamp,
+                entities=entities or {},
+                relationships=relationships or [],
+                temporal_data=temporal_data or {},
+                storage_layer=storage_layer,
+                similarity_threshold=self.default_similarity_threshold,
+                main_vector_encrypted=True,
+                encryption_policy={
+                    "policy_hash": policy["policy_hash"],
+                    "access_rules": ",".join(policy["access_rules"]),
+                    "category": category
+                }
+            )
+            
+            self.metadata_store[index_id] = embedding_metadata
+            self.embedding_id_to_index[embedding_id] = index_id
+            self.next_index_id += 1
+            
+            logger.info(f"Added privacy-preserving embedding {embedding_id} to unified index with ID {index_id}")
+            logger.debug(f"Main vector encrypted with IBE identity: {encryption_result['ibe_identity']}")
+            logger.debug(f"Metadata vector ({len(metadata_vector)} dims) stored in HNSW index")
+            
+            # Auto-backup to Walrus if needed
+            await self._check_auto_backup()
+            
+            return index_id
+            
+        except Exception as e:
+            logger.error(f"Failed to add privacy-preserving embedding to index: {e}")
+            raise
+
+    async def retrieve_decrypted_main_vector(self, 
+                                           embedding_id: str,
+                                           user_address: str,
+                                           user_signature: str) -> Optional[Dict]:
+        """
+        Retrieve and decrypt the main vector for a given embedding.
+        This is used when full vector data is needed (not just metadata search).
+        """
+        try:
+            # Get embedding metadata from index
+            if embedding_id not in self.embedding_id_to_index:
+                logger.warning(f"Embedding {embedding_id} not found in index")
+                return None
+            
+            index_id = self.embedding_id_to_index[embedding_id]
+            metadata = self.metadata_store[index_id]
+            
+            # Check if user has access (basic ownership check)
+            if metadata.owner.lower() != user_address.lower():
+                logger.warning(f"Access denied: {user_address} cannot access {embedding_id} owned by {metadata.owner}")
+                return None
+            
+            # For encrypted vectors, we need to decrypt via Seal
+            if metadata.main_vector_encrypted:
+                # Step 1: Create access PTB (simplified for development)
+                ptb = {
+                    "transaction_type": "access_request",
+                    "embedding_id": embedding_id,
+                    "user_address": user_address,
+                    "timestamp": datetime.datetime.now().isoformat()
+                }
+                
+                # Step 2: Request decryption key from Seal servers
+                key_response = await self.seal_service.request_decryption_key(
+                    ibe_identity=metadata.ibe_identity,
+                    sui_ptb=ptb,
+                    user_signature=user_signature
+                )
+                
+                # Step 3: Retrieve encrypted data from Walrus
+                encrypted_data = await self.walrus_client.retrieve_blob(metadata.walrus_hash)
+                if not encrypted_data:
+                    logger.error(f"Failed to retrieve encrypted data from Walrus: {metadata.walrus_hash}")
+                    return None
+                
+                # Step 4: Decrypt the main vector
+                decrypted_bytes = await self.seal_service.decrypt_data(
+                    encrypted_data=encrypted_data.decode('utf-8'),
+                    decryption_key=key_response["decryption_key"],
+                    ibe_identity=metadata.ibe_identity
+                )
+                
+                # Step 5: Parse decrypted content
+                decrypted_content = json.loads(decrypted_bytes.decode('utf-8'))
+                
+                logger.info(f"Successfully decrypted main vector for {embedding_id}")
+                return {
+                    "embedding_id": embedding_id,
+                    "main_vector": decrypted_content["main_vector"],
+                    "metadata_vector": metadata.metadata_vector,
+                    "owner": metadata.owner,
+                    "category": metadata.category,
+                    "entities": decrypted_content.get("entities", {}),
+                    "relationships": decrypted_content.get("relationships", []),
+                    "temporal_data": decrypted_content.get("temporal_data", {}),
+                    "timestamp": metadata.timestamp,
+                    "decrypted": True
+                }
+            else:
+                # For non-encrypted vectors (legacy or development)
+                logger.warning(f"Embedding {embedding_id} is not encrypted")
+                return {
+                    "embedding_id": embedding_id,
+                    "main_vector": metadata.metadata_vector,  # Fallback to metadata vector
+                    "metadata_vector": metadata.metadata_vector,
+                    "owner": metadata.owner,
+                    "category": metadata.category,
+                    "entities": metadata.entities,
+                    "relationships": metadata.relationships,
+                    "temporal_data": metadata.temporal_data,
+                    "timestamp": metadata.timestamp,
+                    "decrypted": False
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to retrieve decrypted main vector for {embedding_id}: {e}")
+            return None
+
     async def add_enhanced_embedding(self,
                                    embedding_id: str,
                                    owner: str,
@@ -256,7 +459,10 @@ class HNSWIndexerService:
                                    relationships: List[dict] = None,
                                    temporal_data: Dict[str, str] = None,
                                    storage_layer: str = "external_context") -> int:
-        """Add embedding with enhanced metadata to unified index"""
+        """
+        Legacy method for backward compatibility.
+        For new implementations, use add_enhanced_embedding_with_privacy instead.
+        """
         try:
             # Check if already indexed
             if embedding_id in self.embedding_id_to_index:
@@ -270,7 +476,7 @@ class HNSWIndexerService:
             index_id = self.next_index_id
             self.index.add_items(vector_array.reshape(1, -1), [index_id])
             
-            # Store enhanced metadata
+            # Store enhanced metadata (legacy format)
             embedding_metadata = IndexedEmbedding(
                 embedding_id=embedding_id,
                 owner=owner,
@@ -283,14 +489,16 @@ class HNSWIndexerService:
                 relationships=relationships or [],
                 temporal_data=temporal_data or {},
                 storage_layer=storage_layer,
-                similarity_threshold=self.default_similarity_threshold
+                similarity_threshold=self.default_similarity_threshold,
+                main_vector_encrypted=False,  # Legacy method, no encryption
+                encryption_policy={}
             )
             
             self.metadata_store[index_id] = embedding_metadata
             self.embedding_id_to_index[embedding_id] = index_id
             self.next_index_id += 1
             
-            logger.debug(f"Added enhanced embedding {embedding_id} to unified index with ID {index_id}")
+            logger.debug(f"Added enhanced embedding {embedding_id} to unified index with ID {index_id} (legacy mode)")
             
             # Auto-backup to Walrus if needed
             await self._check_auto_backup()
@@ -351,10 +559,14 @@ class HNSWIndexerService:
                     "similarity_score": similarity_score,
                     "index_id": label,
                     "storage_layer": metadata.storage_layer,
-                    # Enhanced metadata
+                    # Enhanced metadata (public - entities/relationships in metadata only)
                     "entities": metadata.entities,
                     "relationships": metadata.relationships,
-                    "temporal_data": metadata.temporal_data
+                    "temporal_data": metadata.temporal_data,
+                    # Privacy information
+                    "main_vector_encrypted": metadata.main_vector_encrypted,
+                    "requires_decryption": metadata.main_vector_encrypted,
+                    "encryption_policy": metadata.encryption_policy if hasattr(metadata, 'encryption_policy') else {}
                 }
                 results.append(result)
                 
