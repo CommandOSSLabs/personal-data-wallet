@@ -13,16 +13,22 @@ class SealEncryptionService:
     """
     Service for integrating with Seal encryption for secure vector storage.
     Implements IBE (Identity-Based Encryption) with access control policies.
+    Now connects to real Seal TypeScript service instead of simulation.
     """
     
     def __init__(self):
-        self.seal_servers = getattr(settings, 'seal_servers', [
-            "https://seal-server-1.example.com",
-            "https://seal-server-2.example.com", 
-            "https://seal-server-3.example.com"
-        ])
-        self.threshold = getattr(settings, 'seal_threshold', 2)  # t-out-of-n threshold
-        self.client = httpx.AsyncClient(timeout=30.0)
+        # Real Seal service configuration
+        self.seal_service_url = getattr(settings, 'seal_service_url', 'http://localhost:8080')
+        self.use_real_seal = getattr(settings, 'use_real_seal', False)
+        self.threshold = getattr(settings, 'seal_threshold', 1)  # 1-out-of-2 for testnet
+        self.client = httpx.AsyncClient(timeout=60.0)
+        
+        # Legacy settings for backward compatibility
+        self.seal_servers = getattr(settings, 'seal_servers', [])
+        
+        logger.info(f"Initialized Seal service: {'REAL' if self.use_real_seal else 'SIMULATION'} mode")
+        if self.use_real_seal:
+            logger.info(f"Seal service URL: {self.seal_service_url}")
     
     def generate_access_policy(self, 
                              user_address: str, 
@@ -101,19 +107,27 @@ class SealEncryptionService:
             # Create IBE identity
             ibe_identity = self.create_ibe_identity(policy, object_id)
             
-            # For now, simulate Seal encryption
-            # In production, this would call actual Seal servers
-            encrypted_data = await self._simulate_seal_encryption(data, ibe_identity)
+            if self.use_real_seal:
+                # Use real Seal encryption via TypeScript service
+                encrypted_data = await self._real_seal_encryption(data, ibe_identity, policy)
+                algorithm = "Seal_IBE"
+                status = "production"
+            else:
+                # Use simulation for development/testing
+                encrypted_data = await self._simulate_seal_encryption(data, ibe_identity)
+                algorithm = "IBE_Simulated"
+                status = "simulated"
             
             return {
                 "encrypted_data": encrypted_data,
                 "ibe_identity": ibe_identity,
                 "policy": policy,
                 "encryption_metadata": {
-                    "algorithm": "IBE",
-                    "servers_used": len(self.seal_servers),
+                    "algorithm": algorithm,
+                    "servers_used": self.threshold + 1,  # Threshold + 1 servers
                     "threshold": self.threshold,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now().isoformat(),
+                    "status": status
                 }
             }
             
@@ -121,15 +135,54 @@ class SealEncryptionService:
             logger.error(f"Failed to encrypt data: {e}")
             raise
     
+    async def _real_seal_encryption(self, data: bytes, ibe_identity: str, policy: Dict) -> str:
+        """
+        Encrypt data using real Seal IBE via TypeScript service.
+        """
+        try:
+            # Prepare request for Seal service
+            request_data = {
+                "data": data.hex(),  # Convert to hex for JSON transport
+                "identity": ibe_identity,
+                "policy": policy
+            }
+            
+            # Call TypeScript Seal service
+            response = await self.client.post(
+                f"{self.seal_service_url}/encrypt",
+                json=request_data,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("success"):
+                    logger.info(f"Seal encryption successful for identity: {ibe_identity}")
+                    return result["encrypted_data"]
+                else:
+                    raise Exception(f"Seal service error: {result.get('error', 'Unknown error')}")
+            else:
+                raise Exception(f"Seal service HTTP error: {response.status_code} - {response.text}")
+                
+        except httpx.TimeoutException:
+            logger.error("Seal service timeout")
+            raise Exception("Seal encryption service timeout")
+        except httpx.ConnectError:
+            logger.error("Cannot connect to Seal service")
+            raise Exception("Cannot connect to Seal encryption service. Make sure it's running.")
+        except Exception as e:
+            logger.error(f"Real Seal encryption failed: {e}")
+            raise
+    
     async def _simulate_seal_encryption(self, data: bytes, ibe_identity: str) -> str:
         """
         Simulate Seal encryption for development/testing.
-        In production, this would interact with actual Seal servers.
         """
         # Simple simulation: base64 encode with identity hash
         identity_hash = hashlib.sha256(ibe_identity.encode()).hexdigest()[:16]
         combined = identity_hash.encode() + data
         encrypted = base64.b64encode(combined).decode()
+        logger.debug(f"Simulated encryption for identity: {ibe_identity}")
         return encrypted
     
     async def request_decryption_key(self, 
@@ -148,6 +201,22 @@ class SealEncryptionService:
             Dictionary containing decryption key and metadata
         """
         try:
+            if self.use_real_seal:
+                # Use real Seal key request via TypeScript service
+                return await self._real_key_request(ibe_identity, sui_ptb, user_signature)
+            else:
+                # Use simulation for development/testing
+                return await self._simulate_key_request(ibe_identity, sui_ptb, user_signature)
+                
+        except Exception as e:
+            logger.error(f"Failed to request decryption key: {e}")
+            raise
+    
+    async def _real_key_request(self, ibe_identity: str, sui_ptb: Dict, user_signature: str) -> Dict:
+        """
+        Request decryption key from real Seal service.
+        """
+        try:
             # Prepare request for Seal servers
             request_data = {
                 "ibe_identity": ibe_identity,
@@ -156,34 +225,55 @@ class SealEncryptionService:
                 "timestamp": datetime.now().isoformat()
             }
             
-            # For now, simulate key retrieval
-            # In production, this would contact actual Seal servers
-            decryption_key = await self._simulate_key_retrieval(request_data)
+            # Call TypeScript Seal service
+            response = await self.client.post(
+                f"{self.seal_service_url}/request-key",
+                json=request_data,
+                headers={"Content-Type": "application/json"}
+            )
             
-            return {
-                "decryption_key": decryption_key,
-                "key_metadata": {
-                    "ibe_identity": ibe_identity,
-                    "servers_contacted": len(self.seal_servers),
-                    "threshold_met": True,
-                    "timestamp": datetime.now().isoformat()
-                }
-            }
-            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("success"):
+                    logger.info(f"Seal key request successful for identity: {ibe_identity}")
+                    return {
+                        "decryption_key": result["decryption_key"],
+                        "key_metadata": result["metadata"]
+                    }
+                else:
+                    raise Exception(f"Seal service error: {result.get('error', 'Unknown error')}")
+            elif response.status_code == 403:
+                raise Exception("Access denied: invalid access policy or signature")
+            else:
+                raise Exception(f"Seal service HTTP error: {response.status_code} - {response.text}")
+                
+        except httpx.TimeoutException:
+            logger.error("Seal service timeout during key request")
+            raise Exception("Seal key request service timeout")
+        except httpx.ConnectError:
+            logger.error("Cannot connect to Seal service for key request")
+            raise Exception("Cannot connect to Seal encryption service for key request")
         except Exception as e:
-            logger.error(f"Failed to request decryption key: {e}")
+            logger.error(f"Real Seal key request failed: {e}")
             raise
     
-    async def _simulate_key_retrieval(self, request_data: Dict) -> str:
+    async def _simulate_key_request(self, ibe_identity: str, sui_ptb: Dict, user_signature: str) -> Dict:
         """
-        Simulate key retrieval from Seal servers.
-        In production, this would contact actual Seal servers.
+        Simulate key request for development/testing.
         """
         # Simple simulation: generate deterministic key from identity
-        key_material = hashlib.sha256(
-            request_data["ibe_identity"].encode()
-        ).hexdigest()
-        return key_material
+        key_material = hashlib.sha256(ibe_identity.encode()).hexdigest()
+        
+        return {
+            "decryption_key": key_material,
+            "key_metadata": {
+                "ibe_identity": ibe_identity,
+                "servers_contacted": 2,
+                "threshold_met": True,
+                "timestamp": datetime.now().isoformat(),
+                "status": "simulated"
+            }
+        }
     
     async def decrypt_data(self, 
                           encrypted_data: str,
@@ -201,16 +291,55 @@ class SealEncryptionService:
             Decrypted raw data
         """
         try:
-            # For now, simulate decryption
-            # In production, this would use actual IBE decryption
-            decrypted_data = await self._simulate_seal_decryption(
-                encrypted_data, decryption_key, ibe_identity
-            )
-            
-            return decrypted_data
-            
+            if self.use_real_seal:
+                # Use real Seal decryption via TypeScript service
+                return await self._real_seal_decryption(encrypted_data, decryption_key, ibe_identity)
+            else:
+                # Use simulation for development/testing
+                return await self._simulate_seal_decryption(encrypted_data, decryption_key, ibe_identity)
+                
         except Exception as e:
             logger.error(f"Failed to decrypt data: {e}")
+            raise
+    
+    async def _real_seal_decryption(self, encrypted_data: str, decryption_key: str, ibe_identity: str) -> bytes:
+        """
+        Decrypt data using real Seal service.
+        """
+        try:
+            # Prepare request for Seal service
+            request_data = {
+                "encrypted_data": encrypted_data,
+                "decryption_key": decryption_key,
+                "identity": ibe_identity
+            }
+            
+            # Call TypeScript Seal service
+            response = await self.client.post(
+                f"{self.seal_service_url}/decrypt",
+                json=request_data,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("success"):
+                    logger.info(f"Seal decryption successful for identity: {ibe_identity}")
+                    # Convert hex back to bytes
+                    return bytes.fromhex(result["decrypted_data"])
+                else:
+                    raise Exception(f"Seal service error: {result.get('error', 'Unknown error')}")
+            else:
+                raise Exception(f"Seal service HTTP error: {response.status_code} - {response.text}")
+                
+        except httpx.TimeoutException:
+            logger.error("Seal service timeout during decryption")
+            raise Exception("Seal decryption service timeout")
+        except httpx.ConnectError:
+            logger.error("Cannot connect to Seal service for decryption")
+            raise Exception("Cannot connect to Seal encryption service for decryption")
+        except Exception as e:
+            logger.error(f"Real Seal decryption failed: {e}")
             raise
     
     async def _simulate_seal_decryption(self, 
@@ -228,6 +357,7 @@ class SealEncryptionService:
             # Remove the identity hash prefix
             if combined.startswith(identity_hash.encode()):
                 original_data = combined[len(identity_hash.encode()):]
+                logger.debug(f"Simulated decryption for identity: {ibe_identity}")
                 return original_data
             else:
                 raise ValueError("Invalid encrypted data or identity")
@@ -236,6 +366,43 @@ class SealEncryptionService:
             logger.error(f"Decryption simulation failed: {e}")
             raise
     
+    async def health_check(self) -> Dict:
+        """
+        Check health of Seal service.
+        """
+        try:
+            if self.use_real_seal:
+                # Check real Seal service
+                response = await self.client.get(f"{self.seal_service_url}/health")
+                if response.status_code == 200:
+                    result = response.json()
+                    return {
+                        "status": result.get("status", "unknown"),
+                        "service": "real_seal",
+                        "url": self.seal_service_url,
+                        "info": result
+                    }
+                else:
+                    return {
+                        "status": "unhealthy",
+                        "service": "real_seal",
+                        "error": f"HTTP {response.status_code}"
+                    }
+            else:
+                # Simulation is always healthy
+                return {
+                    "status": "healthy",
+                    "service": "simulated_seal",
+                    "note": "Using simulation mode"
+                }
+                
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "service": "real_seal" if self.use_real_seal else "simulated_seal",
+                "error": str(e)
+            }
+    
     async def close(self):
         """Close the HTTP client."""
         await self.client.aclose()
@@ -243,8 +410,9 @@ class SealEncryptionService:
     def get_service_info(self) -> Dict:
         """Get information about the Seal service configuration."""
         return {
-            "seal_servers": len(self.seal_servers),
+            "seal_service_url": self.seal_service_url,
+            "use_real_seal": self.use_real_seal,
             "threshold": self.threshold,
-            "encryption_algorithm": "IBE",
-            "status": "simulated"  # Change to "production" when using real Seal
+            "encryption_algorithm": "Seal_IBE" if self.use_real_seal else "IBE_Simulated",
+            "status": "production" if self.use_real_seal else "simulated"
         }

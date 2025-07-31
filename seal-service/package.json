@@ -1,0 +1,42 @@
+{
+  "name": "seal-encryption-service",
+  "version": "1.0.0",
+  "description": "Seal IBE encryption service for Personal Data Wallet",
+  "main": "dist/seal-server.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/seal-server.js",
+    "dev": "tsx watch src/seal-server.ts",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@mysten/seal": "^0.4.20",
+    "@mysten/sui": "^1.37.1",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3",
+    "tsx": "^4.6.2",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.8"
+  },
+  "keywords": [
+    "seal",
+    "encryption",
+    "ibe",
+    "sui",
+    "walrus",
+    "privacy"
+  ],
+  "author": "Personal Data Wallet Team",
+  "license": "MIT"
+}
