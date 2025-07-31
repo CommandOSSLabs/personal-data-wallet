@@ -455,6 +455,17 @@ export function ChatInterface() {
               )
               if (!isDuplicate && tempUserMessage) {
                 allMessages.push(tempUserMessage)
+              } else if (isDuplicate && tempUserMessage) {
+                // If there's a duplicate from the backend, update the tempUserMessage with backend memory data
+                const backendMessage = sessionMessages.find(msg => 
+                  msg.type === 'user' && 
+                  msg.content === tempUserMessage?.content &&
+                  Math.abs(new Date(msg.timestamp).getTime() - new Date(tempUserMessage?.timestamp || '').getTime()) < 15000
+                )
+                if (backendMessage && backendMessage.memoryDetected !== undefined) {
+                  // Use the backend message instead of temp message since it has memory data
+                  console.log('Using backend message with memory data:', backendMessage.memoryDetected, backendMessage.memoryId)
+                }
               }
             }
             

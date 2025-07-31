@@ -101,7 +101,8 @@ class ChatStorage:
         sessions.sort(key=lambda x: x.updated_at, reverse=True)
         return sessions
 
-    def add_message(self, user_id: str, session_id: str, content: str, message_type: str) -> bool:
+    def add_message(self, user_id: str, session_id: str, content: str, message_type: str, 
+                   memory_detected: Optional[bool] = None, memory_id: Optional[str] = None) -> bool:
         """Add a message to a chat session"""
         user_data = self._load_user_chats(user_id)
         
@@ -125,7 +126,9 @@ class ChatStorage:
             id=message_id,
             content=content,
             type=message_type,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
+            memory_detected=memory_detected,
+            memory_id=memory_id
         )
         
         # Add to session

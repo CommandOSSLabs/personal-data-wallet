@@ -285,9 +285,87 @@
         "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753947850079"
       ],
       "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753955738400": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753955738400",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: name, hoangteo, my, is",
+      "raw_text": "my name is hoangteo",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 16:55:38.400716",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753955723387"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753958856157": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753958856157",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: my, is, name, honaag",
+      "raw_text": "my name is honaag",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 17:47:36.157707",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753958850178"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753969843216": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753969843216",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: with, Im, React, senior, expertise, js, TypeScript, developer, Next, in, Nextjs, and",
+      "raw_text": "I'm a senior React developer with expertise in TypeScript and Next.js",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 20:50:43.216205",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753958850178"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753969856008": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753969856008",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: with, Im, React, senior, expertise, js, TypeScript, developer, Next, in, Nextjs, and",
+      "raw_text": "I'm a senior React developer with expertise in TypeScript and Next.js",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 20:50:56.008569",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753958850178"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753970099388": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753970099388",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: name, haong, is, my",
+      "raw_text": "my name is haong",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 20:54:59.388136",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753970002470"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753971582563": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753971582563",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: my, teo, hoang, name, is",
+      "raw_text": "my name is hoang teo",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 21:19:42.563728",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753971564809"
+      ],
+      "metadata": {}
     }
   },
   "metadata": {
-    "last_updated": "2025-07-31T15:19:31.938445"
+    "last_updated": "2025-07-31T21:19:42.563992"
   }
 }

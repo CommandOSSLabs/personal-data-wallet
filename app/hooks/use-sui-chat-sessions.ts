@@ -61,7 +61,9 @@ export function useSuiChatSessions(userAddress: string | null) {
       id: msg.id,
       content: msg.content,
       type: msg.type,
-      timestamp: msg.timestamp // Keep as string
+      timestamp: msg.timestamp, // Keep as string
+      memoryDetected: msg.memory_detected, // Convert snake_case to camelCase
+      memoryId: msg.memory_id // Convert snake_case to camelCase
     })),
     createdAt: new Date(suiSession.created_at),
     updatedAt: new Date(suiSession.updated_at)

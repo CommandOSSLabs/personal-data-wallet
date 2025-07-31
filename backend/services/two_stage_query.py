@@ -39,9 +39,40 @@ class TwoStageQueryService:
         result = await self.storage_service.store_memory(text, category, user_address)
         return result.embedding_id if result else None
         
-    async def search_memories(self, query: str, user_id: str, k: int = 10) -> list:
-        results = await self.storage_service.search_memories(query, k, user_id)
-        return [result.__dict__ for result in results]
+    async def search_memories(self, user_address: str, query_text: str, k: int = 10):
+        """Search memories using the vector storage service"""
+        try:
+            results = await self.storage_service.search_memories(query_text, k, user_address)
+            return ContextResult(
+                memories=results if results else [],
+                context_text="",  # Will be populated if needed
+                total_memories=len(results) if results else 0
+            )
+        except Exception as e:
+            logger.error(f"Error searching memories: {e}")
+            return ContextResult(memories=[], context_text="", total_memories=0)
+
+    async def get_memory_stats(self, user_address: str) -> dict:
+        """Get memory statistics for a user"""
+        try:
+            # Try to get stats from the storage service
+            # For now, we'll check if there are any stored memories
+            results = await self.storage_service.search_memories("", 100, user_address)
+            
+            categories = set()
+            if results:
+                for result in results:
+                    if hasattr(result, 'category'):
+                        categories.add(result.category)
+            
+            return {
+                "total_memories": len(results) if results else 0,
+                "categories": list(categories),
+                "last_updated": "2024-01-01T00:00:00Z"  # Placeholder
+            }
+        except Exception as e:
+            logger.error(f"Error getting memory stats: {e}")
+            return {"total_memories": 0, "categories": [], "last_updated": None}
     
     async def stage1_metadata_search(self,
                                    query_text: str,

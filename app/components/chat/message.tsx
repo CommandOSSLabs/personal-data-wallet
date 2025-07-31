@@ -77,13 +77,19 @@ export function MessageComponent({ message, isTyping = false, isStreaming = fals
                   <Text size="sm" style={{ whiteSpace: 'pre-wrap', flex: 1 }}>
                     {message.content}
                   </Text>
-                  {userAddress && message.memoryDetected && (
+                  {userAddress && (message.memoryDetected || message.memoryId) && (
                     <MemoryIndicatorIcon
-                      memoryDetected={message.memoryDetected}
+                      memoryDetected={!!message.memoryDetected}
                       memoryId={message.memoryId}
                       onClick={() => setMemoryModalOpened(true)}
                       size={18}
                     />
+                  )}
+                  {/* Debug: Show memory status */}
+                  {process.env.NODE_ENV === 'development' && (
+                    <Text size="xs" c="dimmed">
+                      🧠: {message.memoryDetected ? '✓' : '✗'} | ID: {message.memoryId || 'none'}
+                    </Text>
                   )}
                 </Group>
               </Stack>

@@ -1,0 +1,20 @@
+{
+  "memories": {
+    "0xtest123_1753968561170": {
+      "id": "0xtest123_1753968561170",
+      "user_id": "0xtest123",
+      "content": "Entities: React, TypeScript, developer, am, love, and",
+      "raw_text": "I am a React developer and I love TypeScript",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 20:29:21.170043",
+      "related_sessions": [
+        "memory-test-session"
+      ],
+      "metadata": {}
+    }
+  },
+  "metadata": {
+    "last_updated": "2025-07-31T20:29:21.170150"
+  }
+}

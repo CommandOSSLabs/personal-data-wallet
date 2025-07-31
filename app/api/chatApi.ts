@@ -17,6 +17,8 @@ export interface ChatMessage {
   content: string
   type: 'user' | 'assistant'
   timestamp: string
+  memory_detected?: boolean
+  memory_id?: string
 }
 
 export interface CreateSessionRequest {

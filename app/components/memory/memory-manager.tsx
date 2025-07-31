@@ -34,6 +34,8 @@ import {
 import { notifications } from '@mantine/notifications'
 import { useDisclosure } from '@mantine/hooks'
 import { memoryApi } from '@/app/api/memoryApi'
+import { MemoryGraph } from './memory-graph'
+import { MemoryDecryptionModal } from './memory-decryption-modal'
 
 interface Memory {
   id: string
@@ -71,6 +73,8 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
   
   // Add memory modal
   const [addModalOpened, { open: openAddModal, close: closeAddModal }] = useDisclosure(false)
+  const [decryptModalOpened, { open: openDecryptModal, close: closeDecryptModal }] = useDisclosure(false)
+  const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null)
   const [newMemoryContent, setNewMemoryContent] = useState('')
   const [newMemoryCategory, setNewMemoryCategory] = useState('general')
   const [addingMemory, setAddingMemory] = useState(false)
@@ -92,7 +96,16 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
         userAddress,
         k: 50
       })
-      setMemories(data.results || [])
+      console.log('Memory API response:', data)
+      
+      // Handle different response formats
+      const memoryList = data.results || data.memories || []
+      console.log('Processed memories:', memoryList)
+      setMemories(memoryList)
+      
+      if (memoryList.length === 0) {
+        console.log('No memories found for user:', userAddress)
+      }
     } catch (error) {
       console.error('Failed to load memories:', error)
       notifications.show({
@@ -224,7 +237,16 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
               {MEMORY_CATEGORIES.find(c => c.value === memory.category)?.label || memory.category}
             </Badge>
             {memory.isEncrypted && (
-              <Badge color="blue" variant="outline" size="xs">
+              <Badge 
+                color="blue" 
+                variant="outline" 
+                size="xs"
+                style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  setSelectedMemory(memory)
+                  openDecryptModal()
+                }}
+              >
                 <IconLock size={10} />
               </Badge>
             )}
@@ -283,6 +305,9 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
             </Tabs.Tab>
             <Tabs.Tab value="search" leftSection={<IconSearch size={16} />}>
               Search
+            </Tabs.Tab>
+            <Tabs.Tab value="graph" leftSection={<IconCategory size={16} />}>
+              Graph
             </Tabs.Tab>
           </Tabs.List>
 
@@ -370,6 +395,10 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
               )}
             </Stack>
           </Tabs.Panel>
+
+          <Tabs.Panel value="graph" pt="md">
+            <MemoryGraph memories={memories} />
+          </Tabs.Panel>
         </Tabs>
       </Stack>
 
@@ -418,6 +447,16 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
           </Group>
         </Stack>
       </Modal>
+
+      {/* Memory Decryption Modal */}
+      {selectedMemory && (
+        <MemoryDecryptionModal
+          opened={decryptModalOpened}
+          onClose={closeDecryptModal}
+          memory={selectedMemory}
+          userAddress={userAddress}
+        />
+      )}
     </>
   )
 }
