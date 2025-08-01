@@ -215,6 +215,106 @@ class MemoryIntegrationService {
       recommendations: ['Memory detection moved to backend - no manual analysis needed']
     }
   }
+
+  /**
+   * Fetch all memories for a user and auto-decrypt them
+   */
+  async fetchUserMemories(userAddress: string): Promise<{
+    memories: any[]
+    total: number
+  }> {
+    try {
+      // Use the search endpoint with empty query to get all memories
+      const response = await memoryApi.searchMemories({
+        query: '',
+        userAddress,
+        k: 100 // Get a reasonable number of memories
+      })
+      
+      const memories = response.results || [];
+      
+      // Auto-decrypt memories in background
+      this.autoDecryptMemories(memories);
+      
+      return {
+        memories: memories,
+        total: memories.length || 0
+      }
+    } catch (error) {
+      console.error('Failed to fetch user memories:', error)
+      return {
+        memories: [],
+        total: 0
+      }
+    }
+  }
+  
+  /**
+   * Automatically decrypt all memories in background
+   */
+  async autoDecryptMemories(memories: any[]) {
+    try {
+      console.log(`Auto-decrypting ${memories.length} memories in background...`);
+      
+      // Process memories that have walrus hashes and are encrypted
+      const toDecrypt = memories.filter(m => m.isEncrypted && m.walrusHash);
+      
+      if (toDecrypt.length === 0) {
+        console.log('No memories to decrypt');
+        return;
+      }
+      
+      // Import here to avoid circular dependencies
+      const { memoryDecryptionCache } = await import('@/app/services/memoryDecryptionCache');
+      
+      // Process in batches to avoid overwhelming the API
+      const batchSize = 5;
+      
+      for (let i = 0; i < toDecrypt.length; i += batchSize) {
+        const batch = toDecrypt.slice(i, i + batchSize);
+        
+        // Don't await - let this run in background
+        Promise.all(batch.map(async memory => {
+          if (memory.walrusHash) {
+            try {
+              // Use the caching service to get and store content
+              const content = await memoryDecryptionCache.getDecryptedContent(memory.walrusHash);
+              if (content) {
+                memoryDecryptionCache.markMemoryDecrypted(memory.id);
+                console.log(`Auto-decrypted memory ${memory.id.slice(0, 8)}...`);
+              }
+            } catch (err) {
+              console.error(`Failed to auto-decrypt memory ${memory.id}:`, err);
+            }
+          }
+        })).catch(err => {
+          console.error('Batch decryption error:', err);
+        });
+      }
+    } catch (error) {
+      console.error('Auto-decryption failed:', error);
+    }
+  }
+
+  /**
+   * Clear all memories for a user and clear decryption cache
+   */
+  async clearUserMemories(userAddress: string): Promise<boolean> {
+    try {
+      // This should be replaced with actual API call when available
+      console.log('Clearing memories for user:', userAddress);
+      
+      // Also clear the decryption cache
+      const { memoryDecryptionCache } = await import('@/app/services/memoryDecryptionCache');
+      memoryDecryptionCache.clearCache();
+      
+      // For now, just return success
+      return true;
+    } catch (error) {
+      console.error('Failed to clear user memories:', error);
+      return false;
+    }
+  }
 }
 
 export const memoryIntegrationService = new MemoryIntegrationService()

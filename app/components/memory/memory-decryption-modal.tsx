@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Modal, Stack, Button, Text, Alert, Loader, TextInput, Group, Card } from '@mantine/core'
 import { IconLock, IconLockOpen, IconEye, IconKey } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
+import { memoryDecryptionCache } from '@/app/services/memoryDecryptionCache'
 
 interface MemoryDecryptionModalProps {
   opened: boolean
@@ -28,16 +29,27 @@ export function MemoryDecryptionModal({
   const [decryptedContent, setDecryptedContent] = useState<string | null>(null)
   const [passphrase, setPassphrase] = useState('')
 
-  const handleDecrypt = async () => {
-    setDecrypting(true)
-    try {
-      // Simulate decryption process (replace with actual Seal/IBE decryption)
-      await new Promise(resolve => setTimeout(resolve, 2000))
+  // Check cache when memory changes
+  useEffect(() => {
+    if (memory && memory.walrusHash && !decryptedContent) {
+      // Check if already decrypted in cache
+      const checkCache = async () => {
+        const cachedContent = await memoryDecryptionCache.getDecryptedContent(memory.walrusHash!);
+        if (cachedContent) {
+          // If we have it cached, auto-decrypt
+          setDecryptedContent(formatDecryptedContent(cachedContent));
+          memoryDecryptionCache.markMemoryDecrypted(memory.id);
+        }
+      };
       
-      // For demo purposes, show enhanced content
-      const enhancedContent = `🔓 **Decrypted Memory Content:**
+      checkCache();
+    }
+  }, [memory]);
+  
+  const formatDecryptedContent = (fullContent: string) => {
+    return `🔓 **Decrypted Memory Content:**
 
-${memory.content}
+${fullContent}
 
 **Technical Details:**
 - Stored on Walrus: ${memory.walrusHash || 'hash_example_123'}
@@ -46,11 +58,27 @@ ${memory.content}
 - Owner: ${userAddress}
 
 **Full Context:**
-This memory was automatically detected and stored with advanced encryption. The content is now fully accessible and can be used for enhanced AI conversations.
-
-**Related Concepts:**
-Based on the content analysis, this relates to your interests in technology, development, and personal preferences.`
-
+This memory was automatically detected and stored with advanced encryption. The content is now fully accessible and can be used for enhanced AI conversations.`;
+  };
+  
+  const handleDecrypt = async () => {
+    setDecrypting(true)
+    try {
+      let fullContent = memory.content;
+      
+      // If we have a walrus hash, try to fetch the full content from cache first
+      if (memory.walrusHash) {
+        // Use the cache service
+        const content = await memoryDecryptionCache.getDecryptedContent(memory.walrusHash);
+        if (content) {
+          fullContent = content;
+          // Mark this memory as decrypted in the cache
+          memoryDecryptionCache.markMemoryDecrypted(memory.id);
+        }
+      }
+      
+      // Create enhanced content with the full text
+      const enhancedContent = formatDecryptedContent(fullContent);
       setDecryptedContent(enhancedContent)
       
       notifications.show({

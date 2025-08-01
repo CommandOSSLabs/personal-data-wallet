@@ -363,9 +363,152 @@
         "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753971564809"
       ],
       "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753977151079": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753977151079",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: hoang, is, my, name",
+      "raw_text": "my name is hoang",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 22:52:31.079309",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753977143636"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753979325995": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753979325995",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: please, good, Im, math, help, with, me, not",
+      "raw_text": "please help me. I'm not good with math",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 23:28:45.995760",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753979302219"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753979339889": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753979339889",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: hoang, name, my, is",
+      "raw_text": "my name is hoang",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-07-31 23:28:59.889144",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753979302219"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753980359553": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753980359553",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: number, phone, my, is",
+      "raw_text": "my phone number is 03213213",
+      "type": "fact",
+      "category": "contacts",
+      "created_at": "2025-07-31 23:45:59.553920",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753979302219"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753981502363": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753981502363",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: my, name, hoang, is",
+      "raw_text": "my name is hoang",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-08-01 00:05:02.363616",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753981491202"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753981584712": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753981584712",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: my, number, phone, is",
+      "raw_text": "my phone number is 4231312",
+      "type": "fact",
+      "category": "contacts",
+      "created_at": "2025-08-01 00:06:24.712966",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753981491202"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753982693510": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753982693510",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: is, name, hoangteo, my",
+      "raw_text": "my name is hoangteo",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-08-01 00:24:53.510828",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1753982682686"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1754018582015": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1754018582015",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: name, my, is, hoang",
+      "raw_text": "my name is hoang",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-08-01 10:23:02.015399",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1754018566991"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1754019282011": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1754019282011",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: haong, name, is, my",
+      "raw_text": "my name is haong",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-08-01 10:34:42.011562",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1754019272660"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1754019332306": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1754019332306",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: with, you, can, go, tommorow",
+      "raw_text": "can i go with you tommorow,",
+      "type": "fact",
+      "category": "general",
+      "created_at": "2025-08-01 10:35:32.306455",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1754019272660"
+      ],
+      "metadata": {}
+    },
+    "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1754020191706": {
+      "id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1754020191706",
+      "user_id": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+      "content": "Entities: my, name, is, hoang",
+      "raw_text": "my name is hoang",
+      "type": "fact",
+      "category": "personal",
+      "created_at": "2025-08-01 10:49:51.707001",
+      "related_sessions": [
+        "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1754020179416"
+      ],
+      "metadata": {}
     }
   },
   "metadata": {
-    "last_updated": "2025-07-31T21:19:42.563992"
+    "last_updated": "2025-08-01T10:49:51.708084"
   }
 }

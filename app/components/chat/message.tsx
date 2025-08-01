@@ -6,6 +6,7 @@ import { MarkdownRenderer } from './markdown-renderer'
 import { MemoryExtractionIndicator } from '@/app/components/memory/memory-extraction-indicator'
 import { MemoryIndicatorIcon } from '@/app/components/memory/memory-indicator-icon'
 import { MemoryReviewModal } from '@/app/components/memory/memory-review-modal'
+import { RelevantMemories } from './relevant-memories'
 import {
   Group,
   Avatar,
@@ -94,25 +95,35 @@ export function MessageComponent({ message, isTyping = false, isStreaming = fals
                 </Group>
               </Stack>
             ) : (
-              <Box style={{ position: 'relative' }}>
-                <MarkdownRenderer
-                  content={message.content}
-                  className="prose prose-sm max-w-none"
-                />
-                {isStreaming && (
-                  <Text
-                    component="span"
-                    size="sm"
-                    c="dimmed"
-                    style={{
-                      animation: 'pulse 1s infinite',
-                      display: 'inline'
-                    }}
-                  >
-                    ▋
-                  </Text>
+              <Stack gap="xs">
+                <Box style={{ position: 'relative' }}>
+                  <MarkdownRenderer
+                    content={message.content}
+                    className="prose prose-sm max-w-none"
+                  />
+                  {isStreaming && (
+                    <Text
+                      component="span"
+                      size="sm"
+                      c="dimmed"
+                      style={{
+                        animation: 'pulse 1s infinite',
+                        display: 'inline'
+                      }}
+                    >
+                      ▋
+                    </Text>
+                  )}
+                </Box>
+                
+                {/* Show relevant memories below assistant messages when not streaming */}
+                {!isUser && !isStreaming && userAddress && (
+                  <RelevantMemories
+                    message={message.content}
+                    userAddress={userAddress || ''}
+                  />
                 )}
-              </Box>
+              </Stack>
             )}
           </Box>
         )}

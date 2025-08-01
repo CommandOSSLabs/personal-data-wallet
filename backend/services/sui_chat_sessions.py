@@ -40,23 +40,44 @@ class SuiChatSessionsService:
             Dictionary containing session information
         """
         try:
-            # Generate session ID
-            session_id = f"{user_address}_{int(datetime.now().timestamp() * 1000)}"
+            # Create session on Sui blockchain
+            result = await self.sui_client.create_chat_session(
+                user_address=user_address,
+                title=title
+            )
             
-            # For now, simulate Sui transaction
-            # In production, this would call the actual Sui smart contract
-            session_data = {
-                "id": session_id,
-                "owner": user_address,
-                "title": title,
-                "messages": [],
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
-                "message_count": 0,
-                "sui_object_id": f"0x{uuid.uuid4().hex}"  # Simulated object ID
-            }
+            if not result.get("success", False):
+                logger.error(f"Failed to create chat session on Sui: {result.get('error', 'unknown error')}")
+                # Fall back to simulated storage
+                logger.info("Falling back to simulated storage")
+                session_id = result.get("session_id") or f"{user_address}_{int(datetime.now().timestamp() * 1000)}"
+                session_data = {
+                    "id": session_id,
+                    "owner": user_address,
+                    "title": title,
+                    "messages": [],
+                    "created_at": datetime.now().isoformat(),
+                    "updated_at": datetime.now().isoformat(),
+                    "message_count": 0,
+                    "sui_object_id": None,  # No Sui object ID for simulated sessions
+                    "storage_type": "simulated"
+                }
+            else:
+                # Use the session data from Sui blockchain
+                session_id = result["session_id"]
+                session_data = {
+                    "id": session_id,
+                    "owner": user_address,
+                    "title": title,
+                    "messages": [],
+                    "created_at": datetime.fromtimestamp(result.get("created_at", datetime.now().timestamp())).isoformat(),
+                    "updated_at": datetime.now().isoformat(),
+                    "message_count": 0,
+                    "sui_object_id": result.get("transaction_digest"),
+                    "storage_type": "sui_blockchain"
+                }
             
-            # Store in simulated storage
+            # Always store in local cache for quick access
             self.simulated_sessions[session_id] = session_data
             
             logger.info(f"Created chat session: {session_id}")
@@ -77,18 +98,111 @@ class SuiChatSessionsService:
             List of session dictionaries
         """
         try:
-            # For now, filter simulated sessions
-            # In production, this would query Sui for user's session objects
-            user_sessions = []
-            for session_id, session_data in self.simulated_sessions.items():
-                if session_data["owner"] == user_address:
-                    user_sessions.append(session_data)
+            # Try to get sessions from Sui blockchain first
+            blockchain_sessions = await self.sui_client.get_user_sessions(user_address)
             
-            # Sort by updated_at descending
-            user_sessions.sort(key=lambda x: x["updated_at"], reverse=True)
-            
-            logger.debug(f"Found {len(user_sessions)} sessions for user {user_address}")
-            return user_sessions
+            if blockchain_sessions:
+                logger.info(f"Retrieved {len(blockchain_sessions)} sessions from Sui blockchain for user {user_address}")
+                
+                # Convert blockchain sessions to our format
+                user_sessions = []
+                for session in blockchain_sessions:
+                    session_id = session.get("session_id")
+                    
+                    # Check if we have this session in our cache
+                    if session_id in self.simulated_sessions:
+                        # Use cached session with messages
+                        cached_session = self.simulated_sessions[session_id]
+                        
+                        # Update with latest blockchain data
+                        cached_session["message_count"] = session.get("message_count", cached_session["message_count"])
+                        cached_session["storage_type"] = "sui_blockchain"
+                        
+                        user_sessions.append(cached_session)
+                    else:
+                        # Create new session object from blockchain data
+                        timestamp = session.get("created_at", int(datetime.now().timestamp()))
+                        created_at = datetime.fromtimestamp(timestamp).isoformat() if isinstance(timestamp, int) else timestamp
+                        
+                        new_session = {
+                            "id": session_id,
+                            "owner": user_address,
+                            "title": session.get("title", "Chat Session"),
+                            "messages": [],  # Messages will be loaded on demand
+                            "created_at": created_at,
+                            "updated_at": created_at,
+                            "message_count": session.get("message_count", 0),
+                            "sui_object_id": session_id,
+                            "storage_type": "sui_blockchain"
+                        }
+                        
+                        self.simulated_sessions[session_id] = new_session
+                        user_sessions.append(new_session)
+                
+                # Sort by updated_at descending
+                user_sessions.sort(key=lambda x: x["updated_at"], reverse=True)
+                return user_sessions
+            else:
+                # Fall back to local sessions
+                logger.info(f"No blockchain sessions found, checking local cache for user {user_address}")
+                user_sessions = []
+                for session_id, session_data in self.simulated_sessions.items():
+                    if session_data["owner"] == user_address:
+                        user_sessions.append(session_data)
+                
+                # If no cached sessions, try to recover from file storage
+                if not user_sessions:
+                    logger.warning(f"No local cache sessions found, trying to recover from file storage for user {user_address}")
+                    try:
+                        # Import inside function to avoid circular imports
+                        from services.chat_storage import ChatStorage
+                        chat_storage = ChatStorage()
+                        stored_sessions = chat_storage.get_user_sessions(user_address)
+                        
+                        if stored_sessions:
+                            logger.info(f"Recovered {len(stored_sessions)} sessions from file storage for user {user_address}")
+                            
+                            # Convert the file storage format to our format
+                            for session in stored_sessions:
+                                # Create a unique session ID if not present
+                                session_id = getattr(session, 'id', f"{user_address}_{int(datetime.now().timestamp() * 1000)}")
+                                
+                                # Convert messages to dict format
+                                message_list = []
+                                try:
+                                    if hasattr(session, 'messages'):
+                                        if hasattr(session.messages[0], 'dict'):
+                                            message_list = [msg.dict() for msg in session.messages]
+                                        else:
+                                            message_list = session.messages
+                                except (IndexError, AttributeError):
+                                    logger.warning(f"Could not convert messages for session {session_id}")
+                                
+                                # Create timestamps
+                                created_at = getattr(session, 'created_at', datetime.now()).isoformat() 
+                                updated_at = getattr(session, 'updated_at', datetime.now()).isoformat()
+                                
+                                # Create a session data structure 
+                                session_data = {
+                                    "id": session_id,
+                                    "owner": user_address,
+                                    "title": getattr(session, 'title', "Recovered Chat"),
+                                    "messages": message_list,
+                                    "created_at": created_at,
+                                    "updated_at": updated_at,
+                                    "message_count": len(message_list),
+                                    "storage_type": "local_file"
+                                }
+                                
+                                # Add to cache and return list
+                                self.simulated_sessions[session_id] = session_data
+                                user_sessions.append(session_data)
+                    except Exception as storage_error:
+                        logger.error(f"Failed to recover from file storage: {storage_error}")
+                
+                # Sort by updated_at descending
+                user_sessions.sort(key=lambda x: x["updated_at"], reverse=True)
+                return user_sessions
             
         except Exception as e:
             logger.error(f"Failed to get user sessions: {e}")
@@ -148,10 +262,15 @@ class SuiChatSessionsService:
             # Get session
             session_data = await self.get_session(session_id, user_address)
             if not session_data:
-                return False
+                logger.warning(f"Session {session_id} not found, creating it automatically")
+                session_data = await self.create_session(user_address, "New Chat")
+                session_id = session_data["id"]
+                
+            # Current timestamp
+            timestamp = int(datetime.now().timestamp())
+            message_id = f"msg_{timestamp}_{uuid.uuid4().hex[:6]}"
             
-            # Create message
-            message_id = f"msg_{uuid.uuid4().hex[:8]}"
+            # Create message locally
             message = {
                 "id": message_id,
                 "content": message_content,
@@ -159,7 +278,24 @@ class SuiChatSessionsService:
                 "timestamp": datetime.now().isoformat()
             }
             
-            # Add to session
+            # Try to add message to blockchain if this is a blockchain-stored session
+            if session_data.get("storage_type") == "sui_blockchain":
+                result = await self.sui_client.add_message_to_session(
+                    user_address=user_address,
+                    session_id=session_id,
+                    role=message_type,
+                    content=message_content,
+                    timestamp=timestamp
+                )
+                
+                if not result.get("success", False):
+                    logger.warning(f"Failed to add message to blockchain: {result.get('error', 'unknown error')}")
+                    # Continue with local storage
+                else:
+                    logger.info(f"Message added to blockchain session: {session_id}")
+                    message["blockchain_tx"] = result.get("transaction_digest")
+            
+            # Always add to local cache
             session_data["messages"].append(message)
             session_data["message_count"] = len(session_data["messages"])
             session_data["updated_at"] = datetime.now().isoformat()
@@ -170,7 +306,7 @@ class SuiChatSessionsService:
                 title = self._generate_title_from_message(message_content)
                 session_data["title"] = title
             
-            # Store updated session
+            # Update local cache
             self.simulated_sessions[session_id] = session_data
             
             logger.debug(f"Added message to session {session_id}")

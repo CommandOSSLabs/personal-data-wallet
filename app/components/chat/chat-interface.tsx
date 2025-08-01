@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ChatWindow } from './chat-window'
 import { ChatInput } from './chat-input'
@@ -13,6 +13,7 @@ import { useSuiAuth } from '@/app/hooks/use-sui-auth'
 import { Message } from '@/app/types'
 import { memoryIntegrationService } from '@/app/services/memoryIntegration'
 import { MemoryIndicator, useMemoryIndicator } from '@/app/components/memory/memory-indicator'
+import { MemoryPanel } from '@/app/components/memory/memory-panel'
 import {
   AppShell,
   Group,
@@ -52,11 +53,39 @@ export function ChatInterface() {
     selectSession
   } = useSuiChatSessions(userAddress)
 
-  // Placeholder for memories - will be integrated with the new memory system
-  const memories: any[] = []
-  const memoriesLoading = false
-  const clearMemories = () => {
-    console.log('Clear memories - to be implemented with new memory system')
+  // Load memories from the memory API
+  const [memories, setMemories] = useState<any[]>([])
+  const [memoriesLoading, setMemoriesLoading] = useState(true)
+  const [currentInputMessage, setCurrentInputMessage] = useState<string>('')
+
+  // Load memories when the user address changes
+  useEffect(() => {
+    const loadMemories = async () => {
+      if (!userAddress) return
+      
+      try {
+        setMemoriesLoading(true)
+        const response = await memoryIntegrationService.fetchUserMemories(userAddress)
+        setMemories(response.memories || [])
+      } catch (error) {
+        console.error('Failed to load memories:', error)
+      } finally {
+        setMemoriesLoading(false)
+      }
+    }
+    
+    loadMemories()
+  }, [userAddress])
+
+  const clearMemories = async () => {
+    if (!userAddress) return
+    
+    try {
+      await memoryIntegrationService.clearUserMemories(userAddress)
+      setMemories([])
+    } catch (error) {
+      console.error('Failed to clear memories:', error)
+    }
   }
 
 
@@ -107,7 +136,10 @@ export function ChatInterface() {
     memoryIndicator.startProcessing()
 
     // Create temporary user message for immediate display (will be replaced by backend data)
-    const userMessageId = Date.now().toString()
+    // Use a more unique ID format combining timestamp and random string
+    const timestamp = Date.now()
+    const randomUserSuffix = Math.random().toString(36).substring(2, 8)
+    const userMessageId = `${userAddress}_${timestamp}_${randomUserSuffix}`
     const tempUserMessage: Message = {
       id: userMessageId,
       content: messageText,
@@ -115,8 +147,9 @@ export function ChatInterface() {
       timestamp: new Date().toISOString(),
     }
 
-    // Create a placeholder message for streaming
-    const assistantMessageId = (Date.now() + 1).toString()
+    // Create a placeholder message for streaming with a completely different ID
+    const randomAiSuffix = Math.random().toString(36).substring(2, 8)
+    const assistantMessageId = `${userAddress}_${timestamp + 1}_${randomAiSuffix}`
     const streamingMsg: Message = {
       id: assistantMessageId,
       content: '',
@@ -187,10 +220,13 @@ export function ChatInterface() {
           console.log('Streaming complete:', { fullResponse, intent, entities, memoryStored, memoryId })
 
           // Update memory indicator with backend results
+          console.log("Memory detection status:", { memoryStored, memoryId });
+          
           if (memoryStored && memoryId) {
-            memoryIndicator.setDetected(1)
-            memoryIndicator.setStored(1)
-            console.log(`Backend automatically stored memory: ${memoryId}`)
+            // Show memory indicator - set to 1 for detected and stored
+            console.log(`Memory detected and stored! ID: ${memoryId}`);
+            memoryIndicator.setDetected(1);
+            memoryIndicator.setStored(1);
             
             // Update temporary user message with memory detection data
             if (tempUserMessage) {
@@ -198,12 +234,24 @@ export function ChatInterface() {
                 ...tempUserMessage,
                 memoryDetected: true,
                 memoryId: memoryId
-              }
-              setTempUserMessage(updatedTempMessage)
+              };
+              setTempUserMessage(updatedTempMessage);
+              console.log("Updated user message with memory detection:", updatedTempMessage);
+            }
+            
+            // Force refresh memories list
+            if (userAddress) {
+              memoryIntegrationService.fetchUserMemories(userAddress)
+                .then(response => {
+                  console.log("Refreshed memories after detection");
+                  setMemories(response.memories || []);
+                })
+                .catch(err => console.error("Failed to refresh memories:", err));
             }
           } else {
-            memoryIndicator.setDetected(0)
-            memoryIndicator.setStored(0)
+            console.log("No memory detected or stored by backend");
+            memoryIndicator.setDetected(0);
+            memoryIndicator.setStored(0);
           }
 
           // Update the streaming message with the final content
@@ -338,6 +386,7 @@ export function ChatInterface() {
   return (
     <AppShell
       navbar={{ width: 300, breakpoint: 'sm' }}
+      aside={{ width: 320, breakpoint: 'md' }}
       header={{ height: 70 }}
       padding="md"
     >
@@ -487,8 +536,17 @@ export function ChatInterface() {
         <ChatInput
           onSendMessage={handleSendMessage}
           isLoading={isStreaming}
+          onInputChange={(text) => setCurrentInputMessage(text)}
         />
       </AppShell.Main>
+      
+      <AppShell.Aside>
+        <MemoryPanel 
+          userAddress={userAddress || ''}
+          sessionId={currentSessionId || undefined}
+          currentMessage={currentInputMessage}
+        />
+      </AppShell.Aside>
 
       {/* Memory Manager Modal */}
       <Modal

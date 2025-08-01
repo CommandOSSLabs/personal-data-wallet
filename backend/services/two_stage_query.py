@@ -16,6 +16,7 @@ class QueryResult:
     timestamp: str
     owner: str
     is_encrypted: bool = True
+    walrus_hash: Optional[str] = None
 
 @dataclass
 class ContextResult:
@@ -91,7 +92,8 @@ class TwoStageQueryService:
                     category=getattr(result, 'category', category_filter or 'general'),
                     timestamp=getattr(result, 'timestamp', '2024-01-01T00:00:00'),
                     owner=owner_filter or 'default-user',
-                    is_encrypted=True
+                    is_encrypted=True,
+                    walrus_hash=getattr(result, 'walrus_hash', None)
                 )
                 query_results.append(query_result)
             

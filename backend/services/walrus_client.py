@@ -21,6 +21,8 @@ class EncryptedEmbedding:
     ibe_identity: str
     created_at: str
     checksum: str
+    # Store the full original text content (encrypted)
+    full_text_content: str
 
 @dataclass
 class HNSWIndex:
@@ -63,29 +65,61 @@ class WalrusClient:
         
         with open(blob_path, 'r') as f:
             return json.load(f)
-    
-    async def store_encrypted_embedding(self, 
-                                      embedding: EncryptedEmbedding) -> str:
+        
+    async def store_encrypted_embedding(self,
+                                  embedding: EncryptedEmbedding) -> str:
         encrypted_data = {
-            'type': 'encrypted_vector_embedding',
+            'type': 'encrypted_embedding',
             'version': '1.0',
             'encryption': {
                 'algorithm': 'IBE-KEM-DEM',
                 'ibe_identity': embedding.ibe_identity,
                 'threshold': '2_of_3'
             },
-            'encrypted_payload': {
+            'data': {
                 'vector': embedding.vector,
                 'vector_dimension': len(embedding.vector),
-                'encoding': 'float32'
-            },
-            'metadata': embedding.metadata,
-            'owner': embedding.owner,
-            'created_at': embedding.created_at,
-            'checksum': embedding.checksum
+                'encoding': 'float32',
+                'metadata': embedding.metadata,
+                'owner': embedding.owner,
+                'created_at': embedding.created_at,
+                'checksum': embedding.checksum,
+                'ibe_identity': embedding.ibe_identity,
+                'full_text_content': embedding.full_text_content  # Store the full original text
+            }
         }
         
         return await self.store_blob(encrypted_data)
+    
+    async def get_encrypted_embedding(self, walrus_hash: str) -> Optional[EncryptedEmbedding]:
+        """Retrieve an encrypted embedding from Walrus storage"""
+        try:
+            logger.info(f'Retrieving encrypted embedding from Walrus: {walrus_hash}')
+            
+            # Get the blob data from Walrus
+            blob_data = await self.retrieve_blob(walrus_hash)
+            
+            if not blob_data or blob_data.get('type') != 'encrypted_embedding':
+                logger.warning(f'Invalid or missing embedding data for hash: {walrus_hash}')
+                return None
+            
+            # Reconstruct the EncryptedEmbedding object
+            embedding = EncryptedEmbedding(
+                vector=blob_data['data']['vector'],
+                metadata=blob_data['data']['metadata'],
+                owner=blob_data['data']['owner'],
+                ibe_identity=blob_data['data']['ibe_identity'],
+                created_at=blob_data['data']['created_at'],
+                checksum=blob_data['data']['checksum'],
+                full_text_content=blob_data['data'].get('full_text_content', '')
+            )
+            
+            logger.info(f'Successfully retrieved embedding: {embedding.metadata.get("embedding_id", "unknown")}')
+            return embedding
+            
+        except Exception as e:
+            logger.error(f'Failed to retrieve embedding from Walrus: {e}')
+            return None
     
     async def store_hnsw_index(self, index: HNSWIndex) -> str:
         quilt_data = {

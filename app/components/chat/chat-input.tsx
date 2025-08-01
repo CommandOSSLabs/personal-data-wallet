@@ -12,11 +12,12 @@ import { IconSend } from '@tabler/icons-react'
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void
+  onInputChange?: (message: string) => void
   isLoading: boolean
   disabled?: boolean
 }
 
-export function ChatInput({ onSendMessage, isLoading, disabled }: ChatInputProps) {
+export function ChatInput({ onSendMessage, onInputChange, isLoading, disabled }: ChatInputProps) {
   const [message, setMessage] = useState('')
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -44,7 +45,13 @@ export function ChatInput({ onSendMessage, isLoading, disabled }: ChatInputProps
         <Group gap="sm" align="flex-end">
           <TextInput
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={(e) => {
+              const newValue = e.target.value;
+              setMessage(newValue);
+              if (onInputChange) {
+                onInputChange(newValue);
+              }
+            }}
             onKeyDown={handleKeyPress}
             placeholder="💭 Ask me anything or share personal information..."
             disabled={disabled || isLoading}

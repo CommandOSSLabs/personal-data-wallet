@@ -216,7 +216,7 @@ export function Sidebar({
                                   {memory.type}
                                 </Badge>
                                 <Text size="xs" c="dimmed">
-                                  {memory.createdAt.toLocaleDateString()}
+                                  {memory?.createdAt?.toLocaleDateString()}
                                 </Text>
                               </Group>
                             </Box>

@@ -1,21 +1,18 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 
-// Create axios instance with default configuration
 const createHttpClient = (): AxiosInstance => {
   const baseURL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
   
   const client = axios.create({
     baseURL,
-    timeout: 30000, // 30 seconds
+    timeout: 60000, 
     headers: {
       'Content-Type': 'application/json',
     },
   })
 
-  // Request interceptor
   client.interceptors.request.use(
     (config) => {
-      // Add any auth tokens or common headers here
       console.log(`🚀 ${config.method?.toUpperCase()} ${config.url}`)
       return config
     },

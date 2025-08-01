@@ -157,3 +157,18 @@ class HNSWIndexerService:
         self.next_index_id = index_data['next_index_id']
         
         logger.info(f'Loaded HNSW index with {len(self.metadata_store)} vectors')
+    
+    async def update_walrus_hash(self, embedding_id: str, walrus_hash: str):
+        """Update the Walrus hash for an existing embedding in the metadata store"""
+        try:
+            if embedding_id in self.embedding_id_to_index:
+                index_id = self.embedding_id_to_index[embedding_id]
+                if index_id in self.metadata_store:
+                    self.metadata_store[index_id].walrus_hash = walrus_hash
+                    logger.info(f'Updated Walrus hash for embedding {embedding_id}: {walrus_hash}')
+                else:
+                    logger.warning(f'Index ID {index_id} not found in metadata store for embedding {embedding_id}')
+            else:
+                logger.warning(f'Embedding ID {embedding_id} not found in embedding_id_to_index map')
+        except Exception as e:
+            logger.error(f'Failed to update Walrus hash for {embedding_id}: {e}')

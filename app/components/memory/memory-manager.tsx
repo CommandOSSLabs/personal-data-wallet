@@ -17,7 +17,10 @@ import {
   ScrollArea,
   Alert,
   Loader,
-  Center
+  Center,
+  Progress,
+  Tooltip,
+  Box
 } from '@mantine/core'
 import {
   IconPlus,
@@ -28,14 +31,17 @@ import {
   IconCategory,
   IconClock,
   IconLock,
+  IconLockOpen,
   IconCheck,
-  IconX
+  IconX,
+  IconBolt
 } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useDisclosure } from '@mantine/hooks'
 import { memoryApi } from '@/app/api/memoryApi'
 import { MemoryGraph } from './memory-graph'
 import { MemoryDecryptionModal } from './memory-decryption-modal'
+import { memoryDecryptionCache } from '@/app/services/memoryDecryptionCache'
 
 interface Memory {
   id: string
@@ -78,6 +84,11 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
   const [newMemoryContent, setNewMemoryContent] = useState('')
   const [newMemoryCategory, setNewMemoryCategory] = useState('general')
   const [addingMemory, setAddingMemory] = useState(false)
+  
+  // Batch decryption state
+  const [isDecryptingAll, setIsDecryptingAll] = useState(false)
+  const [decryptProgress, setDecryptProgress] = useState(0)
+  const [decryptedMemories, setDecryptedMemories] = useState<Set<string>>(new Set())
 
   // Search results
   const [searchResults, setSearchResults] = useState<Memory[]>([])
@@ -99,22 +110,57 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
       console.log('Memory API response:', data)
       
       // Handle different response formats
-      const memoryList = data.results || data.memories || []
+      const memoryList = data.results || []
       console.log('Processed memories:', memoryList)
       setMemories(memoryList)
       
       if (memoryList.length === 0) {
         console.log('No memories found for user:', userAddress)
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to load memories:', error)
+      
+      // More detailed error handling
+      let errorMessage = 'Failed to load memories';
+      if (error?.code === 'ECONNABORTED') {
+        errorMessage = 'Request timed out. The server might be under heavy load.';
+      } else if (error?.response) {
+        errorMessage = `Server error: ${error.response.status}`;
+      } else if (error?.request) {
+        errorMessage = 'No response from server. Check your connection.';
+      }
+      
       notifications.show({
         title: 'Error',
-        message: 'Failed to load memories',
+        message: errorMessage,
         color: 'red',
-        icon: <IconX size={16} />
+        icon: <IconX size={16} />,
+        autoClose: 5000
       })
       setMemories([])
+      
+      // Retry once with smaller batch size on timeout
+      if (error?.code === 'ECONNABORTED') {
+        try {
+          const retryData = await memoryApi.searchMemories({
+            query: '',
+            userAddress,
+            k: 20 // Smaller batch
+          });
+          const retryMemoryList = retryData.results || [];
+          if (retryMemoryList.length > 0) {
+            setMemories(retryMemoryList);
+            notifications.show({
+              title: 'Partial Recovery',
+              message: 'Loaded some memories with reduced batch size',
+              color: 'yellow',
+              autoClose: 3000
+            });
+          }
+        } catch (retryError) {
+          console.error('Retry failed:', retryError);
+        }
+      }
     } finally {
       setLoading(false)
     }
@@ -145,7 +191,18 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
         icon: <IconCheck size={16} />
       })
 
-      onMemoryAdded?.(data)
+      if (onMemoryAdded && data.success && data.embeddingId) {
+        // Create a Memory object from the response data
+        const newMemory: Memory = {
+          id: data.embeddingId,
+          content: newMemoryContent,
+          category: newMemoryCategory,
+          timestamp: new Date().toISOString(),
+          isEncrypted: true,
+          owner: userAddress
+        };
+        onMemoryAdded(newMemory);
+      }
     } catch (error) {
       console.error('Failed to add memory:', error)
       notifications.show({
@@ -215,6 +272,84 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
       })
     }
   }
+  
+  const decryptAllMemories = async () => {
+    if (isDecryptingAll || memories.length === 0) return;
+    
+    setIsDecryptingAll(true);
+    setDecryptProgress(0);
+    
+    try {
+      const encryptedMemories = memories.filter(m => 
+        m.isEncrypted && !decryptedMemories.has(m.id) && m.walrusHash
+      );
+      
+      if (encryptedMemories.length === 0) {
+        notifications.show({
+          title: 'No Encrypted Memories',
+          message: 'There are no encrypted memories to decrypt.',
+          color: 'blue'
+        });
+        setIsDecryptingAll(false);
+        return;
+      }
+      
+      // Process in small batches to avoid overwhelming the API
+      const batchSize = 3;
+      const totalMemories = encryptedMemories.length;
+      let processedCount = 0;
+      
+      // Update progress tracking
+      const updateProgress = () => {
+        processedCount++;
+        setDecryptProgress(Math.floor((processedCount / totalMemories) * 100));
+      };
+      
+      for (let i = 0; i < encryptedMemories.length; i += batchSize) {
+        const batch = encryptedMemories.slice(i, i + batchSize);
+        
+        await Promise.all(batch.map(async memory => {
+          try {
+            if (memory.walrusHash) {
+              // Use our caching service for decryption
+              const content = await memoryDecryptionCache.getDecryptedContent(memory.walrusHash);
+              if (content) {
+                // Add to our decrypted set
+                setDecryptedMemories(prev => {
+                  const newSet = new Set(prev);
+                  newSet.add(memory.id);
+                  return newSet;
+                });
+                // Also mark in the cache
+                memoryDecryptionCache.markMemoryDecrypted(memory.id);
+              }
+            }
+          } catch (err) {
+            console.error(`Failed to decrypt memory ${memory.id}:`, err);
+          } finally {
+            updateProgress();
+          }
+        }));
+      }
+      
+      notifications.show({
+        title: 'Decryption Complete',
+        message: `Successfully decrypted ${processedCount} memories.`,
+        color: 'green',
+        icon: <IconLockOpen size={16} />
+      });
+      
+    } catch (error) {
+      console.error('Failed to decrypt all memories:', error);
+      notifications.show({
+        title: 'Decryption Failed',
+        message: 'An error occurred while decrypting memories.',
+        color: 'red'
+      });
+    } finally {
+      setIsDecryptingAll(false);
+    }
+  }
 
   const getCategoryColor = (category: string) => {
     return MEMORY_CATEGORIES.find(c => c.value === category)?.color || 'gray'
@@ -224,81 +359,148 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
     ? memories.filter(m => m.category === selectedCategory)
     : memories
 
-  const MemoryCard = ({ memory, showSimilarity = false }: { memory: Memory, showSimilarity?: boolean }) => (
-    <Card key={memory.id} p="md" radius="md" withBorder>
-      <Stack gap="sm">
-        <Group justify="space-between" align="flex-start">
-          <Group gap="xs">
-            <Badge 
-              color={getCategoryColor(memory.category)} 
-              variant="light"
-              leftSection={<IconCategory size={12} />}
-            >
-              {MEMORY_CATEGORIES.find(c => c.value === memory.category)?.label || memory.category}
-            </Badge>
-            {memory.isEncrypted && (
+  const MemoryCard = ({ memory, showSimilarity = false }: { memory: Memory, showSimilarity?: boolean }) => {
+    // Function to open Sui Explorer in new tab
+    const openInSuiExplorer = (walrusHash: string) => {
+      // Use SuiVision explorer which better handles Walrus hashes
+      const explorerUrl = `https://suivision.xyz/object/${walrusHash}?network=testnet`; 
+      window.open(explorerUrl, '_blank');
+    };
+    
+    return (
+      <Card key={memory.id} p="md" radius="md" withBorder>
+        <Stack gap="sm">
+          <Group justify="space-between" align="flex-start">
+            <Group gap="xs">
               <Badge 
-                color="blue" 
-                variant="outline" 
-                size="xs"
-                style={{ cursor: 'pointer' }}
-                onClick={() => {
-                  setSelectedMemory(memory)
-                  openDecryptModal()
-                }}
+                color={getCategoryColor(memory.category)} 
+                variant="light"
+                leftSection={<IconCategory size={12} />}
               >
-                <IconLock size={10} />
+                {MEMORY_CATEGORIES.find(c => c.value === memory.category)?.label || memory.category}
               </Badge>
-            )}
-            {showSimilarity && memory.similarity && (
-              <Badge color="green" variant="light" size="xs">
-                {(memory.similarity * 100).toFixed(1)}% match
-              </Badge>
-            )}
+              {memory.isEncrypted && (
+                <Badge 
+                  color={decryptedMemories.has(memory.id) ? "teal" : "blue"}
+                  variant={decryptedMemories.has(memory.id) ? "filled" : "outline"}
+                  size="xs"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => {
+                    setSelectedMemory(memory)
+                    openDecryptModal()
+                  }}
+                >
+                  {decryptedMemories.has(memory.id) ? 
+                    <><IconLockOpen size={10} /> Decrypted</> : 
+                    <><IconLock size={10} /> Encrypted</>}
+                </Badge>
+              )}
+              {showSimilarity && memory.similarity && (
+                <Badge color="green" variant="light" size="xs">
+                  {(memory.similarity * 100).toFixed(1)}% match
+                </Badge>
+              )}
+            </Group>
+            <Group gap="xs">
+              {memory.walrusHash && (
+                <ActionIcon
+                  variant="subtle"
+                  color="blue"
+                  size="sm"
+                  title="View on Sui Explorer"
+                  onClick={() => openInSuiExplorer(memory.walrusHash || '')}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.58 20 4 16.42 4 12C4 7.58 7.58 4 12 4C16.42 4 20 7.58 20 12C20 16.42 16.42 20 12 20Z" fill="currentColor"/>
+                    <path d="M12 10.5C12.83 10.5 13.5 11.17 13.5 12C13.5 12.83 12.83 13.5 12 13.5C11.17 13.5 10.5 12.83 10.5 12C10.5 11.17 11.17 10.5 12 10.5Z" fill="currentColor"/>
+                    <path d="M7 12C7 9.24 9.24 7 12 7C14.76 7 17 9.24 17 12C17 14.76 14.76 17 12 17C9.24 17 7 14.76 7 12ZM9 12C9 13.66 10.34 15 12 15C13.66 15 15 13.66 15 12C15 10.34 13.66 9 12 9C10.34 9 9 10.34 9 12Z" fill="currentColor"/>
+                  </svg>
+                </ActionIcon>
+              )}
+              <ActionIcon
+                variant="subtle"
+                color="red"
+                size="sm"
+                onClick={() => deleteMemory(memory.id)}
+              >
+                <IconTrash size={14} />
+              </ActionIcon>
+            </Group>
           </Group>
-          <ActionIcon
-            variant="subtle"
-            color="red"
-            size="sm"
-            onClick={() => deleteMemory(memory.id)}
-          >
-            <IconTrash size={14} />
-          </ActionIcon>
-        </Group>
-        
-        <Text size="sm" lineClamp={3}>
-          {memory.content}
-        </Text>
-        
-        <Group justify="space-between" align="center">
-          <Group gap="xs">
-            <IconClock size={12} />
-            <Text size="xs" c="dimmed">
-              {new Date(memory.timestamp).toLocaleDateString()}
+          
+          <Text size="sm" lineClamp={3}>
+            {memory.content}
+          </Text>
+          
+          <Group justify="space-between" align="center">
+            <Group gap="xs">
+              <IconClock size={12} />
+              <Text size="xs" c="dimmed">
+                {new Date(memory.timestamp).toLocaleDateString()}
+              </Text>
+            </Group>
+            <Text size="xs" c="dimmed" ff="monospace">
+              {memory.id.slice(0, 8)}...
             </Text>
           </Group>
-          <Text size="xs" c="dimmed" ff="monospace">
-            {memory.id.slice(0, 8)}...
-          </Text>
-        </Group>
-      </Stack>
-    </Card>
-  )
+        </Stack>
+      </Card>
+    );
+  }
+
 
   return (
     <>
       <Stack gap="md">
         <Group justify="space-between">
           <Text size="lg" fw={600}>Memory Manager</Text>
-          <Button
-            leftSection={<IconPlus size={16} />}
-            onClick={openAddModal}
-          >
-            Add Memory
-          </Button>
+          
+          <Group gap="sm">
+            <Tooltip label="Decrypt all memories at once">
+              <Button
+                leftSection={isDecryptingAll ? <Loader size={14} /> : <IconBolt size={16} />}
+                variant="light"
+                color="teal"
+                onClick={decryptAllMemories}
+                disabled={isDecryptingAll || memories.length === 0}
+              >
+                Decrypt All
+              </Button>
+            </Tooltip>
+            
+            <Button
+              leftSection={<IconPlus size={16} />}
+              onClick={openAddModal}
+            >
+              Add Memory
+            </Button>
+          </Group>
         </Group>
+        
+        {isDecryptingAll && (
+          <Box style={{ position: 'relative' }} mb="xs">
+            <Progress 
+              value={decryptProgress} 
+              size="sm" 
+              color="teal"
+              striped
+              animated
+            />
+            <Text
+              size="xs"
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)'
+              }}
+            >
+              {decryptProgress}% Complete
+            </Text>
+          </Box>
+        )}
 
-        <Tabs value={activeTab} onChange={setActiveTab}>
+        <Tabs value={activeTab} onChange={(value) => setActiveTab(value || 'browse')}>
           <Tabs.List>
             <Tabs.Tab value="browse" leftSection={<IconBrain size={16} />}>
               Browse
@@ -397,7 +599,7 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
           </Tabs.Panel>
 
           <Tabs.Panel value="graph" pt="md">
-            <MemoryGraph memories={memories} />
+            <MemoryGraph memories={memories} userAddress={userAddress} />
           </Tabs.Panel>
         </Tabs>
       </Stack>

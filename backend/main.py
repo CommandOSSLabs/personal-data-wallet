@@ -673,6 +673,60 @@ async def get_user_facts(user_id: str):
         logger.error(f"Error getting user facts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/memory/{user_id}/search")
+async def search_memories_enhanced(
+    user_id: str, 
+    query: str = "", 
+    k: int = 10, 
+    include_content: bool = False
+):
+    """Enhanced memory search with optional full content retrieval"""
+    try:
+        logger.info(f"Enhanced search for user {user_id}: '{query}' (include_content: {include_content})")
+        
+        # Use the enhanced search method
+        results = await vector_storage.search_memories_with_content(
+            query=query,
+            k=k,
+            user_filter=user_id,
+            include_content=include_content
+        )
+        
+        return {
+            "user_id": user_id,
+            "query": query,
+            "results": results,
+            "total_found": len(results),
+            "include_content": include_content
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in enhanced memory search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/memory/content/{walrus_hash}")
+async def get_memory_content(walrus_hash: str):
+    """Retrieve and decrypt the full content of a specific memory"""
+    try:
+        logger.info(f"Retrieving memory content for Walrus hash: {walrus_hash}")
+        
+        content = await vector_storage.get_memory_content(walrus_hash)
+        
+        if content is None:
+            raise HTTPException(status_code=404, detail="Memory content not found")
+        
+        return {
+            "walrus_hash": walrus_hash,
+            "content": content,
+            "status": "decrypted"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving memory content: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.delete("/memory/{user_id}/clear")
 async def clear_user_memory(user_id: str):
     try:
@@ -782,7 +836,8 @@ async def search_memories(request: dict):
                 "similarity": result.similarity_score,
                 "timestamp": result.timestamp,
                 "isEncrypted": True,
-                "owner": result.owner
+                "owner": result.owner,
+                "walrusHash": getattr(result, 'walrus_hash', None)
             })
 
         return {"results": api_results}
