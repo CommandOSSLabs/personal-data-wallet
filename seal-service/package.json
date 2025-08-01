@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/seal-server.js",
     "dev": "tsx watch src/seal-server.ts",
-    "test": "jest"
+    "test": "jest",
+    "find-servers": "node scripts/get-key-servers.js"
   },
   "dependencies": {
     "@mysten/seal": "^0.4.20",

@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 
-from services.walrus_client import WalrusClient, QuiltBlob, QuiltResponse
+from services.walrus_client import WalrusClient, ALRIQuiltBlob as QuiltBlob, QuiltResponse
 from services.seal_encryption import SealEncryptionService
 
 logger = logging.getLogger(__name__)

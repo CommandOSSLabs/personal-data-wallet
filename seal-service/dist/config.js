@@ -21,6 +21,15 @@ export const config = {
         ].filter(Boolean),
     },
 };
-// Validation - we'll use real testnet servers via getAllowlistedKeyServers()
-console.log('Using real Seal testnet key servers via getAllowlistedKeyServers()');
+// Validation
+if (config.seal.keyServerIds.length === 0) {
+    console.warn('Warning: No key server IDs configured. Running in development mode.');
+    // For development mode, add testnet server IDs
+    // For development, use empty array to let Seal SDK use default testnet servers
+    config.seal.keyServerIds = [];
+    config.seal.threshold = 1; // Set threshold to 1 for development
+}
+if (config.seal.threshold > config.seal.keyServerIds.length) {
+    throw new Error(`Threshold (${config.seal.threshold}) cannot be greater than number of key servers (${config.seal.keyServerIds.length})`);
+}
 export default config;

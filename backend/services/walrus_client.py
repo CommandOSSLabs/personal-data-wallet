@@ -12,7 +12,7 @@ import httpx
 
 from config import settings
 from models import (
-    QuiltBlob, QuiltResponse, QuiltPatchInfo, EmbeddingResult, 
+    ALRIQuiltBlob as QuiltBlob, QuiltResponse, QuiltPatchInfo, EmbeddingResult, 
     EmbeddingQuiltData, VectorIndexQuiltData, MemoryStorageComponents,
     EnhancedEmbeddingQuiltData, EntityInfo, RelationshipTriplet
 )
@@ -144,18 +144,55 @@ class WalrusClient:
             
             if response.status_code == 200:
                 result = response.json()
+                logger.info(f"Walrus quilt response: {result}")
+                
                 # Parse quilt response and extract patch information
                 patches = []
                 quilt_id = None
                 
-                if "newlyCreated" in result:
-                    quilt_data = result["newlyCreated"]
-                    quilt_id = quilt_data.get("quiltId")
+                # Handle different response formats for quilt vs individual blob
+                if "blobStoreResult" in result and "storedQuiltBlobs" in result:
+                    # This is a quilt response
+                    blob_store_result = result["blobStoreResult"]
+                    if "newlyCreated" in blob_store_result:
+                        quilt_data = blob_store_result["newlyCreated"]
+                        quilt_id = quilt_data.get("blobObject", {}).get("blobId")
+                    elif "alreadyCertified" in blob_store_result:
+                        quilt_id = blob_store_result["alreadyCertified"]["blobId"]
                     
-                    # Extract patch information
-                    for i, blob in enumerate(blobs):
+                    # Extract patch information from storedQuiltBlobs
+                    stored_blobs = result.get("storedQuiltBlobs", [])
+                    for stored_blob in stored_blobs:
+                        # Find matching original blob for size info
+                        original_blob = next((b for b in blobs if b.identifier == stored_blob["identifier"]), None)
                         patch_info = QuiltPatchInfo(
-                            patch_id=f"patch_{i}",  # This would come from actual response
+                            patch_id=stored_blob.get("quiltPatchId"),
+                            identifier=stored_blob.get("identifier"),
+                            size=len(original_blob.data) if original_blob else 0
+                        )
+                        patches.append(patch_info)
+                
+                elif "newlyCreated" in result:
+                    # This might be an individual blob response or old format
+                    quilt_data = result["newlyCreated"]
+                    quilt_id = quilt_data.get("quiltId") or quilt_data.get("blobObject", {}).get("blobId")
+                    
+                    # Fallback: create patch info for each blob
+                    logger.warning("Old format or individual blob response, creating fallback patch info")
+                    for blob in blobs:
+                        patch_info = QuiltPatchInfo(
+                            patch_id=None,  # No patch ID available
+                            identifier=blob.identifier,
+                            size=len(blob.data)
+                        )
+                        patches.append(patch_info)
+                        
+                elif "alreadyCertified" in result:
+                    quilt_id = result["alreadyCertified"]["blobId"]
+                    # Create patch info for existing quilt
+                    for blob in blobs:
+                        patch_info = QuiltPatchInfo(
+                            patch_id=None,
                             identifier=blob.identifier,
                             size=len(blob.data)
                         )
@@ -174,37 +211,118 @@ class WalrusClient:
             print(f"Error storing quilt on Walrus: {e}")
             return None
 
-    async def retrieve_from_quilt_by_patch_id(self, patch_id: str) -> Optional[bytes]:
-        """Retrieve blob from quilt using patch ID"""
-        try:
+    async def retrieve_from_quilt_by_patch_id(self, patch_id: str, max_retries: int = 3) -> Optional[bytes]:
+        """Retrieve blob from quilt using patch ID with retry logic"""
+        async def _retrieve_operation():
             url = f"{self.aggregator_url}/v1/blobs/by-quilt-patch-id/{patch_id}"
             response = await self.client.get(url)
             
             if response.status_code == 200:
                 return response.content
-            
-            print(f"Failed to retrieve blob by patch ID {patch_id}: {response.status_code}")
-            return None
-            
+            elif response.status_code == 404:
+                raise Exception(f"Blob with patch ID {patch_id} not found: 404")
+            else:
+                raise Exception(f"Failed to retrieve blob by patch ID {patch_id}: {response.status_code}")
+        
+        try:
+            return await self._retry_request(_retrieve_operation, max_retries=max_retries, backoff_factor=2.0)
         except Exception as e:
-            print(f"Error retrieving blob by patch ID: {e}")
+            logger.error(f"Error retrieving blob by patch ID {patch_id}: {e}")
             return None
 
-    async def retrieve_from_quilt_by_id(self, quilt_id: str, identifier: str) -> Optional[bytes]:
-        """Retrieve specific blob from quilt using quilt ID and identifier"""
-        try:
+    async def retrieve_from_quilt_by_id(self, quilt_id: str, identifier: str, max_retries: int = 3) -> Optional[bytes]:
+        """Retrieve specific blob from quilt using quilt ID and identifier with retry logic"""
+        async def _retrieve_operation():
             url = f"{self.aggregator_url}/v1/blobs/by-quilt-id/{quilt_id}/{identifier}"
             response = await self.client.get(url)
             
             if response.status_code == 200:
                 return response.content
-            
-            print(f"Failed to retrieve blob {identifier} from quilt {quilt_id}: {response.status_code}")
-            return None
-            
+            elif response.status_code == 404:
+                raise Exception(f"Blob {identifier} not found in quilt {quilt_id}: 404")
+            else:
+                raise Exception(f"Failed to retrieve blob {identifier} from quilt {quilt_id}: {response.status_code}")
+        
+        try:
+            return await self._retry_request(_retrieve_operation, max_retries=max_retries, backoff_factor=2.0)
         except Exception as e:
-            print(f"Error retrieving blob from quilt: {e}")
+            logger.error(f"Error retrieving blob {identifier} from quilt {quilt_id}: {e}")
             return None
+
+    async def wait_for_quilt_propagation(self, quilt_id: str, test_identifier: str, max_wait_seconds: int = 120) -> bool:
+        """Wait for quilt to propagate across Walrus network before retrieval"""
+        import time
+        
+        start_time = time.time()
+        check_interval = 10  # Check every 10 seconds
+        
+        logger.info(f"Waiting for quilt {quilt_id} to propagate...")
+        
+        while time.time() - start_time < max_wait_seconds:
+            # Try to retrieve test blob to check availability
+            test_data = await self.retrieve_from_quilt_by_id(quilt_id, test_identifier, max_retries=1)
+            
+            if test_data is not None:
+                elapsed = time.time() - start_time
+                logger.info(f"Quilt propagated successfully after {elapsed:.1f} seconds")
+                return True
+            
+            logger.debug(f"Quilt not yet available, waiting {check_interval}s...")
+            await asyncio.sleep(check_interval)
+        
+        logger.warning(f"Quilt propagation timeout after {max_wait_seconds} seconds")
+        return False
+
+    async def retrieve_all_blobs_from_quilt(self, quilt_response: QuiltResponse) -> Dict[str, bytes]:
+        """Retrieve all blobs from a quilt using parallel requests"""
+        async def retrieve_single_blob(patch_info: QuiltPatchInfo) -> tuple[str, Optional[bytes]]:
+            # Try patch ID first (preferred method), then fall back to quilt ID + identifier
+            blob_data = None
+            
+            if patch_info.patch_id:
+                logger.debug(f"Trying patch ID retrieval for {patch_info.identifier}")
+                blob_data = await self.retrieve_from_quilt_by_patch_id(
+                    patch_info.patch_id,
+                    max_retries=2
+                )
+            
+            if blob_data is None:
+                logger.debug(f"Trying quilt ID + identifier retrieval for {patch_info.identifier}")
+                blob_data = await self.retrieve_from_quilt_by_id(
+                    quilt_response.quilt_id, 
+                    patch_info.identifier,
+                    max_retries=2
+                )
+            
+            return patch_info.identifier, blob_data
+        
+        # Execute all retrievals in parallel
+        tasks = [
+            retrieve_single_blob(patch) 
+            for patch in quilt_response.patches
+        ]
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Collect successful results
+        blob_data = {}
+        failed_retrievals = []
+        
+        for result in results:
+            if isinstance(result, Exception):
+                failed_retrievals.append(str(result))
+            else:
+                identifier, data = result
+                if data is not None:
+                    blob_data[identifier] = data
+                else:
+                    failed_retrievals.append(identifier)
+        
+        if failed_retrievals:
+            logger.warning(f"Failed to retrieve {len(failed_retrievals)} blobs: {failed_retrievals}")
+        
+        logger.info(f"Successfully retrieved {len(blob_data)}/{len(quilt_response.patches)} blobs")
+        return blob_data
 
     async def store_embeddings_quilt(self, embedding_data: EmbeddingQuiltData) -> Optional[str]:
         """Store vector embeddings as an optimized quilt"""

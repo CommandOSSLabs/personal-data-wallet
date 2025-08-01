@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import json
-from models import QuiltBlob, QuiltResponse
+from models import ALRIQuiltBlob as QuiltBlob, QuiltResponse
 
 
 class MetadataManager:

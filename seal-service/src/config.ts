@@ -30,12 +30,11 @@ export const config = {
 
 // Validation
 if (config.seal.keyServerIds.length === 0) {
-  console.warn('Warning: No key server IDs configured. Service will use default testnet servers.');
-  // Add default testnet servers when available from Mysten Labs docs
-  config.seal.keyServerIds = [
-    // These would be actual testnet server object IDs
-    // Will be updated when we get access to testnet
-  ];
+  console.warn('Warning: No key server IDs configured. Running in development mode.');
+  // For development mode, add testnet server IDs
+  // For development, use empty array to let Seal SDK use default testnet servers
+  config.seal.keyServerIds = [];
+  config.seal.threshold = 1; // Set threshold to 1 for development
 }
 
 if (config.seal.threshold > config.seal.keyServerIds.length) {

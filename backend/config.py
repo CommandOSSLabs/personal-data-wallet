@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     
     # Seal Encryption Configuration (Quilt/Seal specific)
     seal_service_url: str = "http://localhost:8080"
-    use_real_seal: bool = False  # Set to True for production Seal integration
+    use_real_seal: bool = True  # Set to True for production Seal integration
     seal_threshold: int = 1  # 1-out-of-2 threshold for testnet
     seal_verify_key_servers: bool = False  # Set to True in production
     

@@ -8,7 +8,7 @@ from typing import List
 from services.walrus_client import WalrusClient
 from services.vector_store import VectorStore
 from models import (
-    QuiltBlob, QuiltResponse, QuiltPatchInfo, EmbeddingResult, 
+    ALRIQuiltBlob as QuiltBlob, QuiltResponse, QuiltPatchInfo, EmbeddingResult, 
     EmbeddingQuiltData, VectorIndexQuiltData
 )
 

@@ -117,7 +117,7 @@ class MemoryObject(BaseModel):
     last_updated: str
 
 # Walrus-Quilt Models
-class QuiltBlob(BaseModel):
+class ALRIQuiltBlob(BaseModel):
     identifier: str
     data: bytes
     metadata: Dict[str, str] = {}
