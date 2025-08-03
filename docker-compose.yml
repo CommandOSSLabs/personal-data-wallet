@@ -1,78 +1,130 @@
 version: '3.8'
 
 services:
-  # Redis for caching and session management
-  redis:
-    image: redis:7-alpine
-    container_name: pdw-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-    restart: unless-stopped
-
-  # Python FastAPI Backend
+  # NestJS Backend
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: pdw-backend
     ports:
-      - "8000:8000"
+      - "3000:3000"
     environment:
-      - REDIS_URL=redis://redis:6379
-      - SUI_NETWORK=testnet
-      - SUI_RPC_URL=https://fullnode.testnet.sui.io:443
-      - WALRUS_PUBLISHER_URL=https://publisher.walrus-testnet.walrus.space
-      - LOG_LEVEL=INFO
+      - NODE_ENV=development
+      - SUI_NETWORK=devnet
+      - SUI_PACKAGE_ID=${SUI_PACKAGE_ID}
+      - SUI_ADMIN_PRIVATE_KEY=${SUI_ADMIN_PRIVATE_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - WALRUS_API_KEY=${WALRUS_API_KEY}
+      - WALRUS_API_URL=${WALRUS_API_URL}
+      - SEAL_MASTER_KEY=${SEAL_MASTER_KEY}
     volumes:
-      - ./backend/data:/app/data
-      - ./backend/.env:/app/.env:ro
+      - ./backend:/app
+      - /app/node_modules
     depends_on:
-      - redis
-    restart: unless-stopped
+      - sui-node
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
 
-  # Next.js Frontend
+  # Local Sui Node
+  sui-node:
+    image: mysten/sui-tools:devnet
+    ports:
+      - "9000:9000" # JSON-RPC
+      - "9184:9184" # Metrics
+    volumes:
+      - ./sui-data:/sui-data
+    command: sui-test-validator
+    environment:
+      - SUI_CONFIG_DIR=/sui-data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Frontend
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
-    container_name: pdw-frontend
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
-      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://backend:3000
+      - NEXT_PUBLIC_BACKEND_URL=http://backend:3000
     depends_on:
       - backend
-    restart: unless-stopped
-
-  # Local Sui Node (for development)
-  sui-node:
-    image: mysten/sui-tools:testnet
-    container_name: pdw-sui-node
-    ports:
-      - "9000:9000"
-      - "9184:9184"
     volumes:
-      - sui_data:/root/.sui
-    command: sui start --network.bind-address 0.0.0.0
+      - ./app:/app/app
+      - ./public:/app/public
+      - /app/node_modules
+      - /app/.next
+
+  # Sui Contract Deployer
+  contract-deployer:
+    image: mysten/sui-tools:devnet
+    volumes:
+      - ./smart-contract:/smart-contract
+      - ./sui-data:/sui-data
+    depends_on:
+      - sui-node
+    environment:
+      - SUI_CONFIG_DIR=/sui-data
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "
+      # Wait for sui-node to be available
+      while ! curl -s http://sui-node:9000 > /dev/null; do
+        echo 'Waiting for sui-node to be ready...'
+        sleep 5
+      done
+      
+      # Navigate to contract directory
+      cd /smart-contract
+      
+      # Build the contract
+      sui move build
+      
+      # Publish the contract and save the output
+      echo 'Publishing contract...'
+      sui client publish --gas-budget 100000000 --json > /sui-data/publish_output.json
+      
+      # Extract package ID
+      PACKAGE_ID=$(cat /sui-data/publish_output.json | grep -o '\"packageId\":\"0x[a-fA-F0-9]*\"' | head -1 | cut -d '\"' -f 4)
+      echo \"Package ID: $${PACKAGE_ID}\"
+      
+      # Write package ID to environment file for backend to use
+      echo \"SUI_PACKAGE_ID=$${PACKAGE_ID}\" > /sui-data/contract.env
+      
+      # Keep container running for debugging
+      tail -f /dev/null
+      "
     restart: unless-stopped
-    profiles:
-      - local-sui
 
-volumes:
-  redis_data:
-    driver: local
-  sui_data:
-    driver: local
-
-networks:
-  default:
-    name: pdw-network
+  # Test runner for backend API
+  test-runner:
+    image: node:18-alpine
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - backend
+    working_dir: /app
+    environment:
+      - API_URL=http://backend:3000
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      # Wait for backend to be available
+      while ! wget -q --spider http://backend:3000/api/health; do
+        echo 'Waiting for backend to be ready...'
+        sleep 5
+      done
+      
+      # Run the endpoint tests
+      echo 'Running endpoint tests...'
+      node test-endpoints.js
+      "
+    restart: on-failure

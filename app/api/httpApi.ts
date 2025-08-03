@@ -1,7 +1,7 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 
 const createHttpClient = (): AxiosInstance => {
-  const baseURL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+  const baseURL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3000'
   
   const client = axios.create({
     baseURL,

@@ -104,12 +104,32 @@ export const chatApi = {
 
   // Stream chat (returns a Response object for streaming)
   streamChat: async (request: StreamChatRequest): Promise<Response> => {
-    return httpApi.stream('/chat/stream', request)
+    // Format request for backend
+    const backendRequest = {
+      text: request.text,
+      userId: request.user_id,
+      sessionId: request.session_id,
+      model: request.model || 'gemini-1.5-pro',
+      originalUserMessage: request.originalUserMessage,
+      memoryContext: request.memoryContext
+    };
+    
+    return httpApi.stream('/api/chat/stream', backendRequest)
   },
 
   // Send regular (non-streaming) chat message
   sendMessage: async (request: StreamChatRequest): Promise<ApiResponse<any>> => {
-    return httpApi.post('/chat', request)
+    // Format request for backend
+    const backendRequest = {
+      text: request.text,
+      userId: request.user_id,
+      sessionId: request.session_id,
+      model: request.model || 'gemini-1.5-pro',
+      originalUserMessage: request.originalUserMessage,
+      memoryContext: request.memoryContext
+    };
+    
+    return httpApi.post('/api/chat', backendRequest)
   }
 }
 

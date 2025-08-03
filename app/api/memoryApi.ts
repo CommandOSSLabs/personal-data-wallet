@@ -52,7 +52,7 @@ export interface MemoryContextResponse {
 // Memory API methods
 export const memoryApi = {
   // Get all memories for a user
-  getMemories: async (userAddress: string): Promise<ApiResponse<{ memories: Memory[] }>> => {
+  getMemories: async (userAddress: string): Promise<{ memories: Memory[], success: boolean }> => {
     return httpApi.get(`/api/memories?user=${userAddress}`)
   },
 
@@ -82,11 +82,9 @@ export const memoryApi = {
   },
 
   // Get memory context for chat
-  getMemoryContext: async (request: MemoryContextRequest): Promise<ApiResponse<MemoryContextResponse>> => {
+  getMemoryContext: async (request: MemoryContextRequest): Promise<MemoryContextResponse> => {
     return httpApi.post('/api/memories/context', request)
   },
-
-  // Note: Secure endpoints not implemented yet, using regular endpoints
 
   // Get memory statistics
   getMemoryStats: async (userAddress: string): Promise<ApiResponse<{

@@ -1,279 +1,178 @@
 # Personal Data Wallet
 
-A Decentralized, Self-Organizing Memory Layer for LLMs, inspired by the architecture of mem0. This system creates a user-owned knowledge graph where interactions are not just stored but understood, categorized, and structured, with ownership and data integrity managed by the Sui blockchain.
+A decentralized chat application featuring streaming chat, on-chain session history, and an encrypted persistent memory layer using vector search and knowledge graphs, all secured by Sui blockchain.
 
-## Architecture Overview
+## Architecture
 
-The system consists of three primary components:
+This application consists of three primary components:
 
-1. **Next.js Frontend**: A sophisticated chat interface with TanStack Query for robust server-state management
-2. **Intelligent Backend (Python/FastAPI)**: Core logic plane that classifies input, extracts entities, builds knowledge graphs, creates vector embeddings, and orchestrates storage
-3. **Sui & Walrus Backend**: Sui blockchain manages ownership and pointers, while Walrus stores immutable data blobs
+1. **NestJS Backend (Application)**: Orchestrates all business logic, including chat streaming, RAG, memory classification, and communication with external services.
 
-## Features
+2. **Walrus (Data Store)**: Used for off-chain bulk data storage:
+   - Encrypted Content Blobs: Individual encrypted user memories
+   - HNSW Index File: Vector search index
+   - Knowledge Graph File: JSON connecting memory entities
 
-- ✅ **Intent Classification**: Automatically classifies user input as facts, queries, or conversation
-- ✅ **Knowledge Graph Extraction**: Builds structured relationships from natural language
-- ✅ **Vector Embeddings**: Creates semantic embeddings for similarity search
-- ✅ **Decentralized Storage**: Uses Sui blockchain for ownership and Walrus for data storage
-- ✅ **Real-time Chat Interface**: Modern React-based chat with loading states and error handling
-- ✅ **Memory Persistence**: Stores and retrieves user memories across sessions
+3. **Sui Blockchain (Ledger)**: On-chain source of truth for ownership and data pointers, storing chat history and pointers to user's data on Walrus.
 
-## Quick Start
+## Prerequisites
 
-### Prerequisites
-
-- Node.js 18+ and npm
-- Python 3.11+
+- Node.js v18+
+- Sui CLI (for smart contract deployment)
 - Docker and Docker Compose
-- Sui CLI (for contract deployment)
+- Google API Key for Gemini AI
+- Walrus API Key
 
-### 1. Clone and Setup
+## Installation and Setup
+
+1. **Clone the repository**
 
 ```bash
-git clone https://github.com/CommandOSSLabs/personal-data-wallet.git
+git clone https://github.com/yourusername/personal-data-wallet.git
 cd personal-data-wallet
-
-# Install frontend dependencies
-npm install
-
-# Setup backend
-cd backend
-pip install -r requirements.txt
-cp .env.example .env
-# Edit .env with your configuration
-cd ..
 ```
 
-### 2. Environment Configuration
+2. **Set up environment variables**
 
-Copy `backend/.env.example` to `backend/.env` and configure:
+Create a `.env` file in the project root:
 
-```env
-OPENAI_API_KEY=your_openai_api_key_here
-SUI_NETWORK=testnet
-SUI_RPC_URL=https://fullnode.testnet.sui.io:443
-WALRUS_PUBLISHER_URL=https://publisher.walrus-testnet.walrus.space
-REDIS_URL=redis://localhost:6379
-LOG_LEVEL=INFO
+```
+SUI_NETWORK=devnet
+SUI_PACKAGE_ID=<your_deployed_package_id>
+SUI_ADMIN_PRIVATE_KEY=<your_sui_private_key>
+GOOGLE_API_KEY=<your_google_api_key>
+WALRUS_API_KEY=<your_walrus_api_key>
+WALRUS_API_URL=https://api.walrus.ai/v1
+SEAL_MASTER_KEY=<your_seal_master_key>
 ```
 
-### 3. Run with Docker (Recommended)
+3. **Deploy the Sui smart contracts**
 
 ```bash
-# Start all services
+cd smart-contract
+sui client publish --gas-budget 100000000
+```
+
+After deployment, copy the package ID to your `.env` file.
+
+4. **Start the application using Docker Compose**
+
+```bash
 docker-compose up -d
-
-# Check service health
-docker-compose ps
-
-# View logs
-docker-compose logs -f backend
 ```
-
-### 4. Run Locally (Development)
-
-Terminal 1 - Backend:
-```bash
-cd backend
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Terminal 2 - Frontend:
-```bash
-npm run dev
-```
-
-Terminal 3 - Redis (if not using Docker):
-```bash
-redis-server
-```
-
-### 5. Deploy Sui Smart Contract
-
-```bash
-cd sui-contract
-
-# Install Sui CLI if not already installed
-curl -fsSL https://raw.githubusercontent.com/MystenLabs/sui/main/scripts/installer.sh | sh
-
-# Deploy to testnet
-sui client publish --gas-budget 20000000
-```
-
-## Usage
-
-1. Open http://localhost:3000 in your browser
-2. Start chatting! The system will:
-   - **Facts**: Store information like "My flight to Tokyo is Tuesday at 8 AM"
-   - **Queries**: Answer questions like "When is my flight?"
-   - **Conversation**: Handle casual chat naturally
 
 ## API Endpoints
 
-### Backend (http://localhost:8000)
+### Chat API
 
-- `POST /ingest` - Process and store user input
-- `POST /query` - Query stored memories
-- `GET /memory/{user_id}/stats` - Get memory statistics
-- `GET /health` - Health check
+- `POST /api/chat/session` - Create a new chat session
+  - Body: `{ "modelName": "gemini-1.5-pro", "userAddress": "0x..." }`
 
-### Example API Usage
+- `SSE /api/chat/message` - Stream a chat message (Server-Sent Events)
+  - Body: `{ "content": "Hello", "modelName": "gemini-1.5-pro", "sessionId": "0x...", "userAddress": "0x..." }`
 
-```bash
-# Store a fact
-curl -X POST "http://localhost:8000/ingest" \
-  -H "Content-Type: application/json" \
-  -d '{"text": "My meeting with John is tomorrow at 2 PM", "user_id": "user123"}'
+- `POST /api/chat/summary` - Save a summary for a chat session
+  - Body: `{ "sessionId": "0x...", "summary": "Chat about weather", "userAddress": "0x..." }`
 
-# Query memories
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{"text": "When is my meeting?", "user_id": "user123"}'
+### Memory API
+
+- `POST /api/memory` - Create a new memory
+  - Body: `{ "content": "My favorite color is blue", "category": "preference", "userAddress": "0x..." }`
+
+- `GET /api/memory/query` - Query relevant memories
+  - Query params: `?query=favorite+color&userAddress=0x...&limit=5`
+
+## Consuming the Chat Streaming Endpoint
+
+Here's how a frontend client would consume the SSE streaming endpoint:
+
+```javascript
+// Example frontend code using EventSource API
+function startChatStream() {
+  const userMessage = "Tell me about climate change";
+  const sessionId = "0x123..."; // From previous createSession call
+  const userAddress = "0x456..."; // User's Sui address
+  
+  // Create the EventSource
+  const eventSource = new EventSource(`/api/chat/message?content=${encodeURIComponent(userMessage)}&sessionId=${sessionId}&userAddress=${userAddress}&modelName=gemini-1.5-pro`);
+  
+  let fullResponse = '';
+  
+  // Handle incoming message chunks
+  eventSource.onmessage = (event) => {
+    const chunk = event.data;
+    fullResponse += chunk;
+    
+    // Update UI with the chunk
+    appendToChat(chunk);
+  };
+  
+  // Handle completion
+  eventSource.onerror = () => {
+    // Stream is complete or errored
+    eventSource.close();
+    
+    // Process the complete response if needed
+    processCompleteResponse(fullResponse);
+  };
+}
+
+function appendToChat(text) {
+  const chatWindow = document.getElementById('chat-window');
+  chatWindow.innerHTML += text;
+}
+
+function processCompleteResponse(text) {
+  console.log('Full response received:', text);
+  // Additional processing if needed
+}
 ```
 
 ## Project Structure
 
 ```
-personal-data-wallet/
-├── app/                          # Next.js frontend
-│   ├── components/               # React components
-│   ├── hooks/                    # TanStack Query hooks
-│   ├── lib/                      # API client
-│   └── types/                    # TypeScript types
-├── backend/                      # Python FastAPI backend
-│   ├── services/                 # Core business logic
-│   │   ├── classifier.py         # Intent classification
-│   │   ├── graph_extractor.py    # Knowledge graph extraction
-│   │   ├── embeddings.py         # Vector embeddings
-│   │   ├── vector_store.py       # HNSW vector search
-│   │   ├── memory_manager.py     # Memory orchestration
-│   │   ├── sui_client.py         # Sui blockchain client
-│   │   └── walrus_client.py      # Walrus storage client
-│   ├── models.py                 # Pydantic models
-│   ├── config.py                 # Configuration
-│   └── main.py                   # FastAPI application
-├── sui-contract/                 # Sui Move smart contract
-│   ├── sources/                  # Move source files
-│   └── tests/                    # Move tests
-└── docker-compose.yml            # Container orchestration
+├── backend-v2/              # NestJS Backend
+│   ├── src/
+│   │   ├── controllers/     # API Controllers
+│   │   ├── dto/             # Data Transfer Objects
+│   │   ├── modules/         # NestJS Modules
+│   │   ├── services/        # Service Layer
+│   │   ├── app.module.ts    # Main App Module
+│   │   └── main.ts          # Application Entry Point
+│   ├── Dockerfile           # Backend Docker Configuration
+│   └── package.json         # Backend Dependencies
+├── smart-contract/          # Sui Move Package
+│   ├── sources/
+│   │   ├── chat_sessions.move  # Chat Session Contract
+│   │   └── memory.move         # Memory Contract
+│   └── Move.toml            # Move Package Config
+└── docker-compose.yml       # Docker Compose Configuration
 ```
 
 ## Development
 
-### Running Tests
+For local development:
+
+1. **Run services individually**
 
 ```bash
-# Frontend tests
+# Backend
+cd backend-v2
+npm install
+npm run start:dev
+
+# Local Sui Node (in a separate terminal)
+sui start
+```
+
+2. **Run tests**
+
+```bash
+# Backend tests
+cd backend-v2
 npm test
-
-# Backend tests (when implemented)
-cd backend
-pytest
-
-# Sui contract tests
-cd sui-contract
-sui move test
 ```
-
-### Code Style
-
-```bash
-# Frontend linting
-npm run lint
-
-# Backend formatting (install black first: pip install black)
-cd backend
-black .
-```
-
-## Deployment
-
-### Production Docker
-
-```bash
-# Build and deploy
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-```
-
-### Environment Variables
-
-Production environment variables:
-
-```env
-NODE_ENV=production
-NEXT_PUBLIC_BACKEND_URL=https://your-api-domain.com
-SUI_NETWORK=mainnet
-SUI_RPC_URL=https://fullnode.mainnet.sui.io:443
-```
-
-## Technical Details
-
-### Intent Classification
-
-The system uses keyword-based classification to determine:
-- **FACT_ADDITION**: Statements containing factual information
-- **QUERY**: Questions seeking information
-- **CONVERSATIONAL**: General chat
-
-### Knowledge Graph Extraction
-
-Extracts entities and relationships using:
-- Pattern matching for common relationship types
-- Named entity recognition
-- Proximity-based relationship inference
-
-### Vector Storage
-
-Uses HNSW (Hierarchical Navigable Small World) for efficient similarity search:
-- 384-dimensional vectors from sentence-transformers
-- Cosine similarity for semantic matching
-- Persistent storage with metadata
-
-### Blockchain Integration
-
-- **Sui Smart Contract**: Manages ownership and data pointers
-- **Walrus Storage**: Immutable blob storage for vector indexes and graphs
-- **Event-driven**: Backend listens for blockchain events
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Backend not starting**: Check Redis connection and Python dependencies
-2. **Frontend API errors**: Verify backend URL in environment variables  
-3. **Sui connection issues**: Ensure correct RPC URL and network configuration
-4. **Docker issues**: Check port availability and Docker daemon status
-
-### Debug Commands
-
-```bash
-# Check service logs
-docker-compose logs backend
-docker-compose logs frontend
-
-# Check API health
-curl http://localhost:8000/health
-
-# Check memory stats
-curl http://localhost:8000/memory/default-user/stats
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Support
-
-For issues and questions:
-- Create an issue on GitHub
-- Check the troubleshooting section above
-- Review the API documentation
+This project is licensed under the MIT License.

@@ -11,7 +11,14 @@
       "Bash(docker-compose up:*)",
       "Bash(npm install:*)",
       "Bash(pip3 install:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(ls:*)",
+      "Bash(sui move publish:*)",
+      "Bash(python:*)",
+      "Bash(./venv/bin/python backend/services/test_sui.py)",
+      "Bash(./venv/bin/python:*)",
+      "Bash(rm:*)",
+      "Bash(pkill:*)"
     ],
     "deny": []
   }
