@@ -70,6 +70,7 @@ export class MemoryQueryService {
   async findRelevantMemories(
     query: string,
     userAddress: string,
+    userSignature?: string,
     limit: number = 5
   ): Promise<string[]> {
     try {
@@ -128,7 +129,7 @@ export class MemoryQueryService {
             const encryptedContent = await this.walrusService.retrieveContent(memory.blobId);
             
             // Decrypt content
-            const decryptedContent = await this.sealService.decrypt(encryptedContent, userAddress);
+            const decryptedContent = await this.sealService.decrypt(encryptedContent, userAddress, userSignature);
             
             memories.push(decryptedContent);
             
@@ -274,7 +275,7 @@ export class MemoryQueryService {
       const startTime = Date.now();
       
       // Find relevant memories
-      const relevantMemoriesContent = await this.findRelevantMemories(queryText, userAddress, k);
+      const relevantMemoriesContent = await this.findRelevantMemories(queryText, userAddress, userSignature, k);
       
       // Format memories as structured objects
       const relevantMemories: Memory[] = relevantMemoriesContent.map((content, index) => ({

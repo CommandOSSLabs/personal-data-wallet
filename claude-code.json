@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "suiMcp": {
+      "command": "npx",
+      "args": ["@jordangens/sui-mcp@latest", "start"]
+    }
+  }
+}

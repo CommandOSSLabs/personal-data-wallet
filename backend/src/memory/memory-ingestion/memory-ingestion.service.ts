@@ -180,13 +180,13 @@ export class MemoryIngestionService {
       );
       
       // Step 7: Encrypt the memory content
-      const encryptedContent = await this.sealService.encrypt(
+      const { encrypted, backupKey } = await this.sealService.encrypt(
         memoryDto.content,
         memoryDto.userAddress
       );
       
       // Step 8: Save the encrypted content to Walrus
-      const contentBlobId = await this.walrusService.uploadContent(encryptedContent);
+      const contentBlobId = await this.walrusService.uploadContent(encrypted);
       
       // Step 9: Save the updated index and graph to Walrus
       const newIndexBlobId = await this.hnswIndexService.saveIndex(index);
@@ -305,13 +305,13 @@ export class MemoryIngestionService {
       );
       
       // Step 7: Encrypt the memory content
-      const encryptedContent = await this.sealService.encrypt(
+      const { encrypted, backupKey } = await this.sealService.encrypt(
         content,
         userAddress
       );
       
       // Step 8: Save the encrypted content to Walrus
-      const contentBlobId = await this.walrusService.uploadContent(encryptedContent);
+      const contentBlobId = await this.walrusService.uploadContent(encrypted);
       
       // Step 9: Save the updated index and graph to Walrus
       const newIndexBlobId = await this.hnswIndexService.saveIndex(index);

@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "suiMcp": {
+      "command": "npx",
+      "args": ["@jordangens/sui-mcp@latest", "start"]
+    },
+    "serena": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena",
+        "serena-mcp-server",
+        "--context",
+        "ide-assistant",
+        "--project",
+        "."
+      ]
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@context-labs/context7-mcp"]
+    }
+  }
+}

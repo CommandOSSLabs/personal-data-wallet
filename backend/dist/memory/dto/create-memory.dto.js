@@ -15,6 +15,7 @@ class CreateMemoryDto {
     content;
     category;
     userAddress;
+    userSignature;
 }
 exports.CreateMemoryDto = CreateMemoryDto;
 __decorate([
@@ -32,4 +33,9 @@ __decorate([
     (0, class_validator_1.IsNotEmpty)(),
     __metadata("design:type", String)
 ], CreateMemoryDto.prototype, "userAddress", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], CreateMemoryDto.prototype, "userSignature", void 0);
 //# sourceMappingURL=create-memory.dto.js.map

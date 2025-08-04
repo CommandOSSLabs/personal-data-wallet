@@ -71,7 +71,7 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
             return { memories: [], success: false };
         }
     }
-    async findRelevantMemories(query, userAddress, limit = 5) {
+    async findRelevantMemories(query, userAddress, userSignature, limit = 5) {
         try {
             let indexBlobId;
             let graphBlobId;
@@ -102,7 +102,7 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
                             continue;
                         seenBlobIds.add(memory.blobId);
                         const encryptedContent = await this.walrusService.retrieveContent(memory.blobId);
-                        const decryptedContent = await this.sealService.decrypt(encryptedContent, userAddress);
+                        const decryptedContent = await this.sealService.decrypt(encryptedContent, userAddress, userSignature);
                         memories.push(decryptedContent);
                         if (memories.length >= limit)
                             break;
@@ -198,7 +198,7 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
     async getMemoryContext(queryText, userAddress, userSignature, k = 5) {
         try {
             const startTime = Date.now();
-            const relevantMemoriesContent = await this.findRelevantMemories(queryText, userAddress, k);
+            const relevantMemoriesContent = await this.findRelevantMemories(queryText, userAddress, userSignature, k);
             const relevantMemories = relevantMemoriesContent.map((content, index) => ({
                 id: `mem-${index}`,
                 content,

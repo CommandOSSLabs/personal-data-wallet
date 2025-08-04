@@ -10,4 +10,5 @@ export declare class ChatMessageDto {
     originalUserMessage?: string;
     memoryContext?: string;
     userAddress?: string;
+    userSignature?: string;
 }

@@ -2,8 +2,12 @@
 
 # Test script for the Personal Data Wallet smart contract
 
+# Ensure we're on testnet
+echo "Switching to testnet environment..."
+sui client switch --env testnet
+
 echo "Building the contract..."
-sui move build
+sui move build --skip-fetch-latest-git-deps
 
 if [ $? -ne 0 ]; then
     echo "Build failed. Exiting."
@@ -11,7 +15,8 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "Publishing the contract..."
-PUBLISH_OUTPUT=$(sui client publish --gas-budget 100000000 --json)
+PUBLISH_OUTPUT=$(sui client publish --gas-budget 100000000 --skip-fetch-latest-git-deps --json 2>&1)
+echo "Publish output: $PUBLISH_OUTPUT"
 PACKAGE_ID=$(echo "$PUBLISH_OUTPUT" | grep -o '"packageId":"0x[a-fA-F0-9]*"' | head -1 | cut -d '"' -f 4)
 
 if [ -z "$PACKAGE_ID" ]; then

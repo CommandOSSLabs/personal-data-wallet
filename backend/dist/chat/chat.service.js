@@ -243,7 +243,7 @@ let ChatService = ChatService_1 = class ChatService {
                     this.logger.log('Using provided memory context');
                 }
                 else {
-                    relevantMemories = await this.memoryQueryService.findRelevantMemories(content, userId);
+                    relevantMemories = await this.memoryQueryService.findRelevantMemories(content, userId, messageDto.userSignature);
                 }
                 const systemPrompt = this.constructPrompt(chatSession.summary, relevantMemories, messageDto.memoryContext || '');
                 const responseStream = this.geminiService.generateContentStream(modelName, chatHistory, systemPrompt);
@@ -316,7 +316,7 @@ let ChatService = ChatService_1 = class ChatService {
                 this.logger.log('Using provided memory context');
             }
             else {
-                relevantMemories = await this.memoryQueryService.findRelevantMemories(content, userId);
+                relevantMemories = await this.memoryQueryService.findRelevantMemories(content, userId, messageDto.userSignature);
             }
             const systemPrompt = this.constructPrompt(chatSession.summary, relevantMemories, messageDto.memoryContext || '');
             const response = await this.geminiService.generateContent(modelName, chatHistory, systemPrompt);

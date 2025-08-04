@@ -317,7 +317,8 @@ export class ChatService {
           // Fetch relevant memories
           relevantMemories = await this.memoryQueryService.findRelevantMemories(
             content,
-            userId
+            userId,
+            messageDto.userSignature
           );
         }
         
@@ -452,9 +453,10 @@ export class ChatService {
       } else {
         // Fetch relevant memories
         relevantMemories = await this.memoryQueryService.findRelevantMemories(
-          content,
-          userId
-        );
+            content,
+            userId,
+            messageDto.userSignature
+          );
       }
       
       // Step 3: Construct the system prompt with context

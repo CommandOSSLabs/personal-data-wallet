@@ -1,12 +1,31 @@
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { SealClient, SessionKey } from '@mysten/seal';
+import { SuiClient } from '@mysten/sui/client';
+import { SessionStore } from './session-store';
 export declare class SealService {
     private configService;
-    private masterKey;
-    private logger;
-    constructor(configService: ConfigService);
-    encrypt(content: string, userAddress: string): Promise<string>;
-    decrypt(encryptedContent: string, userAddress: string): Promise<string>;
-    canDecrypt(userAddress: string): Promise<boolean>;
-    generateDecryptionKey(userAddress: string): Promise<string>;
-    private deriveUserKey;
+    protected sessionStore: SessionStore;
+    protected sealClient: SealClient;
+    protected suiClient: SuiClient;
+    protected logger: Logger;
+    protected packageId: string;
+    protected sealCorePackageId: string;
+    protected moduleName: string;
+    protected threshold: number;
+    protected network: 'mainnet' | 'testnet' | 'devnet';
+    protected sessionKeys: Map<string, SessionKey>;
+    protected isOpenMode: boolean;
+    constructor(configService: ConfigService, sessionStore: SessionStore);
+    encrypt(content: string, userAddress: string, customPackageId?: string): Promise<{
+        encrypted: string;
+        backupKey: string;
+    }>;
+    decrypt(encryptedContent: string, userAddress: string, signature?: string, customPackageId?: string, customModuleName?: string): Promise<string>;
+    decryptWithBackupKey(encryptedContent: string, backupKey: string): Promise<string>;
+    protected getOrCreateSessionKey(userAddress: string, signature?: string, packageId?: string): Promise<SessionKey>;
+    getSessionKeyMessage(userAddress: string, packageId?: string): Promise<Uint8Array>;
+    protected isSessionKeyExpired(sessionKey: SessionKey): boolean;
+    isInOpenMode(): boolean;
+    fetchMultipleKeys(ids: string[], userAddress: string, signature?: string, packageId?: string, moduleName?: string): Promise<Map<string, Uint8Array>>;
 }

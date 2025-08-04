@@ -18,7 +18,21 @@
       "Bash(./venv/bin/python backend/services/test_sui.py)",
       "Bash(./venv/bin/python:*)",
       "Bash(rm:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "mcp__serena__check_onboarding_performed",
+      "mcp__serena__list_dir",
+      "mcp__serena__replace_regex",
+      "mcp__serena__search_for_pattern",
+      "mcp__serena__find_symbol",
+      "mcp__context7__get-library-docs",
+      "Bash(npx ts-node:*)",
+      "Bash(npm run build:*)",
+      "mcp__serena__replace_symbol_body",
+      "mcp__serena__find_file",
+      "mcp__serena__list_memories",
+      "mcp__serena__get_symbols_overview",
+      "mcp__serena__read_memory",
+      "mcp__context7__resolve-library-id"
     ],
     "deny": []
   }

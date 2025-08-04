@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 
 export class CreateMemoryDto {
   @IsString()
@@ -12,4 +12,8 @@ export class CreateMemoryDto {
   @IsString()
   @IsNotEmpty()
   userAddress: string;
+  
+  @IsString()
+  @IsOptional()
+  userSignature?: string;
 }

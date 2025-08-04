@@ -45,4 +45,8 @@ export class ChatMessageDto {
   @IsString()
   @IsOptional()
   userAddress?: string; // Used in other DTOs
+  
+  @IsString()
+  @IsOptional()
+  userSignature?: string;
 }

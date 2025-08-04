@@ -22,7 +22,7 @@ export declare class MemoryQueryService {
         memories: Memory[];
         success: boolean;
     }>;
-    findRelevantMemories(query: string, userAddress: string, limit?: number): Promise<string[]>;
+    findRelevantMemories(query: string, userAddress: string, userSignature?: string, limit?: number): Promise<string[]>;
     searchMemories(query: string, userAddress: string, category?: string, k?: number): Promise<{
         results: Memory[];
     }>;

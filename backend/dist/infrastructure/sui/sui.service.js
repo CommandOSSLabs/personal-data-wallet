@@ -430,6 +430,107 @@ let SuiService = SuiService_1 = class SuiService {
             throw new Error(`Failed to delete memory: ${error.message}`);
         }
     }
+    async grantAppPermission(userAddress, appAddress, dataIds, expiresAt) {
+        try {
+            const tx = new transactions_1.TransactionBlock();
+            const dataIdBytes = dataIds.map(id => Array.from(new TextEncoder().encode(id)));
+            tx.moveCall({
+                target: `${this.packageId}::seal_access_control::grant_app_permission`,
+                arguments: [
+                    tx.pure(appAddress),
+                    tx.pure(dataIdBytes),
+                    tx.pure(expiresAt.toString()),
+                    tx.object('0x6'),
+                ],
+            });
+            const result = await this.executeTransaction(tx, userAddress);
+            const permissionId = this.extractCreatedObjectId(result);
+            this.logger.log(`Granted permission ${permissionId} to app ${appAddress}`);
+            return permissionId;
+        }
+        catch (error) {
+            this.logger.error(`Error granting app permission: ${error.message}`);
+            throw new Error(`Failed to grant app permission: ${error.message}`);
+        }
+    }
+    async revokeAppPermission(permissionId, userAddress) {
+        try {
+            const tx = new transactions_1.TransactionBlock();
+            tx.moveCall({
+                target: `${this.packageId}::seal_access_control::revoke_app_permission`,
+                arguments: [
+                    tx.object(permissionId),
+                ],
+            });
+            await this.executeTransaction(tx, userAddress);
+            this.logger.log(`Revoked permission ${permissionId}`);
+            return true;
+        }
+        catch (error) {
+            this.logger.error(`Error revoking app permission: ${error.message}`);
+            throw new Error(`Failed to revoke app permission: ${error.message}`);
+        }
+    }
+    async getAppPermission(permissionId) {
+        try {
+            const object = await this.client.getObject({
+                id: permissionId,
+                options: {
+                    showContent: true,
+                },
+            });
+            if (!object || !object.data || !object.data.content) {
+                throw new Error(`Permission ${permissionId} not found`);
+            }
+            const content = object.data.content;
+            const fields = content.fields;
+            const dataIds = fields.data_ids.map((idBytes) => new TextDecoder().decode(new Uint8Array(idBytes)));
+            return {
+                user: fields.user,
+                app: fields.app,
+                grantedAt: Number(fields.granted_at),
+                expiresAt: Number(fields.expires_at),
+                revoked: fields.revoked,
+                dataIds,
+            };
+        }
+        catch (error) {
+            this.logger.error(`Error getting app permission: ${error.message}`);
+            throw new Error(`Failed to get app permission: ${error.message}`);
+        }
+    }
+    async getUserAppPermissions(userAddress) {
+        try {
+            const response = await this.client.getOwnedObjects({
+                owner: userAddress,
+                filter: {
+                    StructType: `${this.packageId}::seal_access_control::AppPermission`
+                },
+                options: {
+                    showContent: true,
+                },
+            });
+            const permissions = [];
+            for (const item of response.data) {
+                if (!item.data?.content)
+                    continue;
+                const content = item.data.content;
+                const fields = content.fields;
+                permissions.push({
+                    id: item.data.objectId,
+                    app: fields.app,
+                    grantedAt: Number(fields.granted_at),
+                    expiresAt: Number(fields.expires_at),
+                    revoked: fields.revoked,
+                });
+            }
+            return permissions;
+        }
+        catch (error) {
+            this.logger.error(`Error getting user app permissions: ${error.message}`);
+            return [];
+        }
+    }
     async executeTransaction(tx, sender) {
         tx.setSender(sender);
         this.logger.log(`Executing transaction for user ${sender}`);

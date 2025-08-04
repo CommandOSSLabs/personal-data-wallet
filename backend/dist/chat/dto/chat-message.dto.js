@@ -23,6 +23,7 @@ class ChatMessageDto {
     originalUserMessage;
     memoryContext;
     userAddress;
+    userSignature;
 }
 exports.ChatMessageDto = ChatMessageDto;
 __decorate([
@@ -80,4 +81,9 @@ __decorate([
     (0, class_validator_1.IsOptional)(),
     __metadata("design:type", String)
 ], ChatMessageDto.prototype, "userAddress", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], ChatMessageDto.prototype, "userSignature", void 0);
 //# sourceMappingURL=chat-message.dto.js.map

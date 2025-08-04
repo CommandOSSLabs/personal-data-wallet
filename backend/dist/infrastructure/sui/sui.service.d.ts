@@ -46,6 +46,23 @@ export declare class SuiService {
         vectorId: number;
     }>;
     deleteMemory(memoryId: string, userAddress: string): Promise<boolean>;
+    grantAppPermission(userAddress: string, appAddress: string, dataIds: string[], expiresAt: number): Promise<string>;
+    revokeAppPermission(permissionId: string, userAddress: string): Promise<boolean>;
+    getAppPermission(permissionId: string): Promise<{
+        user: string;
+        app: string;
+        grantedAt: number;
+        expiresAt: number;
+        revoked: boolean;
+        dataIds: string[];
+    }>;
+    getUserAppPermissions(userAddress: string): Promise<Array<{
+        id: string;
+        app: string;
+        grantedAt: number;
+        expiresAt: number;
+        revoked: boolean;
+    }>>;
     private executeTransaction;
     private extractCreatedObjectId;
     private deserializeMessages;
