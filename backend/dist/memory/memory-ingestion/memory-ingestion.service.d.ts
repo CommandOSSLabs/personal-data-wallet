@@ -6,6 +6,8 @@ import { SealService } from '../../infrastructure/seal/seal.service';
 import { SuiService } from '../../infrastructure/sui/sui.service';
 import { WalrusService } from '../../infrastructure/walrus/walrus.service';
 import { GeminiService } from '../../infrastructure/gemini/gemini.service';
+import { MemoryIndexDto } from '../dto/memory-index.dto';
+import { ProcessMemoryDto } from '../dto/process-memory.dto';
 export interface CreateMemoryDto {
     content: string;
     category: string;
@@ -34,6 +36,16 @@ export declare class MemoryIngestionService {
     processNewMemory(memoryDto: CreateMemoryDto): Promise<{
         success: boolean;
         memoryId?: string;
+        message?: string;
+    }>;
+    processMemory(processDto: ProcessMemoryDto): Promise<{
+        success: boolean;
+        vectorId?: number;
+        blobId?: string;
+        message?: string;
+    }>;
+    indexMemory(indexDto: MemoryIndexDto): Promise<{
+        success: boolean;
         message?: string;
     }>;
     updateMemory(memoryId: string, content: string, userAddress: string): Promise<{

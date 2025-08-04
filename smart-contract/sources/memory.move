@@ -1,5 +1,5 @@
 module pdw::memory {
-    use sui::object::{Self, UID};
+    use sui::object::{Self, UID, ID};
     use sui::tx_context::{Self, TxContext};
     use sui::transfer;
     use std::string::{Self, String};

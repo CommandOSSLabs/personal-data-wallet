@@ -23,7 +23,8 @@ async function bootstrap() {
   // Global prefix for all routes
   app.setGlobalPrefix('api');
   
-  await app.listen(8000);
+  const port = process.env.PORT || 8000;
+  await app.listen(port);
   console.log(`Application is running on: ${await app.getUrl()}`);
 }
 

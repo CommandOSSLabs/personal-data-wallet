@@ -1,8 +1,9 @@
+import { Optional } from '@nestjs/common';
 import { IsString, IsNotEmpty, IsOptional, IsNumber } from 'class-validator';
 
 export class SearchMemoryDto {
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   query: string;
 
   @IsString()

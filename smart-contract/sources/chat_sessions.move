@@ -1,5 +1,5 @@
 module pdw::chat_sessions {
-    use sui::object::{Self, UID};
+    use sui::object::{Self, UID, ID};
     use sui::tx_context::{Self, TxContext};
     use sui::transfer;
     use std::string::{Self, String};
@@ -87,7 +87,7 @@ module pdw::chat_sessions {
 
         // Create a preview of the content (first 32 chars)
         let preview_len = if (string::length(&message.content) > 32) { 32 } else { string::length(&message.content) };
-        let preview = string::sub_string(&message.content, 0, preview_len);
+        let preview = string::substring(&message.content, 0, preview_len);
 
         // Emit event
         sui::event::emit(MessageAdded {
@@ -110,7 +110,7 @@ module pdw::chat_sessions {
 
         // Create a preview of the summary (first 64 chars)
         let preview_len = if (string::length(&session.summary) > 64) { 64 } else { string::length(&session.summary) };
-        let preview = string::sub_string(&session.summary, 0, preview_len);
+        let preview = string::substring(&session.summary, 0, preview_len);
 
         // Emit event
         sui::event::emit(SessionSummaryUpdated {

@@ -9,6 +9,7 @@ export interface Memory {
   isEncrypted: boolean
   owner: string
   similarity_score?: number
+  walrusHash?: string  // Added to match backend
 }
 
 export interface CreateMemoryRequest {
@@ -37,6 +38,7 @@ export interface MemoryContextRequest {
   user_address: string
   user_signature: string
   k?: number
+  // Keep snake_case for these fields to match backend DTO
 }
 
 export interface MemoryContextResponse {

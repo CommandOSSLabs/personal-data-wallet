@@ -1,6 +1,5 @@
 import { httpApi, ApiResponse } from './httpApi'
 
-// Types for chat API
 export interface ChatSession {
   id: string
   owner: string
@@ -13,10 +12,11 @@ export interface ChatSession {
 }
 
 export interface ChatMessage {
-  id: string
+  id?: string
   content: string
-  type: 'user' | 'assistant'
-  timestamp: string
+  role?: string  
+  type?: 'user' | 'assistant'  
+  timestamp?: string
   memory_detected?: boolean
   memory_id?: string
 }
@@ -24,6 +24,8 @@ export interface ChatMessage {
 export interface CreateSessionRequest {
   userAddress: string
   title?: string
+  modelName: string
+  suiObjectId?: string // Used when session is created directly on blockchain
 }
 
 export interface AddMessageRequest {
@@ -49,7 +51,6 @@ export interface StreamChatResponse {
   error?: string
 }
 
-// Backend response types (what the backend actually returns)
 export interface BackendSessionsResponse {
   success: boolean
   sessions: ChatSession[]
@@ -65,7 +66,6 @@ export interface BackendMessageResponse {
   message: string
 }
 
-// Chat API methods
 export const chatApi = {
   // Get all sessions for a user
   getSessions: async (userAddress: string): Promise<BackendSessionsResponse> => {
@@ -79,7 +79,12 @@ export const chatApi = {
 
   // Create a new session
   createSession: async (request: CreateSessionRequest): Promise<BackendSessionResponse> => {
-    return httpApi.post('/api/chat/sessions', request)
+    // Ensure modelName is set (use default if not provided)
+    const requestWithModel = {
+      ...request,
+      modelName: request.modelName || 'gemini-1.5-pro'
+    };
+    return httpApi.post('/api/chat/sessions', requestWithModel)
   },
 
   // Add a message to a session
@@ -119,7 +124,6 @@ export const chatApi = {
 
   // Send regular (non-streaming) chat message
   sendMessage: async (request: StreamChatRequest): Promise<ApiResponse<any>> => {
-    // Format request for backend
     const backendRequest = {
       text: request.text,
       userId: request.user_id,

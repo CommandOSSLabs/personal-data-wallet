@@ -245,6 +245,22 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
             };
         }
     }
+    async getMemoryContentByHash(hash) {
+        try {
+            const encryptedContent = await this.walrusService.retrieveContent(hash);
+            return {
+                content: encryptedContent,
+                success: true
+            };
+        }
+        catch (error) {
+            this.logger.error(`Error getting memory content by hash ${hash}: ${error.message}`);
+            return {
+                content: '',
+                success: false
+            };
+        }
+    }
     async getMemoryStats(userAddress) {
         try {
             const { memories } = await this.getUserMemories(userAddress);

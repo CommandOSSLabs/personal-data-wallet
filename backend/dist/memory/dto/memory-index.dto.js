@@ -9,39 +9,33 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SearchMemoryDto = void 0;
+exports.MemoryIndexDto = void 0;
 const class_validator_1 = require("class-validator");
-class SearchMemoryDto {
-    query;
+class MemoryIndexDto {
+    memoryId;
     userAddress;
     category;
-    k;
-    userSignature;
+    walrusHash;
 }
-exports.SearchMemoryDto = SearchMemoryDto;
-__decorate([
-    (0, class_validator_1.IsString)(),
-    (0, class_validator_1.IsOptional)(),
-    __metadata("design:type", String)
-], SearchMemoryDto.prototype, "query", void 0);
+exports.MemoryIndexDto = MemoryIndexDto;
 __decorate([
     (0, class_validator_1.IsString)(),
     (0, class_validator_1.IsNotEmpty)(),
     __metadata("design:type", String)
-], SearchMemoryDto.prototype, "userAddress", void 0);
+], MemoryIndexDto.prototype, "memoryId", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsNotEmpty)(),
+    __metadata("design:type", String)
+], MemoryIndexDto.prototype, "userAddress", void 0);
 __decorate([
     (0, class_validator_1.IsString)(),
     (0, class_validator_1.IsOptional)(),
     __metadata("design:type", String)
-], SearchMemoryDto.prototype, "category", void 0);
-__decorate([
-    (0, class_validator_1.IsNumber)(),
-    (0, class_validator_1.IsOptional)(),
-    __metadata("design:type", Number)
-], SearchMemoryDto.prototype, "k", void 0);
+], MemoryIndexDto.prototype, "category", void 0);
 __decorate([
     (0, class_validator_1.IsString)(),
     (0, class_validator_1.IsOptional)(),
     __metadata("design:type", String)
-], SearchMemoryDto.prototype, "userSignature", void 0);
-//# sourceMappingURL=search-memory.dto.js.map
+], MemoryIndexDto.prototype, "walrusHash", void 0);
+//# sourceMappingURL=memory-index.dto.js.map

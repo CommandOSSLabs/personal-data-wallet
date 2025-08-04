@@ -65,6 +65,14 @@ export declare class ChatService {
         success: boolean;
         message: string;
     }>;
+    indexSession(sessionIndexDto: {
+        sessionId: string;
+        userAddress: string;
+        title: string;
+    }): Promise<{
+        success: boolean;
+        message?: string;
+    }>;
     saveSummary(saveSummaryDto: SaveSummaryDto): Promise<{
         success: boolean;
     }>;

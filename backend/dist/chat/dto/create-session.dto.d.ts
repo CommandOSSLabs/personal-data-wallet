@@ -1,4 +1,6 @@
 export declare class CreateSessionDto {
-    modelName: string;
     userAddress: string;
+    title?: string;
+    modelName: string;
+    suiObjectId?: string;
 }

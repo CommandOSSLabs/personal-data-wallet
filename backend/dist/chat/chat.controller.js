@@ -21,6 +21,7 @@ const create_session_dto_1 = require("./dto/create-session.dto");
 const save_summary_dto_1 = require("./dto/save-summary.dto");
 const add_message_dto_1 = require("./dto/add-message.dto");
 const update_session_title_dto_1 = require("./dto/update-session-title.dto");
+const session_index_dto_1 = require("./dto/session-index.dto");
 let ChatController = class ChatController {
     chatService;
     constructor(chatService) {
@@ -43,6 +44,9 @@ let ChatController = class ChatController {
     }
     async updateSessionTitle(sessionId, updateTitleDto) {
         return this.chatService.updateSessionTitle(sessionId, updateTitleDto.userAddress, updateTitleDto.title);
+    }
+    async indexSession(sessionIndexDto) {
+        return this.chatService.indexSession(sessionIndexDto);
     }
     async saveSummary(saveSummaryDto) {
         return this.chatService.saveSummary(saveSummaryDto);
@@ -102,6 +106,13 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], ChatController.prototype, "updateSessionTitle", null);
 __decorate([
+    (0, common_1.Post)('sessions/index'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [session_index_dto_1.SessionIndexDto]),
+    __metadata("design:returntype", Promise)
+], ChatController.prototype, "indexSession", null);
+__decorate([
     (0, common_1.Post)('summary'),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -123,7 +134,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], ChatController.prototype, "sendMessage", null);
 exports.ChatController = ChatController = __decorate([
-    (0, common_1.Controller)('api/chat'),
+    (0, common_1.Controller)('chat'),
     __metadata("design:paramtypes", [chat_service_1.ChatService])
 ], ChatController);
 //# sourceMappingURL=chat.controller.js.map

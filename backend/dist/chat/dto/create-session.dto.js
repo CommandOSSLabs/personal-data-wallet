@@ -12,10 +12,22 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CreateSessionDto = void 0;
 const class_validator_1 = require("class-validator");
 class CreateSessionDto {
-    modelName;
     userAddress;
+    title;
+    modelName;
+    suiObjectId;
 }
 exports.CreateSessionDto = CreateSessionDto;
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsNotEmpty)(),
+    __metadata("design:type", String)
+], CreateSessionDto.prototype, "userAddress", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], CreateSessionDto.prototype, "title", void 0);
 __decorate([
     (0, class_validator_1.IsString)(),
     (0, class_validator_1.IsNotEmpty)(),
@@ -23,7 +35,7 @@ __decorate([
 ], CreateSessionDto.prototype, "modelName", void 0);
 __decorate([
     (0, class_validator_1.IsString)(),
-    (0, class_validator_1.IsNotEmpty)(),
+    (0, class_validator_1.IsOptional)(),
     __metadata("design:type", String)
-], CreateSessionDto.prototype, "userAddress", void 0);
+], CreateSessionDto.prototype, "suiObjectId", void 0);
 //# sourceMappingURL=create-session.dto.js.map

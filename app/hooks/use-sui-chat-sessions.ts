@@ -10,10 +10,13 @@ interface SuiChatSession {
   owner: string
   title: string
   messages: Array<{
-    id: string
+    id?: string
     content: string
-    type: 'user' | 'assistant'
-    timestamp: string
+    type?: 'user' | 'assistant'
+    role?: string
+    timestamp?: string
+    memory_detected?: boolean
+    memory_id?: string
   }>
   created_at: string
   updated_at: string
@@ -58,10 +61,10 @@ export function useSuiChatSessions(userAddress: string | null) {
     id: suiSession.id,
     title: suiSession.title,
     messages: suiSession.messages.map(msg => ({
-      id: msg.id,
+      id: msg.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`, // Ensure ID exists
       content: msg.content,
-      type: msg.type,
-      timestamp: msg.timestamp, // Keep as string
+      type: msg.type || (msg.role === 'user' ? 'user' : 'assistant'), // Handle both type and role fields
+      timestamp: msg.timestamp || new Date().toISOString(), // Ensure timestamp exists
       memoryDetected: msg.memory_detected, // Convert snake_case to camelCase
       memoryId: msg.memory_id // Convert snake_case to camelCase
     })),
@@ -74,12 +77,26 @@ export function useSuiChatSessions(userAddress: string | null) {
     mutationFn: async (title: string) => {
       if (!userAddress) throw new Error('No user address')
 
-      const response = await chatApi.createSession({
-        userAddress,
-        title
-      })
-
-      return response
+      try {
+        console.log('Creating new session with model:', 'gemini-1.5-pro')
+        
+        const response = await chatApi.createSession({
+          userAddress,
+          title,
+          modelName: 'gemini-1.5-pro' // Add required modelName field
+        })
+        
+        // Even if HTTP status is 201, we need to check the success flag
+        if (response.success === false) {
+          console.error('Backend reported failure despite 201 status:', response)
+          throw new Error('Backend reported failure in response body')
+        }
+        
+        return response
+      } catch (error) {
+        console.error('Session creation error:', error)
+        throw error
+      }
     },
     onSuccess: (data) => {
       console.log('Create session response:', data)
@@ -89,6 +106,9 @@ export function useSuiChatSessions(userAddress: string | null) {
       // Set as current session - backend returns { success: true, session: {...} }
       const sessionId = data.session?.id || ''
       console.log('Extracted session ID:', sessionId)
+      if (!sessionId) {
+        console.error('No session ID in successful response:', data)
+      }
       setCurrentSessionId(sessionId)
     }
   })

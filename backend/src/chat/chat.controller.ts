@@ -6,9 +6,10 @@ import { CreateSessionDto } from './dto/create-session.dto';
 import { SaveSummaryDto } from './dto/save-summary.dto';
 import { AddMessageDto } from './dto/add-message.dto';
 import { UpdateSessionTitleDto } from './dto/update-session-title.dto';
+import { SessionIndexDto } from './dto/session-index.dto';
 import { ChatSession } from '../types/chat.types';
 
-@Controller('api/chat')
+@Controller('chat')
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
@@ -56,6 +57,11 @@ export class ChatController {
       updateTitleDto.userAddress,
       updateTitleDto.title
     );
+  }
+
+  @Post('sessions/index')
+  async indexSession(@Body() sessionIndexDto: SessionIndexDto) {
+    return this.chatService.indexSession(sessionIndexDto);
   }
 
   @Post('summary')

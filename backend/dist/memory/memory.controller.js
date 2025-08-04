@@ -20,6 +20,8 @@ const create_memory_dto_1 = require("./dto/create-memory.dto");
 const search_memory_dto_1 = require("./dto/search-memory.dto");
 const update_memory_dto_1 = require("./dto/update-memory.dto");
 const memory_context_dto_1 = require("./dto/memory-context.dto");
+const memory_index_dto_1 = require("./dto/memory-index.dto");
+const process_memory_dto_1 = require("./dto/process-memory.dto");
 let MemoryController = class MemoryController {
     memoryIngestionService;
     memoryQueryService;
@@ -47,6 +49,15 @@ let MemoryController = class MemoryController {
     }
     async getMemoryStats(userAddress) {
         return this.memoryQueryService.getMemoryStats(userAddress);
+    }
+    async getMemoryContent(hash) {
+        return this.memoryQueryService.getMemoryContentByHash(hash);
+    }
+    async indexMemory(memoryIndexDto) {
+        return this.memoryIngestionService.indexMemory(memoryIndexDto);
+    }
+    async processMemory(processDto) {
+        return this.memoryIngestionService.processMemory(processDto);
     }
 };
 exports.MemoryController = MemoryController;
@@ -101,8 +112,29 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], MemoryController.prototype, "getMemoryStats", null);
+__decorate([
+    (0, common_1.Get)('content/:hash'),
+    __param(0, (0, common_1.Param)('hash')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], MemoryController.prototype, "getMemoryContent", null);
+__decorate([
+    (0, common_1.Post)('index'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [memory_index_dto_1.MemoryIndexDto]),
+    __metadata("design:returntype", Promise)
+], MemoryController.prototype, "indexMemory", null);
+__decorate([
+    (0, common_1.Post)('process'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [process_memory_dto_1.ProcessMemoryDto]),
+    __metadata("design:returntype", Promise)
+], MemoryController.prototype, "processMemory", null);
 exports.MemoryController = MemoryController = __decorate([
-    (0, common_1.Controller)('api/memories'),
+    (0, common_1.Controller)('memories'),
     __metadata("design:paramtypes", [memory_ingestion_service_1.MemoryIngestionService,
         memory_query_service_1.MemoryQueryService])
 ], MemoryController);

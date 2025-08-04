@@ -6,6 +6,7 @@ import { CreateSessionDto } from './dto/create-session.dto';
 import { SaveSummaryDto } from './dto/save-summary.dto';
 import { AddMessageDto } from './dto/add-message.dto';
 import { UpdateSessionTitleDto } from './dto/update-session-title.dto';
+import { SessionIndexDto } from './dto/session-index.dto';
 import { ChatSession } from '../types/chat.types';
 export declare class ChatController {
     private readonly chatService;
@@ -54,6 +55,10 @@ export declare class ChatController {
     updateSessionTitle(sessionId: string, updateTitleDto: UpdateSessionTitleDto): Promise<{
         success: boolean;
         message: string;
+    }>;
+    indexSession(sessionIndexDto: SessionIndexDto): Promise<{
+        success: boolean;
+        message?: string;
     }>;
     saveSummary(saveSummaryDto: SaveSummaryDto): Promise<{
         success: boolean;

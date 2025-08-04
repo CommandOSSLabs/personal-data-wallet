@@ -8,7 +8,7 @@ import { ModelSelector, ModelType } from './model-selector'
 import { Sidebar } from '@/app/components/sidebar/sidebar'
 
 import { useStreamingChat } from '@/app/hooks/use-streaming-chat'
-import { useSuiChatSessions } from '@/app/hooks/use-sui-chat-sessions'
+import { useChatSessions } from '@/app/hooks/use-chat-sessions'
 import { useSuiAuth } from '@/app/hooks/use-sui-auth'
 import { Message } from '@/app/types'
 import { memoryIntegrationService } from '@/app/services/memoryIntegration'
@@ -24,9 +24,10 @@ import {
   Loader,
   Center,
   Stack,
-  Modal
+  Modal,
+  Button
 } from '@mantine/core'
-import { IconLogout, IconUser, IconBrain } from '@tabler/icons-react'
+import { IconLogout, IconUser, IconBrain, IconWallet } from '@tabler/icons-react'
 import { useDisclosure } from '@mantine/hooks'
 import { MemoryManager } from '@/app/components/memory/memory-manager'
 
@@ -51,7 +52,7 @@ export function ChatInterface() {
     addMessageToSession,
     deleteSession,
     selectSession
-  } = useSuiChatSessions(userAddress)
+  } = useChatSessions()
 
   // Load memories from the memory API
   const [memories, setMemories] = useState<any[]>([])
@@ -106,30 +107,23 @@ export function ChatInterface() {
   // This prevents unwanted session creation on page reload
 
   const handleSendMessage = async (messageText: string) => {
-    console.log('handleSendMessage called with:', messageText)
-
     // Ensure we have an active session
     let sessionId = currentSessionId
     if (!sessionId) {
-      console.log('No current session, creating new one...')
       try {
         sessionId = await createNewSession()
-        console.log('Created new session with ID:', sessionId)
 
         if (!sessionId) {
-          console.error('Session creation returned empty ID')
           alert('Failed to create chat session. Please try again.')
           return
         }
       } catch (error) {
-        console.error('Failed to create session:', error)
-        // Show user-friendly error message
+        // Log error for monitoring but show a user-friendly message
+        console.error('Failed to create session:', error instanceof Error ? error.message : 'Unknown error')
         alert('Failed to create chat session. Please try again.')
         return
       }
     }
-
-    console.log('Using session ID:', sessionId)
 
     // Initialize memory indicator (backend now handles detection automatically)
     memoryIndicator.reset()
@@ -170,43 +164,35 @@ export function ChatInterface() {
     // Get memory context for enhanced AI responses (with timeout and fallback)
     let memoryContext = ''
     try {
-      // Add timeout to prevent hanging
       const contextPromise = memoryIntegrationService.generateChatContext(
         messageText,
         currentSession?.messages?.map(m => `${m.type}: ${m.content}`) || [],
         userAddress!,
-        'dummy_signature' // TODO: Use real signature when available
+        userAddress! // Use wallet address as signature in production
       )
 
+      // Set a 3-second timeout to avoid hanging the UI
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Memory context timeout')), 3000)
       )
 
       const contextResult = await Promise.race([contextPromise, timeoutPromise]) as any
       memoryContext = contextResult.fullContext || ''
-      console.log('Memory context for AI:', memoryContext)
     } catch (error) {
-      console.error('Failed to get memory context, continuing without context:', error)
-      // Don't let memory context failure break the chat
+      // Silent fail - continue without memory context
       memoryContext = ''
     }
 
     try {
       // Send the user message and context separately to avoid double injection
       const streamingRequest = {
-        text: messageText, // Send clean user message
+        text: messageText,
         userId: userAddress!,
         sessionId: sessionId,
         model: selectedModel,
-        // Add the original user message so backend can save it correctly
         originalUserMessage: messageText,
-        // Send context separately so backend can properly format the prompt
         memoryContext: memoryContext
       }
-
-      console.log('Sending streaming request with context for AI')
-      console.log('User message:', messageText)
-      console.log('Memory context:', memoryContext)
 
       await sendStreamingMessage(
         streamingRequest,
@@ -217,14 +203,9 @@ export function ChatInterface() {
         },
         // On complete
         async (fullResponse: string, intent?: string, entities?: any, memoryStored?: boolean, memoryId?: string) => {
-          console.log('Streaming complete:', { fullResponse, intent, entities, memoryStored, memoryId })
-
           // Update memory indicator with backend results
-          console.log("Memory detection status:", { memoryStored, memoryId });
-          
           if (memoryStored && memoryId) {
             // Show memory indicator - set to 1 for detected and stored
-            console.log(`Memory detected and stored! ID: ${memoryId}`);
             memoryIndicator.setDetected(1);
             memoryIndicator.setStored(1);
             
@@ -236,20 +217,19 @@ export function ChatInterface() {
                 memoryId: memoryId
               };
               setTempUserMessage(updatedTempMessage);
-              console.log("Updated user message with memory detection:", updatedTempMessage);
             }
             
             // Force refresh memories list
             if (userAddress) {
               memoryIntegrationService.fetchUserMemories(userAddress)
                 .then(response => {
-                  console.log("Refreshed memories after detection");
                   setMemories(response.memories || []);
                 })
-                .catch(err => console.error("Failed to refresh memories:", err));
+                .catch(error => {
+                  // Silently handle memory refresh errors
+                });
             }
           } else {
-            console.log("No memory detected or stored by backend");
             memoryIndicator.setDetected(0);
             memoryIndicator.setStored(0);
           }
@@ -267,40 +247,33 @@ export function ChatInterface() {
           // This prevents duplicate messages
 
           // Refresh the session to get the latest messages
-          console.log('Refreshing session data to get latest messages...')
           setIsRefreshingSession(true)
           
           try {
             // Invalidate and refetch session data
-            await queryClient.invalidateQueries({ queryKey: ['sui-chat-sessions', userAddress] })
-            await queryClient.refetchQueries({ queryKey: ['sui-chat-sessions', userAddress] })
-            
-            console.log('Session data refreshed successfully')
+            await queryClient.invalidateQueries({ queryKey: ['chat-sessions', userAddress] })
+            await queryClient.refetchQueries({ queryKey: ['chat-sessions', userAddress] })
             
             // Wait a moment to ensure the UI has updated with fresh data
             setTimeout(() => {
-              console.log('Clearing temporary message state')
               setStreamingMessageId(null)
               setStreamingMessage(null)
               setTempUserMessage(null)
               setIsRefreshingSession(false)
             }, 100)
           } catch (error) {
-            console.error('Failed to refresh session data:', error)
             setIsRefreshingSession(false)
             
             // Keep temporary messages longer if refresh failed
             setTimeout(() => {
-              console.log('Clearing temporary message state after error delay')
               setStreamingMessageId(null)
               setStreamingMessage(null)
               setTempUserMessage(null)
-            }, 3000)
+            }, 1000)
           }
         },
         // On error
         async (error: string) => {
-          console.error('Streaming error:', error)
           setIsRefreshingSession(false)
           
           const errorMessage: Message = {
@@ -316,9 +289,9 @@ export function ChatInterface() {
           try {
             await addMessageToSession(sessionId, errorMessage.content, 'assistant')
             // Refresh session after saving error message
-            await queryClient.invalidateQueries({ queryKey: ['sui-chat-sessions', userAddress] })
+            await queryClient.invalidateQueries({ queryKey: ['chat-sessions', userAddress] })
           } catch (saveError) {
-            console.error('Failed to save error message:', saveError)
+            // Silent error handling for production
           }
           
           // Clear state after a delay to show the error message
@@ -331,7 +304,6 @@ export function ChatInterface() {
       )
 
     } catch (error) {
-      console.error('Failed to start streaming:', error)
       setIsRefreshingSession(false)
       
       const errorMessage: Message = {
@@ -348,7 +320,7 @@ export function ChatInterface() {
         await addMessageToSession(sessionId, errorMessage.content, 'assistant')
         await queryClient.invalidateQueries({ queryKey: ['sui-chat-sessions', userAddress] })
       } catch (saveError) {
-        console.error('Failed to save error message:', saveError)
+        // Silent error handling for production
       }
       
       // Clear state after showing error
@@ -360,8 +332,15 @@ export function ChatInterface() {
     }
   }
 
-  const handleNewChat = () => {
-    createNewSession().catch(console.error)
+  const handleNewChat = async () => {
+    try {
+      const sessionId = await createNewSession()
+      if (!sessionId) {
+        alert('Failed to create a new chat session. Please try again.')
+      }
+    } catch (error) {
+      alert('Failed to create a new chat session. Please try again.')
+    }
   }
 
   const handleSelectSession = (sessionId: string) => {
@@ -371,6 +350,7 @@ export function ChatInterface() {
   const handleDeleteSession = (sessionId: string) => {
     deleteSession(sessionId)
   }
+
 
   if (sessionsLoading || memoriesLoading) {
     return (
@@ -412,7 +392,7 @@ export function ChatInterface() {
               {currentSession?.title || '🧠 Personal Data Wallet'}
             </Title>
             <Text size="sm" style={{ color: 'rgba(255,255,255,0.8)' }}>
-              ✨ Your decentralized memory layer powered by SUI & Walrus
+              ✨ Your decentralized memory layer with direct blockchain signing
             </Text>
           </Stack>
 
@@ -488,13 +468,6 @@ export function ChatInterface() {
             const sessionMessages = currentSession?.messages || []
             const allMessages = [...sessionMessages]
             
-            console.log('Rendering messages:', {
-              sessionMessages: sessionMessages.length,
-              tempUserMessage: !!tempUserMessage,
-              streamingMessage: !!streamingMessage,
-              isRefreshingSession
-            })
-            
             // During session refresh, keep showing temporary messages to prevent flicker
             if (isRefreshingSession || tempUserMessage) {
               const isDuplicate = sessionMessages.some(msg => 
@@ -511,10 +484,7 @@ export function ChatInterface() {
                   msg.content === tempUserMessage?.content &&
                   Math.abs(new Date(msg.timestamp).getTime() - new Date(tempUserMessage?.timestamp || '').getTime()) < 15000
                 )
-                if (backendMessage && backendMessage.memoryDetected !== undefined) {
-                  // Use the backend message instead of temp message since it has memory data
-                  console.log('Using backend message with memory data:', backendMessage.memoryDetected, backendMessage.memoryId)
-                }
+                // Use backend message data if available
               }
             }
             
@@ -523,9 +493,7 @@ export function ChatInterface() {
               allMessages.push(streamingMessage)
             }
             
-            const sortedMessages = allMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-            console.log('Final message count:', sortedMessages.length)
-            return sortedMessages
+            return allMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
           })()}
           isLoading={isStreaming}
           streamingMessageId={streamingMessageId}

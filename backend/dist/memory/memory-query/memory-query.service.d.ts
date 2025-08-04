@@ -39,6 +39,10 @@ export declare class MemoryQueryService {
             context_length: number;
         };
     }>;
+    getMemoryContentByHash(hash: string): Promise<{
+        content: string;
+        success: boolean;
+    }>;
     getMemoryStats(userAddress: string): Promise<{
         total_memories: number;
         categories: Record<string, number>;

@@ -43,20 +43,42 @@ let SuiService = SuiService_1 = class SuiService {
             networkUrl = (0, client_1.getFullnodeUrl)('testnet');
         }
         this.client = new client_1.SuiClient({ url: networkUrl });
-        const packageId = this.configService.get('SUI_PACKAGE_ID');
+        let packageId = this.configService.get('SUI_PACKAGE_ID');
+        if (packageId && packageId.length < 66 && packageId.startsWith('0x')) {
+            this.logger.warn('Malformed SUI_PACKAGE_ID detected, using default instead');
+            packageId = undefined;
+        }
         if (!packageId) {
-            this.logger.warn('SUI_PACKAGE_ID not provided, using default');
+            this.logger.warn('SUI_PACKAGE_ID not provided or invalid, using default');
             this.packageId = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
         }
         else {
             this.packageId = packageId;
         }
-        const privateKey = this.configService.get('SUI_ADMIN_PRIVATE_KEY');
-        if (privateKey) {
-            this.adminKeypair = ed25519_1.Ed25519Keypair.fromSecretKey(Buffer.from(privateKey.replace('0x', ''), 'hex'));
+        this.logger.log(`Using SUI_PACKAGE_ID: ${this.packageId}`);
+        let privateKey = this.configService.get('SUI_ADMIN_PRIVATE_KEY');
+        try {
+            if (privateKey) {
+                privateKey = privateKey.replace(/\s+/g, '');
+                if (!privateKey.startsWith('0x')) {
+                    privateKey = '0x' + privateKey;
+                }
+                const keyBuffer = Buffer.from(privateKey.replace('0x', ''), 'hex');
+                if (keyBuffer.length !== 32) {
+                    throw new Error(`Invalid key length: ${keyBuffer.length}, expected 32`);
+                }
+                this.adminKeypair = ed25519_1.Ed25519Keypair.fromSecretKey(keyBuffer);
+                const adminAddress = this.adminKeypair.getPublicKey().toSuiAddress();
+                this.logger.log(`SUI admin keypair initialized successfully with address: ${adminAddress}`);
+            }
+            else {
+                this.logger.warn('SUI_ADMIN_PRIVATE_KEY not provided, some operations may fail');
+            }
         }
-        else {
-            this.logger.warn('SUI_ADMIN_PRIVATE_KEY not provided, some operations may fail');
+        catch (error) {
+            this.logger.error(`Failed to initialize admin keypair: ${error.message}`);
+            this.logger.warn('Using mock keypair for development');
+            this.adminKeypair = new ed25519_1.Ed25519Keypair();
         }
     }
     async getChatSessions(userAddress) {
@@ -410,17 +432,23 @@ let SuiService = SuiService_1 = class SuiService {
     }
     async executeTransaction(tx, sender) {
         tx.setSender(sender);
-        const senderAddress = this.adminKeypair.getPublicKey().toSuiAddress();
-        return await this.client.signAndExecuteTransactionBlock({
-            transactionBlock: tx,
-            signer: this.adminKeypair,
-            options: {
-                showEffects: true,
-                showEvents: true,
-                showObjectChanges: true,
-            },
-            requestType: 'WaitForLocalExecution',
-        });
+        this.logger.log(`Executing transaction for user ${sender}`);
+        try {
+            return await this.client.signAndExecuteTransactionBlock({
+                transactionBlock: tx,
+                signer: this.adminKeypair,
+                options: {
+                    showEffects: true,
+                    showEvents: true,
+                    showObjectChanges: true,
+                },
+                requestType: 'WaitForLocalExecution',
+            });
+        }
+        catch (error) {
+            this.logger.error(`Transaction execution failed: ${error.message}`);
+            throw error;
+        }
     }
     extractCreatedObjectId(result) {
         try {

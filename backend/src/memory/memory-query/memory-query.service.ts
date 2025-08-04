@@ -335,6 +335,28 @@ export class MemoryQueryService {
   /**
    * Get memory statistics
    */
+  /**
+   * Get memory content by its Walrus hash
+   */
+  async getMemoryContentByHash(hash: string): Promise<{ content: string, success: boolean }> {
+    try {
+      // Retrieve encrypted content from Walrus
+      const encryptedContent = await this.walrusService.retrieveContent(hash);
+      
+      // Return the content (can be encrypted)
+      return {
+        content: encryptedContent,
+        success: true
+      };
+    } catch (error) {
+      this.logger.error(`Error getting memory content by hash ${hash}: ${error.message}`);
+      return {
+        content: '',
+        success: false
+      };
+    }
+  }
+  
   async getMemoryStats(userAddress: string): Promise<{
     total_memories: number,
     categories: Record<string, number>,

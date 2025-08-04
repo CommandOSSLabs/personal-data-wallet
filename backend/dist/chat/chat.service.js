@@ -85,16 +85,29 @@ let ChatService = ChatService_1 = class ChatService {
     }
     async createSession(createSessionDto) {
         try {
-            const sessionId = await this.suiService.createChatSession(createSessionDto.userAddress, createSessionDto.modelName);
-            const rawSession = await this.suiService.getChatSession(sessionId);
+            let sessionId;
+            if (createSessionDto.suiObjectId) {
+                sessionId = createSessionDto.suiObjectId;
+                this.logger.log(`Using existing blockchain session ID: ${sessionId}`);
+            }
+            else {
+                sessionId = await this.suiService.createChatSession(createSessionDto.userAddress, createSessionDto.modelName);
+            }
+            let rawSession;
+            try {
+                rawSession = await this.suiService.getChatSession(sessionId);
+            }
+            catch (error) {
+                this.logger.error(`Failed to fetch session data: ${error.message}`);
+            }
             const session = {
                 id: sessionId,
-                owner: rawSession.owner,
-                title: rawSession.modelName,
-                messages: [],
+                owner: rawSession?.owner || createSessionDto.userAddress,
+                title: createSessionDto.title || rawSession?.modelName || createSessionDto.modelName,
+                messages: rawSession?.messages || [],
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
-                message_count: 0,
+                message_count: rawSession?.messages?.length || 0,
                 sui_object_id: sessionId
             };
             return { success: true, session, sessionId };
@@ -152,6 +165,38 @@ let ChatService = ChatService_1 = class ChatService {
             return {
                 success: false,
                 message: `Error: ${error.message}`
+            };
+        }
+    }
+    async indexSession(sessionIndexDto) {
+        try {
+            const { sessionId, userAddress, title } = sessionIndexDto;
+            try {
+                const rawSession = await this.suiService.getChatSession(sessionId);
+                if (rawSession.owner !== userAddress) {
+                    return {
+                        success: false,
+                        message: 'Session does not belong to the specified user'
+                    };
+                }
+            }
+            catch (error) {
+                this.logger.error(`Error verifying session: ${error.message}`);
+                return {
+                    success: false,
+                    message: `Failed to verify session ownership: ${error.message}`
+                };
+            }
+            return {
+                success: true,
+                message: `Session ${sessionId} indexed successfully`
+            };
+        }
+        catch (error) {
+            this.logger.error(`Error indexing session: ${error.message}`);
+            return {
+                success: false,
+                message: `Failed to index session: ${error.message}`
             };
         }
     }

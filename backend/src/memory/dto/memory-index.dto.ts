@@ -1,19 +1,19 @@
 import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 
-export class CreateSessionDto {
+export class MemoryIndexDto {
+  @IsString()
+  @IsNotEmpty()
+  memoryId: string;
+
   @IsString()
   @IsNotEmpty()
   userAddress: string;
-
+  
   @IsString()
   @IsOptional()
-  title?: string;
-
-  @IsString()
-  @IsNotEmpty()
-  modelName: string;
-
+  category?: string;
+  
   @IsString()
   @IsOptional()
-  suiObjectId?: string;
+  walrusHash?: string;
 }

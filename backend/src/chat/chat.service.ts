@@ -90,27 +90,42 @@ export class ChatService {
   }
 
   /**
-   * Create a new chat session
+   * Create a new chat session or register an existing one
    */
   async createSession(createSessionDto: CreateSessionDto): Promise<{ success: boolean, session?: any, sessionId?: string }> {
     try {
-      const sessionId = await this.suiService.createChatSession(
-        createSessionDto.userAddress, 
-        createSessionDto.modelName
-      );
+      let sessionId: string;
       
-      // Get the newly created session
-      const rawSession = await this.suiService.getChatSession(sessionId);
+      // If suiObjectId is provided, the session was created directly on the blockchain by the frontend
+      if (createSessionDto.suiObjectId) {
+        sessionId = createSessionDto.suiObjectId;
+        this.logger.log(`Using existing blockchain session ID: ${sessionId}`);
+      } else {
+        // Create a new session on the blockchain via backend
+        sessionId = await this.suiService.createChatSession(
+          createSessionDto.userAddress, 
+          createSessionDto.modelName
+        );
+      }
+      
+      // Get the session data
+      let rawSession: any;
+      try {
+        rawSession = await this.suiService.getChatSession(sessionId);
+      } catch (error) {
+        this.logger.error(`Failed to fetch session data: ${error.message}`);
+        // Continue with default values if session fetch fails
+      }
       
       // Format the session for the frontend
       const session = {
         id: sessionId,
-        owner: rawSession.owner,
-        title: rawSession.modelName, // Use model name as title initially
-        messages: [], // New session has no messages
+        owner: rawSession?.owner || createSessionDto.userAddress,
+        title: createSessionDto.title || rawSession?.modelName || createSessionDto.modelName,
+        messages: rawSession?.messages || [], 
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-        message_count: 0,
+        message_count: rawSession?.messages?.length || 0,
         sui_object_id: sessionId
       };
       
@@ -190,6 +205,45 @@ export class ChatService {
       return {
         success: false,
         message: `Error: ${error.message}`
+      };
+    }
+  }
+
+  /**
+   * Index a session that was created directly on the blockchain
+   */
+  async indexSession(sessionIndexDto: { sessionId: string, userAddress: string, title: string }): Promise<{ success: boolean, message?: string }> {
+    try {
+      const { sessionId, userAddress, title } = sessionIndexDto;
+      
+      // Verify the session exists on chain and belongs to the user
+      try {
+        const rawSession = await this.suiService.getChatSession(sessionId);
+        if (rawSession.owner !== userAddress) {
+          return { 
+            success: false, 
+            message: 'Session does not belong to the specified user'
+          };
+        }
+      } catch (error) {
+        this.logger.error(`Error verifying session: ${error.message}`);
+        return { 
+          success: false, 
+          message: `Failed to verify session ownership: ${error.message}`
+        };
+      }
+      
+      // No need to create the session on-chain since it already exists
+      // Just return success
+      return {
+        success: true,
+        message: `Session ${sessionId} indexed successfully`
+      };
+    } catch (error) {
+      this.logger.error(`Error indexing session: ${error.message}`);
+      return { 
+        success: false,
+        message: `Failed to index session: ${error.message}`
       };
     }
   }

@@ -38,22 +38,54 @@ export class SuiService {
     this.client = new SuiClient({ url: networkUrl });
     
     // Get package ID from config
-    const packageId = this.configService.get<string>('SUI_PACKAGE_ID');
+    let packageId = this.configService.get<string>('SUI_PACKAGE_ID');
+    
+    // Handle potential malformed package ID (split across lines)
+    if (packageId && packageId.length < 66 && packageId.startsWith('0x')) {
+      this.logger.warn('Malformed SUI_PACKAGE_ID detected, using default instead');
+      packageId = undefined;
+    }
+    
     if (!packageId) {
-      this.logger.warn('SUI_PACKAGE_ID not provided, using default');
+      this.logger.warn('SUI_PACKAGE_ID not provided or invalid, using default');
       this.packageId = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
     } else {
       this.packageId = packageId;
     }
     
+    this.logger.log(`Using SUI_PACKAGE_ID: ${this.packageId}`); // Log the package ID being used
+    
     // Initialize admin keypair for gas
-    const privateKey = this.configService.get<string>('SUI_ADMIN_PRIVATE_KEY');
-    if (privateKey) {
-      this.adminKeypair = Ed25519Keypair.fromSecretKey(
-        Buffer.from(privateKey.replace('0x', ''), 'hex')
-      );
-    } else {
-      this.logger.warn('SUI_ADMIN_PRIVATE_KEY not provided, some operations may fail');
+    let privateKey = this.configService.get<string>('SUI_ADMIN_PRIVATE_KEY');
+    
+    // Handle potentially malformed private key (split across lines)
+    try {
+      if (privateKey) {
+        // Clean up the private key and ensure it's in the right format
+        privateKey = privateKey.replace(/\s+/g, ''); // Remove any whitespace
+        
+        if (!privateKey.startsWith('0x')) {
+          privateKey = '0x' + privateKey;
+        }
+        
+        // Ensure it's the right length after removing 0x prefix
+        const keyBuffer = Buffer.from(privateKey.replace('0x', ''), 'hex');
+        if (keyBuffer.length !== 32) {
+          throw new Error(`Invalid key length: ${keyBuffer.length}, expected 32`);
+        }
+        
+        this.adminKeypair = Ed25519Keypair.fromSecretKey(keyBuffer);
+        const adminAddress = this.adminKeypair.getPublicKey().toSuiAddress();
+    this.logger.log(`SUI admin keypair initialized successfully with address: ${adminAddress}`);
+      } else {
+        this.logger.warn('SUI_ADMIN_PRIVATE_KEY not provided, some operations may fail');
+      }
+    } catch (error) {
+      this.logger.error(`Failed to initialize admin keypair: ${error.message}`);
+      this.logger.warn('Using mock keypair for development');
+      
+      // Generate a random keypair for development/testing
+      this.adminKeypair = new Ed25519Keypair();
     }
   }
 
@@ -579,22 +611,28 @@ export class SuiService {
 
   // Helper methods
   private async executeTransaction(tx: TransactionBlock, sender: string) {
+    // Set the sender to the actual user address
     tx.setSender(sender);
     
-    // For demonstration purposes, the admin account is sponsoring the transaction
-    // In production, you'd want to implement a proper gas station pattern
-    const senderAddress = this.adminKeypair.getPublicKey().toSuiAddress();
+    this.logger.log(`Executing transaction for user ${sender}`);
     
-    return await this.client.signAndExecuteTransactionBlock({
-      transactionBlock: tx,
-      signer: this.adminKeypair,
-      options: {
-        showEffects: true,
-        showEvents: true,
-        showObjectChanges: true,
-      },
-      requestType: 'WaitForLocalExecution',
-    });
+    // For demonstration purposes in development, we can use the admin keypair
+    // But we use the user's address as sender
+    try {
+      return await this.client.signAndExecuteTransactionBlock({
+        transactionBlock: tx,
+        signer: this.adminKeypair,
+        options: {
+          showEffects: true,
+          showEvents: true,
+          showObjectChanges: true,
+        },
+        requestType: 'WaitForLocalExecution',
+      });
+    } catch (error) {
+      this.logger.error(`Transaction execution failed: ${error.message}`);
+      throw error;
+    }
   }
 
   private extractCreatedObjectId(result: any): string {

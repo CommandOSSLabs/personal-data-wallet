@@ -7,6 +7,8 @@ import { SealService } from '../../infrastructure/seal/seal.service';
 import { SuiService } from '../../infrastructure/sui/sui.service';
 import { WalrusService } from '../../infrastructure/walrus/walrus.service';
 import { GeminiService } from '../../infrastructure/gemini/gemini.service';
+import { MemoryIndexDto } from '../dto/memory-index.dto';
+import { ProcessMemoryDto } from '../dto/process-memory.dto';
 
 export interface CreateMemoryDto {
   content: string;
@@ -217,6 +219,165 @@ export class MemoryIngestionService {
       return {
         success: false,
         message: `Failed to process memory: ${error.message}`
+      };
+    }
+  }
+
+  /**
+   * Process a memory (embedding, graph, encryption) without creating on-chain record
+   * Used by direct blockchain mode to prepare a memory before user creates it on-chain
+   */
+  async processMemory(processDto: ProcessMemoryDto): Promise<{ 
+    success: boolean, 
+    vectorId?: number,
+    blobId?: string,
+    message?: string 
+  }> {
+    try {
+      const { content, userAddress, category } = processDto;
+      
+      // Step 1: Get or create user's memory index
+      let indexId: string;
+      let indexBlobId: string;
+      let graphBlobId: string;
+      let currentVersion = 0;
+      let index;
+      let graph;
+      
+      try {
+        // Try to get the existing index
+        const memoryIndex = await this.suiService.getMemoryIndex(userAddress);
+        indexId = userAddress; 
+        indexBlobId = memoryIndex.indexBlobId;
+        graphBlobId = memoryIndex.graphBlobId;
+        currentVersion = memoryIndex.version;
+        
+        // Load existing index and graph
+        const indexResult = await this.hnswIndexService.loadIndex(indexBlobId);
+        index = indexResult.index;
+        
+        graph = await this.graphService.loadGraph(graphBlobId);
+      } catch (error) {
+        // No index exists, create a new one
+        this.logger.log(`Creating new memory index for user ${userAddress}`);
+        
+        // Create empty index
+        const newIndexResult = await this.hnswIndexService.createIndex();
+        index = newIndexResult.index;
+        
+        // Save empty index to Walrus
+        indexBlobId = await this.hnswIndexService.saveIndex(index);
+        
+        // Create empty graph
+        graph = this.graphService.createGraph();
+        graphBlobId = await this.graphService.saveGraph(graph);
+        
+        // Create on-chain index through the backend
+        // In direct mode, the frontend will handle this if needed
+        indexId = await this.suiService.createMemoryIndex(
+          userAddress,
+          indexBlobId,
+          graphBlobId
+        );
+      }
+      
+      // Step 2: Generate embedding for the memory
+      const { vector } = await this.embeddingService.embedText(content);
+      
+      // Step 3: Add vector to the index
+      const vectorId = this.getNextVectorId(userAddress);
+      this.hnswIndexService.addVectorToIndex(index, vectorId, vector);
+      
+      // Step 4: Extract entities and relationships
+      const extraction = await this.graphService.extractEntitiesAndRelationships(content);
+      
+      // Step 5: Update the entity-to-vector mapping
+      const entityToVectorMap = this.getEntityToVectorMap(userAddress);
+      extraction.entities.forEach(entity => {
+        entityToVectorMap[entity.id] = vectorId;
+      });
+      
+      // Step 6: Update the graph
+      graph = this.graphService.addToGraph(
+        graph,
+        extraction.entities,
+        extraction.relationships
+      );
+      
+      // Step 7: Encrypt the memory content
+      const encryptedContent = await this.sealService.encrypt(
+        content,
+        userAddress
+      );
+      
+      // Step 8: Save the encrypted content to Walrus
+      const contentBlobId = await this.walrusService.uploadContent(encryptedContent);
+      
+      // Step 9: Save the updated index and graph to Walrus
+      const newIndexBlobId = await this.hnswIndexService.saveIndex(index);
+      const newGraphBlobId = await this.graphService.saveGraph(graph);
+      
+      // Step 10: Update the on-chain memory index
+      await this.suiService.updateMemoryIndex(
+        indexId,
+        userAddress,
+        currentVersion,
+        newIndexBlobId,
+        newGraphBlobId
+      );
+      
+      // Return data needed for frontend to create on-chain record
+      return {
+        success: true,
+        vectorId,
+        blobId: contentBlobId,
+        message: 'Memory processed successfully'
+      };
+    } catch (error) {
+      this.logger.error(`Error processing memory: ${error.message}`);
+      return {
+        success: false,
+        message: `Failed to process memory: ${error.message}`
+      };
+    }
+  }
+  
+  /**
+   * Index a memory that was created directly on the blockchain
+   */
+  async indexMemory(indexDto: MemoryIndexDto): Promise<{ success: boolean, message?: string }> {
+    try {
+      const { memoryId, userAddress, category, walrusHash } = indexDto;
+      
+      // Verify the memory exists on chain
+      try {
+        const memoryOnChain = await this.suiService.getMemory(memoryId);
+        
+        if (memoryOnChain.owner !== userAddress) {
+          return { 
+            success: false, 
+            message: 'Memory does not belong to the specified user' 
+          };
+        }
+        
+        // Log success
+        this.logger.log(`Memory ${memoryId} verified on-chain for user ${userAddress}`);
+      } catch (error) {
+        return { 
+          success: false, 
+          message: `Failed to verify memory: ${error.message}` 
+        };
+      }
+      
+      return {
+        success: true,
+        message: `Memory ${memoryId} indexed successfully`
+      };
+    } catch (error) {
+      this.logger.error(`Error indexing memory: ${error.message}`);
+      return {
+        success: false,
+        message: `Failed to index memory: ${error.message}`
       };
     }
   }

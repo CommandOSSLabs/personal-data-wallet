@@ -4,6 +4,8 @@ import { CreateMemoryDto } from './dto/create-memory.dto';
 import { SearchMemoryDto } from './dto/search-memory.dto';
 import { UpdateMemoryDto } from './dto/update-memory.dto';
 import { MemoryContextDto } from './dto/memory-context.dto';
+import { MemoryIndexDto } from './dto/memory-index.dto';
+import { ProcessMemoryDto } from './dto/process-memory.dto';
 import { Memory } from '../types/memory.types';
 export declare class MemoryController {
     private readonly memoryIngestionService;
@@ -45,5 +47,19 @@ export declare class MemoryController {
         storage_used_bytes: number;
         last_updated: string;
         success: boolean;
+    }>;
+    getMemoryContent(hash: string): Promise<{
+        content: string;
+        success: boolean;
+    }>;
+    indexMemory(memoryIndexDto: MemoryIndexDto): Promise<{
+        success: boolean;
+        message?: string;
+    }>;
+    processMemory(processDto: ProcessMemoryDto): Promise<{
+        success: boolean;
+        vectorId?: number;
+        blobId?: string;
+        message?: string;
     }>;
 }

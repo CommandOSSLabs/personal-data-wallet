@@ -2,25 +2,25 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChatSession, Message } from '@/app/types'
-import { useSuiAuth } from './use-sui-auth'
 import { useSuiBlockchain } from '../services/suiBlockchainService'
+import { ChatSession, Message } from '@/app/types'
 import { chatApi } from '../api/chatApi'
 
-export function useChatSessions() {
+export function useDirectSuiSessions() {
   const queryClient = useQueryClient()
   const { service, wallet } = useSuiBlockchain()
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   
-  const { userAddress } = useSuiAuth()
+  // Get the user address from the wallet
+  const userAddress = wallet.account?.address || null
   
-  // Query to get all user sessions
+  // Query to get all user sessions (still from backend API)
   const {
     data: sessionsData,
     isLoading: sessionsLoading,
     error: sessionsError
   } = useQuery({
-    queryKey: ['chat-sessions', userAddress],
+    queryKey: ['direct-sui-sessions', userAddress],
     queryFn: async () => {
       if (!userAddress) return { sessions: [] }
 
@@ -28,7 +28,7 @@ export function useChatSessions() {
       return { sessions: response.sessions || [] }
     },
     enabled: !!userAddress,
-    staleTime: 30000,
+    staleTime: 30000, // 30 seconds
     refetchOnWindowFocus: false,
     refetchOnMount: true,
   })
@@ -57,15 +57,20 @@ export function useChatSessions() {
       }
 
       try {
+        console.log('Creating new session with direct blockchain transaction')
+        
         // Create session directly on blockchain via wallet
         const sessionId = await service.createChatSession('gemini-1.5-pro')
         
+        console.log('Created session with ID:', sessionId)
+        
         // Notify backend about the new session for indexing
+        // This is optional and depends on your architecture
         await chatApi.createSession({
           userAddress,
           title,
           modelName: 'gemini-1.5-pro',
-          suiObjectId: sessionId
+          suiObjectId: sessionId // Pass the object ID from the blockchain
         })
         
         return { 
@@ -76,13 +81,13 @@ export function useChatSessions() {
           } 
         }
       } catch (error) {
-        console.error('Session creation error:', error)
+        console.error('Direct session creation error:', error)
         throw error
       }
     },
     onSuccess: (data) => {
       // Invalidate sessions query to refetch
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions', userAddress] })
+      queryClient.invalidateQueries({ queryKey: ['direct-sui-sessions', userAddress] })
 
       // Set as current session
       const sessionId = data.session?.id || ''
@@ -114,7 +119,8 @@ export function useChatSessions() {
           content
         )
         
-        // Notify backend about the new message for indexing
+        // Optionally notify backend about the new message
+        // This is for indexing and other backend services
         await chatApi.addMessage(sessionId, {
           userAddress,
           content,
@@ -129,31 +135,10 @@ export function useChatSessions() {
     },
     onSuccess: () => {
       // Invalidate sessions query to refetch
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions', userAddress] })
+      queryClient.invalidateQueries({ queryKey: ['direct-sui-sessions', userAddress] })
     }
   })
-
-  // Delete session mutation
-  const deleteSessionMutation = useMutation({
-    mutationFn: async (sessionId: string) => {
-      if (!userAddress) throw new Error('No user address')
-
-      // This would need implementation in the Move contract
-      // For now, we just update the backend index
-      const response = await chatApi.deleteSession(sessionId, userAddress)
-      return response
-    },
-    onSuccess: (_, deletedSessionId) => {
-      // Invalidate sessions query to refetch
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions', userAddress] })
-      
-      // Clear current session if it was deleted
-      if (currentSessionId === deletedSessionId) {
-        setCurrentSessionId(null)
-      }
-    }
-  })
-
+  
   // Helper functions
   const getCurrentSession = useCallback((): ChatSession | null => {
     if (!currentSessionId) return null
@@ -164,6 +149,7 @@ export function useChatSessions() {
     return new Promise((resolve, reject) => {
       createSessionMutation.mutate('New Chat', {
         onSuccess: (data) => {
+          console.log('CreateNewSession response:', data)
           const sessionId = data.session?.id || ''
           resolve(sessionId)
         },
@@ -190,10 +176,6 @@ export function useChatSessions() {
       })
     })
   }, [addMessageMutation])
-
-  const deleteSession = useCallback((sessionId: string) => {
-    deleteSessionMutation.mutate(sessionId)
-  }, [deleteSessionMutation])
 
   const selectSession = useCallback((sessionId: string) => {
     setCurrentSessionId(sessionId)
@@ -231,10 +213,8 @@ export function useChatSessions() {
     getCurrentSession,
     createNewSession,
     addMessageToSession,
-    deleteSession,
     selectSession,
     isCreatingSession: createSessionMutation.isPending,
-    isAddingMessage: addMessageMutation.isPending,
-    isDeletingSession: deleteSessionMutation.isPending
+    isAddingMessage: addMessageMutation.isPending
   }
 }

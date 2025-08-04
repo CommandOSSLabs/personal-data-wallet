@@ -1,19 +1,15 @@
 import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 
-export class CreateSessionDto {
+export class ProcessMemoryDto {
+  @IsString()
+  @IsNotEmpty()
+  content: string;
+
   @IsString()
   @IsNotEmpty()
   userAddress: string;
-
+  
   @IsString()
   @IsOptional()
-  title?: string;
-
-  @IsString()
-  @IsNotEmpty()
-  modelName: string;
-
-  @IsString()
-  @IsOptional()
-  suiObjectId?: string;
+  category?: string;
 }

@@ -133,6 +133,95 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
             };
         }
     }
+    async processMemory(processDto) {
+        try {
+            const { content, userAddress, category } = processDto;
+            let indexId;
+            let indexBlobId;
+            let graphBlobId;
+            let currentVersion = 0;
+            let index;
+            let graph;
+            try {
+                const memoryIndex = await this.suiService.getMemoryIndex(userAddress);
+                indexId = userAddress;
+                indexBlobId = memoryIndex.indexBlobId;
+                graphBlobId = memoryIndex.graphBlobId;
+                currentVersion = memoryIndex.version;
+                const indexResult = await this.hnswIndexService.loadIndex(indexBlobId);
+                index = indexResult.index;
+                graph = await this.graphService.loadGraph(graphBlobId);
+            }
+            catch (error) {
+                this.logger.log(`Creating new memory index for user ${userAddress}`);
+                const newIndexResult = await this.hnswIndexService.createIndex();
+                index = newIndexResult.index;
+                indexBlobId = await this.hnswIndexService.saveIndex(index);
+                graph = this.graphService.createGraph();
+                graphBlobId = await this.graphService.saveGraph(graph);
+                indexId = await this.suiService.createMemoryIndex(userAddress, indexBlobId, graphBlobId);
+            }
+            const { vector } = await this.embeddingService.embedText(content);
+            const vectorId = this.getNextVectorId(userAddress);
+            this.hnswIndexService.addVectorToIndex(index, vectorId, vector);
+            const extraction = await this.graphService.extractEntitiesAndRelationships(content);
+            const entityToVectorMap = this.getEntityToVectorMap(userAddress);
+            extraction.entities.forEach(entity => {
+                entityToVectorMap[entity.id] = vectorId;
+            });
+            graph = this.graphService.addToGraph(graph, extraction.entities, extraction.relationships);
+            const encryptedContent = await this.sealService.encrypt(content, userAddress);
+            const contentBlobId = await this.walrusService.uploadContent(encryptedContent);
+            const newIndexBlobId = await this.hnswIndexService.saveIndex(index);
+            const newGraphBlobId = await this.graphService.saveGraph(graph);
+            await this.suiService.updateMemoryIndex(indexId, userAddress, currentVersion, newIndexBlobId, newGraphBlobId);
+            return {
+                success: true,
+                vectorId,
+                blobId: contentBlobId,
+                message: 'Memory processed successfully'
+            };
+        }
+        catch (error) {
+            this.logger.error(`Error processing memory: ${error.message}`);
+            return {
+                success: false,
+                message: `Failed to process memory: ${error.message}`
+            };
+        }
+    }
+    async indexMemory(indexDto) {
+        try {
+            const { memoryId, userAddress, category, walrusHash } = indexDto;
+            try {
+                const memoryOnChain = await this.suiService.getMemory(memoryId);
+                if (memoryOnChain.owner !== userAddress) {
+                    return {
+                        success: false,
+                        message: 'Memory does not belong to the specified user'
+                    };
+                }
+                this.logger.log(`Memory ${memoryId} verified on-chain for user ${userAddress}`);
+            }
+            catch (error) {
+                return {
+                    success: false,
+                    message: `Failed to verify memory: ${error.message}`
+                };
+            }
+            return {
+                success: true,
+                message: `Memory ${memoryId} indexed successfully`
+            };
+        }
+        catch (error) {
+            this.logger.error(`Error indexing memory: ${error.message}`);
+            return {
+                success: false,
+                message: `Failed to index memory: ${error.message}`
+            };
+        }
+    }
     async updateMemory(memoryId, content, userAddress) {
         try {
             const memory = await this.suiService.getMemory(memoryId);

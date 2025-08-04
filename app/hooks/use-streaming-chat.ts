@@ -54,7 +54,7 @@ export function useStreamingChat() {
         text: request.text,
         user_id: request.userId,
         session_id: request.sessionId,
-        model: request.model || 'gemini',
+        model: request.model || 'gemini-1.5-pro', // Use consistent model name
         originalUserMessage: request.originalUserMessage,
         memoryContext: request.memoryContext
       })

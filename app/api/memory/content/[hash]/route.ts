@@ -8,10 +8,10 @@ export async function GET(
   
   try {
     // Get the backend URL from environment variables
-    const baseURL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3000';
+    const baseURL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
     
     // Forward the request to the backend
-    const response = await fetch(`${baseURL}/memory/content/${hash}`, {
+    const response = await fetch(`${baseURL}/api/memories/content/${hash}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

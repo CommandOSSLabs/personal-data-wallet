@@ -5,9 +5,11 @@ import { CreateMemoryDto } from './dto/create-memory.dto';
 import { SearchMemoryDto } from './dto/search-memory.dto';
 import { UpdateMemoryDto } from './dto/update-memory.dto';
 import { MemoryContextDto } from './dto/memory-context.dto';
+import { MemoryIndexDto } from './dto/memory-index.dto';
+import { ProcessMemoryDto } from './dto/process-memory.dto';
 import { Memory } from '../types/memory.types';
 
-@Controller('api/memories')
+@Controller('memories')
 export class MemoryController {
   constructor(
     private readonly memoryIngestionService: MemoryIngestionService,
@@ -75,5 +77,20 @@ export class MemoryController {
   @Get('stats')
   async getMemoryStats(@Query('userAddress') userAddress: string) {
     return this.memoryQueryService.getMemoryStats(userAddress);
+  }
+  
+  @Get('content/:hash')
+  async getMemoryContent(@Param('hash') hash: string) {
+    return this.memoryQueryService.getMemoryContentByHash(hash);
+  }
+  
+  @Post('index')
+  async indexMemory(@Body() memoryIndexDto: MemoryIndexDto) {
+    return this.memoryIngestionService.indexMemory(memoryIndexDto);
+  }
+
+  @Post('process')
+  async processMemory(@Body() processDto: ProcessMemoryDto) {
+    return this.memoryIngestionService.processMemory(processDto);
   }
 }
