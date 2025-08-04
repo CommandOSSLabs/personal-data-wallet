@@ -1,13 +1,13 @@
 'use client'
 
 import { useWallet } from '@suiet/wallet-kit'
-import { TransactionBlock } from '@mysten/sui.js/transactions'
+import { Transaction } from '@mysten/sui/transactions'
 import { SuiClient } from '@mysten/sui/client'
 
 // Define the package ID to be used for our Move contracts
-const PACKAGE_ID = process.env.NEXT_PUBLIC_SUI_PACKAGE_ID || '0x0' 
-const SUI_NETWORK = process.env.NEXT_PUBLIC_SUI_NETWORK || 'testnet'
-const SUI_API_URL = process.env.NEXT_PUBLIC_SUI_API_URL || 'https://fullnode.testnet.sui.io:443'
+const PACKAGE_ID = process.env.NEXT_PUBLIC_SUI_PACKAGE_ID || '0x18df5680add6cc42ca87ac3373eb7dc61910c18b0da0e42383ebec35897399ea'
+const SUI_NETWORK = process.env.NEXT_PUBLIC_SUI_NETWORK || 'devnet'
+const SUI_API_URL = process.env.NEXT_PUBLIC_SUI_API_URL || 'https://fullnode.devnet.sui.io:443'
 
 export class SuiBlockchainService {
   private client: SuiClient
@@ -26,24 +26,22 @@ export class SuiBlockchainService {
     if (!this.wallet.connected || !this.wallet.account) {
       throw new Error('Wallet not connected')
     }
-
-    const userAddress = this.wallet.account.address
     
     try {
       // Build the transaction
-      const tx = new TransactionBlock()
+      const tx = new Transaction()
       
       // Call the create_session function from our Move package
       tx.moveCall({
-        target: `${PACKAGE_ID}::chat_sessions::create_session`,
+        target: `${PACKAGE_ID}::pdw::chat_sessions::create_session`,
         arguments: [
-          tx.pure(modelName), // model name string
+          tx.pure.string(modelName), // model name string
         ]
       })
 
       // Sign and execute the transaction using the connected wallet
       const result = await this.wallet.signAndExecuteTransactionBlock({
-        transactionBlock: tx,
+        transactionBlock: tx as any,
         options: {
           showEffects: true,
           showEvents: true,
@@ -75,19 +73,19 @@ export class SuiBlockchainService {
     }
     
     try {
-      const tx = new TransactionBlock()
+      const tx = new Transaction()
       
       tx.moveCall({
-        target: `${PACKAGE_ID}::chat_sessions::add_message_to_session`,
+        target: `${PACKAGE_ID}::pdw::chat_sessions::add_message_to_session`,
         arguments: [
           tx.object(sessionId),    // session ID
-          tx.pure(role),           // role (user or assistant)
-          tx.pure(content),        // message content
+          tx.pure.string(role),    // role (user or assistant)
+          tx.pure.string(content), // message content
         ]
       })
 
       await this.wallet.signAndExecuteTransactionBlock({
-        transactionBlock: tx,
+        transactionBlock: tx as any,
         options: { showEffects: true }
       })
       
@@ -98,7 +96,7 @@ export class SuiBlockchainService {
     }
   }
 
-  // Delete a session (if supported by the contract)
+  // Delete a chat session
   async deleteSession(
     sessionId: string
   ): Promise<boolean> {
@@ -107,19 +105,18 @@ export class SuiBlockchainService {
     }
     
     try {
-      const tx = new TransactionBlock()
+      const tx = new Transaction()
       
-      // Note: This assumes there's a delete_session function in the contract
-      // If not available, this would need to be implemented in the contract
+      // Call the delete_session function we added to the contract
       tx.moveCall({
-        target: `${PACKAGE_ID}::chat_sessions::delete_session`,
+        target: `${PACKAGE_ID}::pdw::chat_sessions::delete_session`,
         arguments: [
           tx.object(sessionId)  // session ID
         ]
       })
 
       await this.wallet.signAndExecuteTransactionBlock({
-        transactionBlock: tx,
+        transactionBlock: tx as any,
         options: { showEffects: true }
       })
       
@@ -140,18 +137,18 @@ export class SuiBlockchainService {
     }
     
     try {
-      const tx = new TransactionBlock()
+      const tx = new Transaction()
       
       tx.moveCall({
-        target: `${PACKAGE_ID}::chat_sessions::save_session_summary`,
+        target: `${PACKAGE_ID}::pdw::chat_sessions::save_session_summary`,
         arguments: [
-          tx.object(sessionId),  // session ID
-          tx.pure(summary),      // summary text
+          tx.object(sessionId),     // session ID
+          tx.pure.string(summary),  // summary text
         ]
       })
 
       await this.wallet.signAndExecuteTransactionBlock({
-        transactionBlock: tx,
+        transactionBlock: tx as any,
         options: { showEffects: true }
       })
       
@@ -173,19 +170,19 @@ export class SuiBlockchainService {
     }
     
     try {
-      const tx = new TransactionBlock()
+      const tx = new Transaction()
       
       tx.moveCall({
-        target: `${PACKAGE_ID}::memory::create_memory_record`,
+        target: `${PACKAGE_ID}::pdw::memory::create_memory_record`,
         arguments: [
-          tx.pure(category),
-          tx.pure(vectorId),
-          tx.pure(blobId),
+          tx.pure.string(category),
+          tx.pure.u64(BigInt(vectorId)),
+          tx.pure.string(blobId),
         ]
       })
 
       const result = await this.wallet.signAndExecuteTransactionBlock({
-        transactionBlock: tx,
+        transactionBlock: tx as any,
         options: {
           showEffects: true,
           showEvents: true,
@@ -215,18 +212,18 @@ export class SuiBlockchainService {
     }
     
     try {
-      const tx = new TransactionBlock()
+      const tx = new Transaction()
       
       tx.moveCall({
-        target: `${PACKAGE_ID}::memory::create_memory_index`,
+        target: `${PACKAGE_ID}::pdw::memory::create_memory_index`,
         arguments: [
-          tx.pure(indexBlobId),
-          tx.pure(graphBlobId),
+          tx.pure.string(indexBlobId),
+          tx.pure.string(graphBlobId),
         ]
       })
 
       const result = await this.wallet.signAndExecuteTransactionBlock({
-        transactionBlock: tx,
+        transactionBlock: tx as any,
         options: {
           showEffects: true,
           showEvents: true,
@@ -258,20 +255,20 @@ export class SuiBlockchainService {
     }
     
     try {
-      const tx = new TransactionBlock()
+      const tx = new Transaction()
       
       tx.moveCall({
-        target: `${PACKAGE_ID}::memory::update_memory_index`,
+        target: `${PACKAGE_ID}::pdw::memory::update_memory_index`,
         arguments: [
           tx.object(indexId),
-          tx.pure(expectedVersion),
-          tx.pure(newIndexBlobId),
-          tx.pure(newGraphBlobId),
+          tx.pure.u64(BigInt(expectedVersion)),
+          tx.pure.string(newIndexBlobId),
+          tx.pure.string(newGraphBlobId),
         ]
       })
 
       await this.wallet.signAndExecuteTransactionBlock({
-        transactionBlock: tx,
+        transactionBlock: tx as any,
         options: { showEffects: true }
       })
       
@@ -288,9 +285,9 @@ export class SuiBlockchainService {
       // Look for object creation events
       for (const event of result.events || []) {
         if (
-          event.type.includes('::chat_sessions::ChatSessionCreated') ||
-          event.type.includes('::memory::MemoryCreated') ||
-          event.type.includes('::memory::MemoryIndexCreated')
+          event.type.includes('::pdw::chat_sessions::ChatSessionCreated') ||
+          event.type.includes('::pdw::memory::MemoryCreated') ||
+          event.type.includes('::pdw::memory::MemoryIndexCreated')
         ) {
           // Extract the ID from the event
           return event.parsedJson?.id

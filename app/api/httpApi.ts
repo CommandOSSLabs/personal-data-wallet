@@ -99,14 +99,26 @@ export const httpApi = {
   stream: async (url: string, data?: any, config?: AxiosRequestConfig): Promise<Response> => {
     const fullUrl = `${httpClient.defaults.baseURL}${url}`
     
+    // Extract headers from config
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json'
+    }
+    
+    // Only add custom headers if they exist
+    if (config?.headers) {
+      // Convert Axios headers to fetch headers
+      const axiosHeaders = config.headers as Record<string, string>
+      Object.keys(axiosHeaders).forEach(key => {
+        if (axiosHeaders[key]) {
+          headers[key] = axiosHeaders[key]
+        }
+      })
+    }
+    
     return fetch(fullUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...config?.headers,
-      },
-      body: data ? JSON.stringify(data) : undefined,
-      ...config,
+      headers,
+      body: data ? JSON.stringify(data) : undefined
     })
   }
 }

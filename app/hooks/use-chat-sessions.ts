@@ -49,7 +49,7 @@ export function useChatSessions() {
     updatedAt: new Date(session.updated_at)
   }))
 
-  // Create session mutation - directly on blockchain
+  // Create session mutation
   const createSessionMutation = useMutation({
     mutationFn: async (title: string) => {
       if (!userAddress) {
@@ -93,7 +93,7 @@ export function useChatSessions() {
     }
   })
 
-  // Add message mutation - directly on blockchain
+  // Add message mutation
   const addMessageMutation = useMutation({
     mutationFn: async ({ 
       sessionId, 
@@ -138,10 +138,18 @@ export function useChatSessions() {
     mutationFn: async (sessionId: string) => {
       if (!userAddress) throw new Error('No user address')
 
-      // This would need implementation in the Move contract
-      // For now, we just update the backend index
-      const response = await chatApi.deleteSession(sessionId, userAddress)
-      return response
+      try {
+        // Delete session on blockchain
+        await service.deleteSession(sessionId)
+        
+        // Update backend index
+        await chatApi.deleteSession(sessionId, userAddress)
+        
+        return { success: true }
+      } catch (error) {
+        console.error('Error deleting session:', error)
+        throw error
+      }
     },
     onSuccess: (_, deletedSessionId) => {
       // Invalidate sessions query to refetch

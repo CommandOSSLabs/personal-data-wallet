@@ -66,7 +66,7 @@ export function RelevantMemories({ message, userAddress }: RelevantMemoriesProps
         const now = Date.now();
         const relevantMemories = (data.results || [])
           // Only show high-quality matches
-          .filter(memory => (memory.similarity || 0) > 0.70)
+          .filter(memory => ((memory as any).similarity || 0) > 0.70)
           // Skip recently created memories to prevent showing memories just created from the current message
           .filter(memory => {
             // If timestamp is available, filter out very recent memories
@@ -158,9 +158,9 @@ export function RelevantMemories({ message, userAddress }: RelevantMemoriesProps
                     <Badge 
                       size="xs" 
                       variant="light" 
-                      color={memory.similarity && memory.similarity > 0.8 ? "green" : "blue"}
+                      color={(memory as any).similarity && (memory as any).similarity > 0.8 ? "green" : "blue"}
                     >
-                      {memory.similarity ? `${Math.round(memory.similarity * 100)}% match` : 'Related'}
+                      {(memory as any).similarity ? `${Math.round((memory as any).similarity * 100)}% match` : 'Related'}
                     </Badge>
                     <Badge size="xs" variant="outline">{memory.category}</Badge>
                   </Group>
