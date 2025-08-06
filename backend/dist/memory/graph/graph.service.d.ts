@@ -26,7 +26,7 @@ export declare class GraphService {
     }>;
     addToGraph(graph: KnowledgeGraph, newEntities: Entity[], newRelationships: Relationship[]): KnowledgeGraph;
     findRelatedEntities(graph: KnowledgeGraph, seedVectorIds: number[], entityToVectorMap: Record<string, number>, maxHops?: number): string[];
-    saveGraph(graph: KnowledgeGraph): Promise<string>;
-    loadGraph(blobId: string): Promise<KnowledgeGraph>;
+    saveGraph(graph: KnowledgeGraph, userAddress: string): Promise<string>;
+    loadGraph(blobId: string, userAddress?: string): Promise<KnowledgeGraph>;
 }
 export {};

@@ -92,11 +92,11 @@ export class MemoryQueryService {
       const { vector } = await this.embeddingService.embedText(query);
       
       // Step 3: Load index and perform vector search
-      const { index } = await this.hnswIndexService.loadIndex(indexBlobId);
+      const { index } = await this.hnswIndexService.loadIndex(indexBlobId, userAddress);
       const searchResults = this.hnswIndexService.searchIndex(index, vector, limit * 2); // Get more results than needed
       
       // Step 4: Load graph and find related entities
-      const graph = await this.graphService.loadGraph(graphBlobId);
+      const graph = await this.graphService.loadGraph(graphBlobId, userAddress);
       const entityToVectorMap = this.memoryIngestionService.getEntityToVectorMap(userAddress);
       
       // Step 5: Expand search using graph traversal
@@ -172,7 +172,7 @@ export class MemoryQueryService {
       }
       
       // Step 3: Load index and perform vector search
-      const { index } = await this.hnswIndexService.loadIndex(indexBlobId);
+      const { index } = await this.hnswIndexService.loadIndex(indexBlobId, userAddress);
       const searchResults = this.hnswIndexService.searchIndex(index, vector, k * 2);
       
       // Step 4: Get memory content and filter by category if needed
@@ -234,7 +234,7 @@ export class MemoryQueryService {
       
       // 3. Delete content blob from Walrus (optional, based on policy)
       try {
-        await this.walrusService.deleteContent(memory.blobId);
+        await this.walrusService.deleteContent(memory.blobId, userAddress);
       } catch (walrusError) {
         // Log but don't fail if Walrus deletion fails - chain is source of truth
         this.logger.warn(`Failed to delete from Walrus: ${walrusError.message}`);

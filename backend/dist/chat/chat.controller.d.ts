@@ -1,5 +1,4 @@
-import { MessageEvent } from '@nestjs/common';
-import { Observable } from 'rxjs';
+import type { Response } from 'express';
 import { ChatService } from './chat.service';
 import { ChatMessageDto } from './dto/chat-message.dto';
 import { CreateSessionDto } from './dto/create-session.dto';
@@ -47,6 +46,7 @@ export declare class ChatController {
     addMessage(sessionId: string, addMessageDto: AddMessageDto): Promise<{
         success: boolean;
         message?: string;
+        memoryExtracted?: import("./chat.service").MemoryExtraction | null;
     }>;
     deleteSession(sessionId: string, userAddress: string): Promise<{
         success: boolean;
@@ -63,7 +63,7 @@ export declare class ChatController {
     saveSummary(saveSummaryDto: SaveSummaryDto): Promise<{
         success: boolean;
     }>;
-    streamChat(messageDto: ChatMessageDto): Observable<MessageEvent>;
+    streamChat(messageDto: ChatMessageDto, response: Response): Promise<void>;
     sendMessage(messageDto: ChatMessageDto): Promise<{
         response: string;
         success: boolean;
@@ -71,5 +71,6 @@ export declare class ChatController {
         entities?: any;
         memoryStored?: boolean;
         memoryId?: string;
+        memoryExtraction?: any;
     }>;
 }

@@ -1,19 +1,24 @@
 import { Controller, Post, Body, Get, Query, Delete, Param, Put } from '@nestjs/common';
 import { MemoryIngestionService } from './memory-ingestion/memory-ingestion.service';
 import { MemoryQueryService } from './memory-query/memory-query.service';
+import { MemoryIndexService } from './memory-index/memory-index.service';
 import { CreateMemoryDto } from './dto/create-memory.dto';
 import { SearchMemoryDto } from './dto/search-memory.dto';
 import { UpdateMemoryDto } from './dto/update-memory.dto';
 import { MemoryContextDto } from './dto/memory-context.dto';
 import { MemoryIndexDto } from './dto/memory-index.dto';
 import { ProcessMemoryDto } from './dto/process-memory.dto';
+import { SaveMemoryDto } from './dto/save-memory.dto';
+import { PrepareIndexDto } from './dto/prepare-index.dto';
+import { RegisterIndexDto } from './dto/register-index.dto';
 import { Memory } from '../types/memory.types';
 
 @Controller('memories')
 export class MemoryController {
   constructor(
     private readonly memoryIngestionService: MemoryIngestionService,
-    private readonly memoryQueryService: MemoryQueryService
+    private readonly memoryQueryService: MemoryQueryService,
+    private readonly memoryIndexService: MemoryIndexService
   ) {}
 
   @Get()
@@ -24,6 +29,13 @@ export class MemoryController {
   @Post()
   async createMemory(@Body() createMemoryDto: CreateMemoryDto) {
     return this.memoryIngestionService.processNewMemory(createMemoryDto);
+  }
+
+  @Post('save-approved')
+  async saveApprovedMemory(@Body() saveMemoryDto: SaveMemoryDto) {
+    // Process the approved memory without blockchain operations
+    // Frontend handles blockchain, backend handles indexing and storage preparation
+    return this.memoryIngestionService.processApprovedMemory(saveMemoryDto);
   }
 
   @Post('search')
@@ -92,5 +104,18 @@ export class MemoryController {
   @Post('process')
   async processMemory(@Body() processDto: ProcessMemoryDto) {
     return this.memoryIngestionService.processMemory(processDto);
+  }
+  
+  @Post('prepare-index')
+  async prepareIndex(@Body() prepareIndexDto: PrepareIndexDto) {
+    return this.memoryIndexService.prepareIndexForCreation(prepareIndexDto.userAddress);
+  }
+  
+  @Post('register-index')
+  async registerIndex(@Body() registerIndexDto: RegisterIndexDto) {
+    return this.memoryIndexService.registerMemoryIndex(
+      registerIndexDto.userAddress, 
+      registerIndexDto.indexId
+    );
   }
 }

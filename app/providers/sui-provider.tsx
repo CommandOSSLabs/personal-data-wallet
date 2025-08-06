@@ -9,7 +9,7 @@ const queryClient = new QueryClient()
 export function SuiProvider({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
-      <WalletProvider>
+      <WalletProvider autoConnect={true} defaultNetwork="testnet">
         {children}
       </WalletProvider>
     </QueryClientProvider>

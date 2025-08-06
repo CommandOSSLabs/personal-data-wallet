@@ -16,24 +16,33 @@ exports.MemoryController = void 0;
 const common_1 = require("@nestjs/common");
 const memory_ingestion_service_1 = require("./memory-ingestion/memory-ingestion.service");
 const memory_query_service_1 = require("./memory-query/memory-query.service");
+const memory_index_service_1 = require("./memory-index/memory-index.service");
 const create_memory_dto_1 = require("./dto/create-memory.dto");
 const search_memory_dto_1 = require("./dto/search-memory.dto");
 const update_memory_dto_1 = require("./dto/update-memory.dto");
 const memory_context_dto_1 = require("./dto/memory-context.dto");
 const memory_index_dto_1 = require("./dto/memory-index.dto");
 const process_memory_dto_1 = require("./dto/process-memory.dto");
+const save_memory_dto_1 = require("./dto/save-memory.dto");
+const prepare_index_dto_1 = require("./dto/prepare-index.dto");
+const register_index_dto_1 = require("./dto/register-index.dto");
 let MemoryController = class MemoryController {
     memoryIngestionService;
     memoryQueryService;
-    constructor(memoryIngestionService, memoryQueryService) {
+    memoryIndexService;
+    constructor(memoryIngestionService, memoryQueryService, memoryIndexService) {
         this.memoryIngestionService = memoryIngestionService;
         this.memoryQueryService = memoryQueryService;
+        this.memoryIndexService = memoryIndexService;
     }
     async getMemories(userAddress) {
         return this.memoryQueryService.getUserMemories(userAddress);
     }
     async createMemory(createMemoryDto) {
         return this.memoryIngestionService.processNewMemory(createMemoryDto);
+    }
+    async saveApprovedMemory(saveMemoryDto) {
+        return this.memoryIngestionService.processApprovedMemory(saveMemoryDto);
     }
     async searchMemories(searchMemoryDto) {
         return this.memoryQueryService.searchMemories(searchMemoryDto.query, searchMemoryDto.userAddress, searchMemoryDto.category, searchMemoryDto.k);
@@ -59,6 +68,12 @@ let MemoryController = class MemoryController {
     async processMemory(processDto) {
         return this.memoryIngestionService.processMemory(processDto);
     }
+    async prepareIndex(prepareIndexDto) {
+        return this.memoryIndexService.prepareIndexForCreation(prepareIndexDto.userAddress);
+    }
+    async registerIndex(registerIndexDto) {
+        return this.memoryIndexService.registerMemoryIndex(registerIndexDto.userAddress, registerIndexDto.indexId);
+    }
 };
 exports.MemoryController = MemoryController;
 __decorate([
@@ -75,6 +90,13 @@ __decorate([
     __metadata("design:paramtypes", [create_memory_dto_1.CreateMemoryDto]),
     __metadata("design:returntype", Promise)
 ], MemoryController.prototype, "createMemory", null);
+__decorate([
+    (0, common_1.Post)('save-approved'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [save_memory_dto_1.SaveMemoryDto]),
+    __metadata("design:returntype", Promise)
+], MemoryController.prototype, "saveApprovedMemory", null);
 __decorate([
     (0, common_1.Post)('search'),
     __param(0, (0, common_1.Body)()),
@@ -133,9 +155,24 @@ __decorate([
     __metadata("design:paramtypes", [process_memory_dto_1.ProcessMemoryDto]),
     __metadata("design:returntype", Promise)
 ], MemoryController.prototype, "processMemory", null);
+__decorate([
+    (0, common_1.Post)('prepare-index'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [prepare_index_dto_1.PrepareIndexDto]),
+    __metadata("design:returntype", Promise)
+], MemoryController.prototype, "prepareIndex", null);
+__decorate([
+    (0, common_1.Post)('register-index'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [register_index_dto_1.RegisterIndexDto]),
+    __metadata("design:returntype", Promise)
+], MemoryController.prototype, "registerIndex", null);
 exports.MemoryController = MemoryController = __decorate([
     (0, common_1.Controller)('memories'),
     __metadata("design:paramtypes", [memory_ingestion_service_1.MemoryIngestionService,
-        memory_query_service_1.MemoryQueryService])
+        memory_query_service_1.MemoryQueryService,
+        memory_index_service_1.MemoryIndexService])
 ], MemoryController);
 //# sourceMappingURL=memory.controller.js.map

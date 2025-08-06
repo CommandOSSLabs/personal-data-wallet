@@ -93,7 +93,19 @@ Only say "true" if the message CLEARLY contains a personal fact, preference or i
 `;
             const responseText = await this.geminiService.generateContent('gemini-1.5-flash', [{ role: 'user', content: prompt }]);
             try {
-                const result = JSON.parse(responseText);
+                let cleanedResponse = responseText;
+                if (cleanedResponse.includes('```json')) {
+                    cleanedResponse = cleanedResponse.replace(/```json\n|\n```/g, '');
+                }
+                else if (cleanedResponse.includes('```')) {
+                    cleanedResponse = cleanedResponse.replace(/```\n|\n```/g, '');
+                }
+                const jsonMatch = cleanedResponse.match(/{[\s\S]*}/);
+                if (jsonMatch) {
+                    cleanedResponse = jsonMatch[0];
+                }
+                this.logger.log(`Cleaned response for parsing: ${cleanedResponse}`);
+                const result = JSON.parse(cleanedResponse);
                 return {
                     shouldSave: result.shouldSave || false,
                     confidence: result.confidence || 0,
@@ -103,6 +115,7 @@ Only say "true" if the message CLEARLY contains a personal fact, preference or i
             }
             catch (parseError) {
                 this.logger.error(`Error parsing classification result: ${parseError.message}`);
+                this.logger.error(`Raw response: ${responseText}`);
                 return {
                     shouldSave: false,
                     confidence: 0,

@@ -28,15 +28,19 @@ let GeminiService = GeminiService_1 = class GeminiService {
         }
         this.generativeAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
     }
-    async generateContent(modelName = 'gemini-1.5-pro', history = [], systemPrompt) {
+    async generateContent(modelName = 'gemini-2.0-flash', history = [], systemPrompt) {
         try {
             const model = this.getModel(modelName);
             const formattedHistory = this.formatChatHistory(history);
             const parts = formattedHistory.slice();
             if (systemPrompt) {
                 parts.unshift({
-                    role: 'system',
+                    role: 'user',
                     parts: [{ text: systemPrompt }]
+                });
+                parts.unshift({
+                    role: 'model',
+                    parts: [{ text: 'I understand. I\'ll help you with that.' }]
                 });
             }
             const result = await model.generateContent({
@@ -55,7 +59,7 @@ let GeminiService = GeminiService_1 = class GeminiService {
             throw new Error(`Gemini API error: ${error.message}`);
         }
     }
-    generateContentStream(modelName = 'gemini-1.5-pro', history = [], systemPrompt) {
+    generateContentStream(modelName = 'gemini-2.0-flash', history = [], systemPrompt) {
         const subject = new rxjs_1.Subject();
         (async () => {
             try {
@@ -64,8 +68,12 @@ let GeminiService = GeminiService_1 = class GeminiService {
                 const parts = formattedHistory.slice();
                 if (systemPrompt) {
                     parts.unshift({
-                        role: 'system',
+                        role: 'user',
                         parts: [{ text: systemPrompt }]
+                    });
+                    parts.unshift({
+                        role: 'model',
+                        parts: [{ text: 'I understand. I will help you with that.' }]
                     });
                 }
                 const result = await model.generateContentStream({

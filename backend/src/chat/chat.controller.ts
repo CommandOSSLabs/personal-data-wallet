@@ -1,5 +1,6 @@
-import { Controller, Post, Body, Sse, MessageEvent, Get, Query, Delete, Param, Put } from '@nestjs/common';
+import { Controller, Post, Body, Sse, MessageEvent, Get, Query, Delete, Param, Put, Res } from '@nestjs/common';
 import { Observable } from 'rxjs';
+import type { Response } from 'express';
 import { ChatService } from './chat.service';
 import { ChatMessageDto } from './dto/chat-message.dto';
 import { CreateSessionDto } from './dto/create-session.dto';
@@ -69,9 +70,29 @@ export class ChatController {
     return this.chatService.saveSummary(saveSummaryDto);
   }
 
-  @Sse('stream')
-  streamChat(@Body() messageDto: ChatMessageDto): Observable<MessageEvent> {
-    return this.chatService.streamChatResponse(messageDto);
+  @Post('stream')
+  async streamChat(@Body() messageDto: ChatMessageDto, @Res() response: Response) {
+    response.setHeader('Content-Type', 'text/event-stream');
+    response.setHeader('Cache-Control', 'no-cache');
+    response.setHeader('Connection', 'keep-alive');
+    response.setHeader('Access-Control-Allow-Origin', '*');
+
+    const observable = this.chatService.streamChatResponse(messageDto);
+    
+    observable.subscribe({
+      next: (event) => {
+        response.write(`data: ${event.data}\n\n`);
+      },
+      error: (error) => {
+        console.error('Streaming error:', error);
+        response.write(`data: ${JSON.stringify({ type: 'error', message: error.message })}\n\n`);
+        response.end();
+      },
+      complete: () => {
+        response.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+        response.end();
+      }
+    });
   }
 
   @Post('')

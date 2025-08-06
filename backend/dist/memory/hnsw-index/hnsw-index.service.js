@@ -45,8 +45,9 @@ var HnswIndexService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.HnswIndexService = void 0;
 const common_1 = require("@nestjs/common");
-const walrus_service_1 = require("../../infrastructure/walrus/walrus.service");
 const hnswlib = __importStar(require("hnswlib-node"));
+const fs = __importStar(require("fs"));
+const walrus_service_1 = require("../../infrastructure/walrus/walrus.service");
 let HnswIndexService = HnswIndexService_1 = class HnswIndexService {
     walrusService;
     logger = new common_1.Logger(HnswIndexService_1.name);
@@ -55,13 +56,20 @@ let HnswIndexService = HnswIndexService_1 = class HnswIndexService {
     }
     async createIndex(dimensions = 512, maxElements = 10000) {
         try {
+            this.logger.log(`Creating new HNSW index with dimensions ${dimensions}, max elements ${maxElements}`);
             const index = new hnswlib.HierarchicalNSW('cosine', dimensions);
             index.initIndex(maxElements);
-            const serialized = index.getIndexBuffer();
+            const tempFilePath = `./tmp_hnsw_${Date.now()}.bin`;
+            index.writeIndexSync(tempFilePath);
+            const serialized = fs.readFileSync(tempFilePath);
+            try {
+                fs.unlinkSync(tempFilePath);
+            }
+            catch (e) { }
             return { index, serialized };
         }
         catch (error) {
-            this.logger.error(`Error creating HNSW index: ${error.message}`);
+            this.logger.error(`Error creating index: ${error.message}`);
             throw new Error(`Index creation error: ${error.message}`);
         }
     }
@@ -87,10 +95,23 @@ let HnswIndexService = HnswIndexService_1 = class HnswIndexService {
             throw new Error(`Index search error: ${error.message}`);
         }
     }
-    async saveIndex(index) {
+    async saveIndex(index, userAddress) {
         try {
-            const serialized = index.getIndexBuffer();
-            const blobId = await this.walrusService.uploadFile(serialized, `index_${Date.now()}.hnsw`);
+            this.logger.log(`Saving HNSW index for user ${userAddress}`);
+            const tempFilePath = `./tmp_hnsw_${Date.now()}.bin`;
+            index.writeIndexSync(tempFilePath);
+            const serialized = fs.readFileSync(tempFilePath);
+            try {
+                fs.unlinkSync(tempFilePath);
+            }
+            catch (e) { }
+            const adminAddress = this.walrusService.getAdminAddress();
+            const blobId = await this.walrusService.uploadFile(serialized, `index_${userAddress}_${Date.now()}.hnsw`, adminAddress, 12, {
+                'user-address': userAddress,
+                'content-type': 'application/hnsw-index',
+                'version': '1.0'
+            });
+            this.logger.log(`Index saved to Walrus with blobId ${blobId}`);
             return blobId;
         }
         catch (error) {
@@ -98,11 +119,24 @@ let HnswIndexService = HnswIndexService_1 = class HnswIndexService {
             throw new Error(`Index save error: ${error.message}`);
         }
     }
-    async loadIndex(blobId) {
+    async loadIndex(blobId, userAddress) {
         try {
+            this.logger.log(`Loading index from blobId: ${blobId}`);
+            if (userAddress) {
+                const hasAccess = await this.walrusService.verifyUserAccess(blobId, userAddress);
+                if (!hasAccess) {
+                    this.logger.warn(`User ${userAddress} attempted to access index without permission: ${blobId}`);
+                }
+            }
             const serialized = await this.walrusService.downloadFile(blobId);
+            const tempFilePath = `./tmp_hnsw_${Date.now()}.bin`;
+            fs.writeFileSync(tempFilePath, serialized);
             const index = new hnswlib.HierarchicalNSW('cosine', 0);
-            index.readIndexFromBuffer(serialized);
+            index.readIndexSync(tempFilePath);
+            try {
+                fs.unlinkSync(tempFilePath);
+            }
+            catch (e) { }
             return { index, serialized };
         }
         catch (error) {

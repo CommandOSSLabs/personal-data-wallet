@@ -26,7 +26,7 @@ import {
   IconLock,
   IconLockOpen
 } from '@tabler/icons-react'
-import { memoryApi } from '@/app/api/memoryApi'
+import { memoryIntegrationService } from '@/app/services/memoryIntegration'
 import { MemoryDecryptionModal } from './memory-decryption-modal'
 import { memoryDecryptionCache } from '@/app/services/memoryDecryptionCache'
 
@@ -119,13 +119,10 @@ export function MemoryPanel({ userAddress, sessionId, currentMessage }: MemoryPa
     
     setLoading(true)
     try {
-      const data = await memoryApi.searchMemories({
-        query: '',
-        userAddress,
-        k: 50
-      })
+      // Get memories directly from blockchain using the integration service
+      const data = await memoryIntegrationService.fetchUserMemories(userAddress)
       
-      const memoryList = data.results || []
+      const memoryList = data.memories || []
       setMemories(memoryList)
     } catch (error) {
       console.error('Failed to load memories:', error)
@@ -138,13 +135,16 @@ export function MemoryPanel({ userAddress, sessionId, currentMessage }: MemoryPa
     if (!query || !userAddress) return
     
     try {
-      const data = await memoryApi.searchMemories({
-        query,
-        userAddress,
-        k: 5
-      })
+      // First get all memories
+      const allMemories = await memoryIntegrationService.fetchUserMemories(userAddress)
       
-      const relevantList = data.results || []
+      // Then filter for relevance using the client-side search
+      const relevantList = memoryIntegrationService.getMemoriesRelevantToText(
+        allMemories.memories || [],
+        query,
+        5 // Limit to 5 results
+      )
+      
       setRelevantMemories(relevantList)
     } catch (error) {
       console.error('Failed to find relevant memories:', error)

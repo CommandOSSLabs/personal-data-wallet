@@ -88,10 +88,15 @@ let ChatService = ChatService_1 = class ChatService {
             let sessionId;
             if (createSessionDto.suiObjectId) {
                 sessionId = createSessionDto.suiObjectId;
-                this.logger.log(`Using existing blockchain session ID: ${sessionId}`);
+                this.logger.log(`Using blockchain session ID created by frontend: ${sessionId}`);
             }
             else {
-                sessionId = await this.suiService.createChatSession(createSessionDto.userAddress, createSessionDto.modelName);
+                this.logger.error('Session must be created on blockchain by frontend first');
+                return {
+                    success: false,
+                    sessionId: undefined,
+                    session: undefined
+                };
             }
             let rawSession;
             try {
@@ -119,17 +124,30 @@ let ChatService = ChatService_1 = class ChatService {
     }
     async addMessage(sessionId, messageDto) {
         try {
-            await this.suiService.addMessageToSession(sessionId, messageDto.userAddress, messageDto.type, messageDto.content);
+            this.logger.log(`Message processing request received for session ${sessionId}`);
+            let memoryExtracted = null;
             if (messageDto.type === 'user') {
-                this.memoryIngestionService.processConversation(messageDto.content, '', messageDto.userAddress).catch(err => this.logger.error(`Memory extraction error: ${err.message}`));
+                try {
+                    memoryExtracted = await this.checkForMemoryContent(messageDto.content, messageDto.userAddress);
+                    this.logger.log('Memory extraction completed', {
+                        hasExtraction: !!memoryExtracted,
+                        factsCount: memoryExtracted?.extractedFacts?.length || 0,
+                        category: memoryExtracted?.category
+                    });
+                }
+                catch (err) {
+                    this.logger.error(`Memory extraction error: ${err.message}`);
+                    memoryExtracted = null;
+                }
             }
             return {
                 success: true,
-                message: 'Message added successfully'
+                message: 'Message processed successfully',
+                memoryExtracted
             };
         }
         catch (error) {
-            this.logger.error(`Error adding message: ${error.message}`);
+            this.logger.error(`Error processing message: ${error.message}`);
             return {
                 success: false,
                 message: `Error: ${error.message}`
@@ -138,14 +156,14 @@ let ChatService = ChatService_1 = class ChatService {
     }
     async deleteSession(sessionId, userAddress) {
         try {
-            await this.suiService.deleteSession(sessionId, userAddress);
+            this.logger.log(`Delete request received for session ${sessionId}`);
             return {
                 success: true,
-                message: 'Session deleted successfully'
+                message: 'Session deletion handled by frontend'
             };
         }
         catch (error) {
-            this.logger.error(`Error deleting session: ${error.message}`);
+            this.logger.error(`Error processing deletion: ${error.message}`);
             return {
                 success: false,
                 message: `Error: ${error.message}`
@@ -154,14 +172,14 @@ let ChatService = ChatService_1 = class ChatService {
     }
     async updateSessionTitle(sessionId, userAddress, newTitle) {
         try {
-            await this.suiService.updateSessionTitle(sessionId, userAddress, newTitle);
+            this.logger.log(`Title update request received for session ${sessionId}`);
             return {
                 success: true,
-                message: 'Session title updated successfully'
+                message: 'Session title update handled by frontend'
             };
         }
         catch (error) {
-            this.logger.error(`Error updating session title: ${error.message}`);
+            this.logger.error(`Error processing title update: ${error.message}`);
             return {
                 success: false,
                 message: `Error: ${error.message}`
@@ -202,11 +220,11 @@ let ChatService = ChatService_1 = class ChatService {
     }
     async saveSummary(saveSummaryDto) {
         try {
-            const success = await this.suiService.saveSessionSummary(saveSummaryDto.sessionId, saveSummaryDto.userAddress, saveSummaryDto.summary);
-            return { success };
+            this.logger.log(`Summary save request received for session ${saveSummaryDto.sessionId}`);
+            return { success: true };
         }
         catch (error) {
-            this.logger.error(`Error saving summary: ${error.message}`);
+            this.logger.error(`Error processing summary: ${error.message}`);
             return { success: false };
         }
     }
@@ -226,7 +244,7 @@ let ChatService = ChatService_1 = class ChatService {
                 const sessionId = messageDto.sessionId || messageDto.session_id;
                 const userId = messageDto.userId || messageDto.user_id || messageDto.userAddress;
                 const content = messageDto.text || messageDto.content;
-                const modelName = messageDto.model || messageDto.modelName || 'gemini-1.5-pro';
+                const modelName = messageDto.model || messageDto.modelName || 'gemini-2.0-flash';
                 if (!sessionId) {
                     throw new Error('Session ID is required for streaming chat');
                 }
@@ -264,18 +282,25 @@ let ChatService = ChatService_1 = class ChatService {
                     complete: async () => {
                         try {
                             const userMessage = messageDto.originalUserMessage || content;
-                            await this.suiService.addMessageToSession(sessionId, userId, 'user', userMessage);
-                            await this.suiService.addMessageToSession(sessionId, userId, 'assistant', fullResponse);
-                            const memoryResult = await this.processCompletedMessage(sessionId, userId, userMessage, fullResponse);
-                            memoryStored = memoryResult.memoryStored;
-                            memoryId = memoryResult.memoryId;
+                            this.logger.log('Messages will be saved by frontend after streaming completes');
+                            let memoryExtraction = null;
+                            try {
+                                memoryExtraction = await this.checkForMemoryContent(userMessage, userId);
+                            }
+                            catch (err) {
+                                this.logger.error(`Memory extraction error: ${err.message}`);
+                            }
+                            this.summarizationService.summarizeSessionIfNeeded(sessionId, userId);
+                            memoryStored = false;
+                            memoryId = undefined;
                             subject.next({
                                 data: JSON.stringify({
                                     type: 'end',
                                     content: fullResponse,
                                     intent: 'CHAT',
                                     memoryStored,
-                                    memoryId
+                                    memoryId,
+                                    memoryExtraction: memoryExtraction
                                 })
                             });
                             subject.complete();
@@ -321,15 +346,21 @@ let ChatService = ChatService_1 = class ChatService {
             const systemPrompt = this.constructPrompt(chatSession.summary, relevantMemories, messageDto.memoryContext || '');
             const response = await this.geminiService.generateContent(modelName, chatHistory, systemPrompt);
             const userMessage = messageDto.originalUserMessage || content;
-            await this.suiService.addMessageToSession(sessionId, userId, 'user', userMessage);
-            await this.suiService.addMessageToSession(sessionId, userId, 'assistant', response);
-            const memoryResult = await this.processCompletedMessage(sessionId, userId, userMessage, response);
+            let memoryExtraction = null;
+            try {
+                memoryExtraction = await this.checkForMemoryContent(userMessage, userId);
+            }
+            catch (err) {
+                this.logger.error(`Memory extraction error: ${err.message}`);
+            }
+            this.summarizationService.summarizeSessionIfNeeded(sessionId, userId);
             return {
                 response,
                 success: true,
                 intent: 'CHAT',
-                memoryStored: memoryResult.memoryStored,
-                memoryId: memoryResult.memoryId
+                memoryStored: false,
+                memoryId: undefined,
+                memoryExtraction: memoryExtraction
             };
         }
         catch (error) {
@@ -393,6 +424,25 @@ let ChatService = ChatService_1 = class ChatService {
         catch (error) {
             this.logger.error(`Error checking factual content: ${error.message}`);
             return false;
+        }
+    }
+    async checkForMemoryContent(message, userAddress) {
+        try {
+            const classification = await this.memoryIngestionService['classifierService'].shouldSaveMemory(message);
+            if (!classification.shouldSave) {
+                return null;
+            }
+            return {
+                shouldSave: true,
+                category: classification.category,
+                content: message,
+                extractedFacts: [message],
+                confidence: classification.confidence || 0.8
+            };
+        }
+        catch (error) {
+            this.logger.error(`Error checking memory content: ${error.message}`);
+            return null;
         }
     }
 };

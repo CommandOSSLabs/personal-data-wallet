@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { ChatWindow } from './chat-window'
 import { ChatInput } from './chat-input'
 import { ModelSelector, ModelType } from './model-selector'
+import { DEFAULT_MODEL_ID, getProviderModelId } from '@/app/config/models'
 import { Sidebar } from '@/app/components/sidebar/sidebar'
 
 import { useStreamingChat } from '@/app/hooks/use-streaming-chat'
@@ -14,6 +15,8 @@ import { Message } from '@/app/types'
 import { memoryIntegrationService } from '@/app/services/memoryIntegration'
 import { MemoryIndicator, useMemoryIndicator } from '@/app/components/memory/memory-indicator'
 import { MemoryPanel } from '@/app/components/memory/memory-panel'
+import { MemoryApprovalModal } from '@/app/components/memory/memory-approval-modal'
+import { MemoryExtraction } from '@/app/services/memoryIntegration'
 import {
   AppShell,
   Group,
@@ -30,9 +33,10 @@ import {
 import { IconLogout, IconUser, IconBrain, IconWallet } from '@tabler/icons-react'
 import { useDisclosure } from '@mantine/hooks'
 import { MemoryManager } from '@/app/components/memory/memory-manager'
+import { WalletBalance } from '@/app/components/wallet/wallet-balance'
 
 export function ChatInterface() {
-  const [selectedModel, setSelectedModel] = useState<ModelType>('gemini')
+  const [selectedModel, setSelectedModel] = useState<ModelType>(DEFAULT_MODEL_ID)
   const queryClient = useQueryClient()
 
   // Memory indicator state
@@ -40,6 +44,10 @@ export function ChatInterface() {
 
   // Memory manager modal
   const [memoryModalOpened, { open: openMemoryModal, close: closeMemoryModal }] = useDisclosure(false)
+  
+  // Memory approval modal
+  const [memoryApprovalModalOpened, setMemoryApprovalModalOpened] = useState(false)
+  const [currentMemoryExtraction, setCurrentMemoryExtraction] = useState<MemoryExtraction | null>(null)
 
   const { logout, userAddress } = useSuiAuth()
 
@@ -51,7 +59,9 @@ export function ChatInterface() {
     createNewSession,
     addMessageToSession,
     deleteSession,
-    selectSession
+    selectSession,
+    isAddingMessage,
+    executePendingTransactions
   } = useChatSessions()
 
   // Load memories from the memory API
@@ -120,7 +130,15 @@ export function ChatInterface() {
       } catch (error) {
         // Log error for monitoring but show a user-friendly message
         console.error('Failed to create session:', error instanceof Error ? error.message : 'Unknown error')
-        alert('Failed to create chat session. Please try again.')
+        
+        // Check if it's a gas coin error
+        if (error instanceof Error && error.message.includes('No valid gas coins found')) {
+          alert('You need SUI tokens to pay for gas fees. Please get some SUI from the testnet faucet at https://suifaucet.com')
+        } else if (error instanceof Error && error.message.includes('Insufficient SUI balance')) {
+          alert('Insufficient SUI balance. Please get some SUI from the testnet faucet at https://suifaucet.com')
+        } else {
+          alert('Failed to create chat session. Please try again.')
+        }
         return
       }
     }
@@ -189,7 +207,7 @@ export function ChatInterface() {
         text: messageText,
         userId: userAddress!,
         sessionId: sessionId,
-        model: selectedModel,
+        model: getProviderModelId(selectedModel),
         originalUserMessage: messageText,
         memoryContext: memoryContext
       }
@@ -202,33 +220,29 @@ export function ChatInterface() {
           // We don't need to manually update here as it's handled by the streaming state
         },
         // On complete
-        async (fullResponse: string, intent?: string, entities?: any, memoryStored?: boolean, memoryId?: string) => {
-          // Update memory indicator with backend results
-          if (memoryStored && memoryId) {
-            // Show memory indicator - set to 1 for detected and stored
+        async (fullResponse: string, intent?: string, entities?: any, memoryStored?: boolean, memoryId?: string, memoryExtraction?: any) => {
+          // Handle memory extraction results from backend
+          if (memoryExtraction && memoryExtraction.shouldSave) {
+            // Show memory indicator - detected but not yet stored
             memoryIndicator.setDetected(1);
-            memoryIndicator.setStored(1);
+            memoryIndicator.setStored(0);
             
             // Update temporary user message with memory detection data
             if (tempUserMessage) {
               const updatedTempMessage: Message = {
                 ...tempUserMessage,
                 memoryDetected: true,
-                memoryId: memoryId
+                memoryExtraction: memoryExtraction
               };
               setTempUserMessage(updatedTempMessage);
             }
             
-            // Force refresh memories list
-            if (userAddress) {
-              memoryIntegrationService.fetchUserMemories(userAddress)
-                .then(response => {
-                  setMemories(response.memories || []);
-                })
-                .catch(error => {
-                  // Silently handle memory refresh errors
-                });
-            }
+            // Show memory approval modal to user
+            console.log('Memory detected:', memoryExtraction);
+            
+            // Set current memory extraction and show modal
+            setCurrentMemoryExtraction(memoryExtraction);
+            setMemoryApprovalModalOpened(true);
           } else {
             memoryIndicator.setDetected(0);
             memoryIndicator.setStored(0);
@@ -243,8 +257,29 @@ export function ChatInterface() {
             setStreamingMessage(finalMessage)
           }
 
-          // Don't save the response here - the streaming endpoint already saves it
-          // This prevents duplicate messages
+                      // Add both messages to blockchain transaction batch
+            try {
+              // Add user message to batch
+              await addMessageToSession(
+                sessionId,
+                messageText,
+                'user',
+                false // Don't execute yet
+              )
+              
+              // Add assistant response to batch
+              await addMessageToSession(
+                sessionId,
+                fullResponse,
+                'assistant',
+                true // Execute the batch with both messages
+              )
+              
+              console.log('Messages saved to blockchain successfully')
+            } catch (error) {
+              console.error('Error saving messages to blockchain:', error)
+              // Continue even if blockchain save fails
+            }
 
           // Refresh the session to get the latest messages
           setIsRefreshingSession(true)
@@ -397,6 +432,8 @@ export function ChatInterface() {
           </Stack>
 
           <Group gap="md">
+            <WalletBalance />
+            
             <ModelSelector
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
@@ -535,6 +572,39 @@ export function ChatInterface() {
           }}
         />
       </Modal>
+
+      {/* Memory Approval Modal */}
+      {currentMemoryExtraction && (
+        <MemoryApprovalModal
+          opened={memoryApprovalModalOpened}
+          onClose={() => {
+            setMemoryApprovalModalOpened(false);
+            setCurrentMemoryExtraction(null);
+            memoryIndicator.setDetected(0);
+          }}
+          memoryExtraction={currentMemoryExtraction}
+          userAddress={userAddress || ''}
+          onApproved={(memoryId) => {
+            console.log('Memory saved with ID:', memoryId);
+            memoryIndicator.setStored(1);
+            
+            // Refresh memories list after save
+            if (userAddress) {
+              memoryIntegrationService.fetchUserMemories(userAddress)
+                .then(response => {
+                  setMemories(response.memories || []);
+                })
+                .catch(error => {
+                  console.error('Error refreshing memories:', error);
+                });
+            }
+          }}
+          onRejected={() => {
+            console.log('Memory save rejected by user');
+            memoryIndicator.setDetected(0);
+          }}
+        />
+      )}
     </AppShell>
   )
 }

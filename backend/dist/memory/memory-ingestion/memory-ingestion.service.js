@@ -16,6 +16,7 @@ const classifier_service_1 = require("../classifier/classifier.service");
 const embedding_service_1 = require("../embedding/embedding.service");
 const graph_service_1 = require("../graph/graph.service");
 const hnsw_index_service_1 = require("../hnsw-index/hnsw-index.service");
+const memory_index_service_1 = require("../memory-index/memory-index.service");
 const seal_service_1 = require("../../infrastructure/seal/seal.service");
 const sui_service_1 = require("../../infrastructure/sui/sui.service");
 const walrus_service_1 = require("../../infrastructure/walrus/walrus.service");
@@ -25,6 +26,7 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
     embeddingService;
     graphService;
     hnswIndexService;
+    memoryIndexService;
     sealService;
     suiService;
     walrusService;
@@ -32,11 +34,12 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
     logger = new common_1.Logger(MemoryIngestionService_1.name);
     entityToVectorMap = {};
     nextVectorId = {};
-    constructor(classifierService, embeddingService, graphService, hnswIndexService, sealService, suiService, walrusService, geminiService) {
+    constructor(classifierService, embeddingService, graphService, hnswIndexService, memoryIndexService, sealService, suiService, walrusService, geminiService) {
         this.classifierService = classifierService;
         this.embeddingService = embeddingService;
         this.graphService = graphService;
         this.hnswIndexService = hnswIndexService;
+        this.memoryIndexService = memoryIndexService;
         this.sealService = sealService;
         this.suiService = suiService;
         this.walrusService = walrusService;
@@ -46,7 +49,9 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
         if (!this.nextVectorId[userAddress]) {
             this.nextVectorId[userAddress] = 1;
         }
-        return this.nextVectorId[userAddress]++;
+        const vectorId = this.nextVectorId[userAddress];
+        this.nextVectorId[userAddress]++;
+        return vectorId;
     }
     getEntityToVectorMap(userAddress) {
         if (!this.entityToVectorMap[userAddress]) {
@@ -56,17 +61,21 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
     }
     async processConversation(userMessage, assistantResponse, userAddress) {
         try {
-            const classification = await this.classifierService.shouldSaveMemory(userMessage);
-            if (!classification.shouldSave) {
-                this.logger.log(`Message not classified as a memory: ${userMessage}`);
+            const conversation = `User: ${userMessage}\nAssistant: ${assistantResponse}`;
+            const classificationResult = await this.classifierService.shouldSaveMemory(conversation);
+            const shouldRemember = classificationResult.shouldSave;
+            if (!shouldRemember) {
                 return { memoryStored: false };
             }
-            const memoryDto = {
-                content: userMessage,
-                category: classification.category,
+            const memoryContent = conversation;
+            if (!memoryContent || memoryContent.trim() === '') {
+                return { memoryStored: false };
+            }
+            const result = await this.processNewMemory({
+                content: memoryContent,
+                category: 'conversation',
                 userAddress
-            };
-            const result = await this.processNewMemory(memoryDto);
+            });
             return {
                 memoryStored: result.success,
                 memoryId: result.memoryId
@@ -79,30 +88,37 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
     }
     async processNewMemory(memoryDto) {
         try {
+            const indexData = await this.memoryIndexService.getOrLoadIndex(memoryDto.userAddress);
+            let index;
+            let graph;
             let indexId;
             let indexBlobId;
             let graphBlobId;
-            let currentVersion = 0;
-            let index;
-            let graph;
-            try {
-                const memoryIndex = await this.suiService.getMemoryIndex(memoryDto.userAddress);
-                indexId = memoryDto.userAddress;
-                indexBlobId = memoryIndex.indexBlobId;
-                graphBlobId = memoryIndex.graphBlobId;
-                currentVersion = memoryIndex.version;
-                const indexResult = await this.hnswIndexService.loadIndex(indexBlobId);
-                index = indexResult.index;
-                graph = await this.graphService.loadGraph(graphBlobId);
+            let currentVersion = 1;
+            if (indexData.exists && indexData.indexId && indexData.indexBlobId && indexData.graphBlobId && indexData.version) {
+                index = indexData.index;
+                graph = indexData.graph;
+                indexId = indexData.indexId;
+                indexBlobId = indexData.indexBlobId;
+                graphBlobId = indexData.graphBlobId;
+                currentVersion = indexData.version;
             }
-            catch (error) {
-                this.logger.log(`Creating new memory index for user ${memoryDto.userAddress}`);
-                const newIndexResult = await this.hnswIndexService.createIndex();
-                index = newIndexResult.index;
-                indexBlobId = await this.hnswIndexService.saveIndex(index);
-                graph = this.graphService.createGraph();
-                graphBlobId = await this.graphService.saveGraph(graph);
-                indexId = await this.suiService.createMemoryIndex(memoryDto.userAddress, indexBlobId, graphBlobId);
+            else {
+                this.logger.log(`Preparing memory index data for user ${memoryDto.userAddress}`);
+                const prepareResult = await this.memoryIndexService.prepareIndexForCreation(memoryDto.userAddress);
+                if (!prepareResult.success) {
+                    return {
+                        success: false,
+                        message: prepareResult.message || 'Failed to prepare index data'
+                    };
+                }
+                return {
+                    success: false,
+                    message: 'Memory index not found. Please create index on-chain first.',
+                    requiresIndexCreation: true,
+                    indexBlobId: prepareResult.indexBlobId,
+                    graphBlobId: prepareResult.graphBlobId
+                };
             }
             const { vector } = await this.embeddingService.embedText(memoryDto.content);
             const vectorId = this.getNextVectorId(memoryDto.userAddress);
@@ -114,9 +130,9 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
             });
             graph = this.graphService.addToGraph(graph, extraction.entities, extraction.relationships);
             const encryptedContent = await this.sealService.encrypt(memoryDto.content, memoryDto.userAddress);
-            const contentBlobId = await this.walrusService.uploadContent(encryptedContent);
-            const newIndexBlobId = await this.hnswIndexService.saveIndex(index);
-            const newGraphBlobId = await this.graphService.saveGraph(graph);
+            const contentBlobId = await this.walrusService.uploadContent(encryptedContent, memoryDto.userAddress);
+            const newIndexBlobId = await this.hnswIndexService.saveIndex(index, memoryDto.userAddress);
+            const newGraphBlobId = await this.graphService.saveGraph(graph, memoryDto.userAddress);
             await this.suiService.updateMemoryIndex(indexId, memoryDto.userAddress, currentVersion, newIndexBlobId, newGraphBlobId);
             const memoryId = await this.suiService.createMemoryRecord(memoryDto.userAddress, memoryDto.category, vectorId, contentBlobId);
             return {
@@ -135,31 +151,38 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
     }
     async processMemory(processDto) {
         try {
-            const { content, userAddress, category } = processDto;
+            const { content, userAddress, category = 'general' } = processDto;
+            const indexData = await this.memoryIndexService.getOrLoadIndex(userAddress);
+            let index;
+            let graph;
             let indexId;
             let indexBlobId;
             let graphBlobId;
-            let currentVersion = 0;
-            let index;
-            let graph;
-            try {
-                const memoryIndex = await this.suiService.getMemoryIndex(userAddress);
-                indexId = userAddress;
-                indexBlobId = memoryIndex.indexBlobId;
-                graphBlobId = memoryIndex.graphBlobId;
-                currentVersion = memoryIndex.version;
-                const indexResult = await this.hnswIndexService.loadIndex(indexBlobId);
-                index = indexResult.index;
-                graph = await this.graphService.loadGraph(graphBlobId);
+            let currentVersion = 1;
+            if (indexData.exists && indexData.indexId && indexData.indexBlobId && indexData.graphBlobId && indexData.version) {
+                index = indexData.index;
+                graph = indexData.graph;
+                indexId = indexData.indexId;
+                indexBlobId = indexData.indexBlobId;
+                graphBlobId = indexData.graphBlobId;
+                currentVersion = indexData.version;
             }
-            catch (error) {
-                this.logger.log(`Creating new memory index for user ${userAddress}`);
-                const newIndexResult = await this.hnswIndexService.createIndex();
-                index = newIndexResult.index;
-                indexBlobId = await this.hnswIndexService.saveIndex(index);
-                graph = this.graphService.createGraph();
-                graphBlobId = await this.graphService.saveGraph(graph);
-                indexId = await this.suiService.createMemoryIndex(userAddress, indexBlobId, graphBlobId);
+            else {
+                this.logger.log(`Preparing memory index data for user ${userAddress}`);
+                const prepareResult = await this.memoryIndexService.prepareIndexForCreation(userAddress);
+                if (!prepareResult.success) {
+                    return {
+                        success: false,
+                        message: prepareResult.message || 'Failed to prepare index data'
+                    };
+                }
+                return {
+                    success: false,
+                    message: 'Memory index not found. Please create index on-chain first.',
+                    requiresIndexCreation: true,
+                    indexBlobId: prepareResult.indexBlobId,
+                    graphBlobId: prepareResult.graphBlobId
+                };
             }
             const { vector } = await this.embeddingService.embedText(content);
             const vectorId = this.getNextVectorId(userAddress);
@@ -171,9 +194,9 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
             });
             graph = this.graphService.addToGraph(graph, extraction.entities, extraction.relationships);
             const encryptedContent = await this.sealService.encrypt(content, userAddress);
-            const contentBlobId = await this.walrusService.uploadContent(encryptedContent);
-            const newIndexBlobId = await this.hnswIndexService.saveIndex(index);
-            const newGraphBlobId = await this.graphService.saveGraph(graph);
+            const contentBlobId = await this.walrusService.uploadContent(encryptedContent, userAddress);
+            const newIndexBlobId = await this.hnswIndexService.saveIndex(index, userAddress);
+            const newGraphBlobId = await this.graphService.saveGraph(graph, userAddress);
             await this.suiService.updateMemoryIndex(indexId, userAddress, currentVersion, newIndexBlobId, newGraphBlobId);
             return {
                 success: true,
@@ -192,7 +215,7 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
     }
     async indexMemory(indexDto) {
         try {
-            const { memoryId, userAddress, category, walrusHash } = indexDto;
+            const { memoryId, userAddress, category = 'general', walrusHash } = indexDto;
             try {
                 const memoryOnChain = await this.suiService.getMemory(memoryId);
                 if (memoryOnChain.owner !== userAddress) {
@@ -224,9 +247,20 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
     }
     async updateMemory(memoryId, content, userAddress) {
         try {
-            const memory = await this.suiService.getMemory(memoryId);
-            if (memory.owner !== userAddress) {
-                throw new Error('You do not own this memory');
+            try {
+                const memory = await this.suiService.getMemory(memoryId);
+                if (memory.owner !== userAddress) {
+                    return {
+                        success: false,
+                        message: 'Memory does not belong to the specified user'
+                    };
+                }
+            }
+            catch (error) {
+                return {
+                    success: false,
+                    message: `Failed to verify memory: ${error.message}`
+                };
             }
             return {
                 success: true,
@@ -241,6 +275,56 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
             };
         }
     }
+    async processApprovedMemory(saveMemoryDto) {
+        try {
+            const { content, category, userAddress, suiObjectId } = saveMemoryDto;
+            if (suiObjectId) {
+                this.logger.log(`Using existing memory object ID: ${suiObjectId}`);
+                const processResult = await this.processMemory({
+                    content,
+                    userAddress,
+                    category
+                });
+                if (!processResult.success) {
+                    return {
+                        success: false,
+                        message: processResult.message || 'Failed to process memory content'
+                    };
+                }
+                return {
+                    success: true,
+                    memoryId: suiObjectId,
+                    blobId: processResult.blobId,
+                    vectorId: processResult.vectorId,
+                    message: 'Memory processed successfully'
+                };
+            }
+            const processResult = await this.processMemory({
+                content,
+                userAddress,
+                category
+            });
+            if (!processResult.success) {
+                return {
+                    success: false,
+                    message: processResult.message || 'Failed to process memory content'
+                };
+            }
+            return {
+                success: true,
+                blobId: processResult.blobId,
+                vectorId: processResult.vectorId,
+                message: 'Memory processed successfully. Create blockchain record with the provided data.'
+            };
+        }
+        catch (error) {
+            this.logger.error(`Error processing approved memory: ${error.message}`);
+            return {
+                success: false,
+                message: `Failed to process memory: ${error.message}`
+            };
+        }
+    }
 };
 exports.MemoryIngestionService = MemoryIngestionService;
 exports.MemoryIngestionService = MemoryIngestionService = MemoryIngestionService_1 = __decorate([
@@ -249,6 +333,7 @@ exports.MemoryIngestionService = MemoryIngestionService = MemoryIngestionService
         embedding_service_1.EmbeddingService,
         graph_service_1.GraphService,
         hnsw_index_service_1.HnswIndexService,
+        memory_index_service_1.MemoryIndexService,
         seal_service_1.SealService,
         sui_service_1.SuiService,
         walrus_service_1.WalrusService,

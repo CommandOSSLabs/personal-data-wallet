@@ -11,6 +11,15 @@ import { MemoryIngestionService } from '../memory/memory-ingestion/memory-ingest
 import { AddMessageDto } from './dto/add-message.dto';
 import { ChatMessage, ChatSession } from '../types/chat.types';
 
+// Interface for memory extraction results
+export interface MemoryExtraction {
+  shouldSave: boolean;
+  category: string;
+  content: string;
+  extractedFacts: string[];
+  confidence: number;
+}
+
 interface MessageEvent {
   data: string;
 }
@@ -96,16 +105,18 @@ export class ChatService {
     try {
       let sessionId: string;
       
-      // If suiObjectId is provided, the session was created directly on the blockchain by the frontend
+      // Frontend always creates sessions on blockchain
       if (createSessionDto.suiObjectId) {
         sessionId = createSessionDto.suiObjectId;
-        this.logger.log(`Using existing blockchain session ID: ${sessionId}`);
+        this.logger.log(`Using blockchain session ID created by frontend: ${sessionId}`);
       } else {
-        // Create a new session on the blockchain via backend
-        sessionId = await this.suiService.createChatSession(
-          createSessionDto.userAddress, 
-          createSessionDto.modelName
-        );
+        // Backend should not create sessions on blockchain
+        this.logger.error('Session must be created on blockchain by frontend first');
+        return { 
+          success: false, 
+          sessionId: undefined,
+          session: undefined 
+        };
       }
       
       // Get the session data
@@ -137,33 +148,41 @@ export class ChatService {
   }
 
   /**
-   * Add a message to a session
+   * Process a message for memory extraction and other backend tasks
    */
-  async addMessage(sessionId: string, messageDto: AddMessageDto): Promise<{ success: boolean, message?: string }> {
+  async addMessage(sessionId: string, messageDto: AddMessageDto): Promise<{ success: boolean, message?: string, memoryExtracted?: MemoryExtraction | null }> {
     try {
-      await this.suiService.addMessageToSession(
-        sessionId,
-        messageDto.userAddress,
-        messageDto.type,
-        messageDto.content
-      );
+      this.logger.log(`Message processing request received for session ${sessionId}`);
+      
+      let memoryExtracted: MemoryExtraction | null = null;
       
       // If it's a user message, check if there are memories to extract
       if (messageDto.type === 'user') {
-        // Asynchronously check for memories - don't wait for completion
-        this.memoryIngestionService.processConversation(
-          messageDto.content,
-          '', // No assistant response yet
-          messageDto.userAddress
-        ).catch(err => this.logger.error(`Memory extraction error: ${err.message}`));
+        try {
+          // Check for factual content that could be stored as memory
+          memoryExtracted = await this.checkForMemoryContent(
+            messageDto.content,
+            messageDto.userAddress
+          );
+          
+          this.logger.log('Memory extraction completed', { 
+            hasExtraction: !!memoryExtracted,
+            factsCount: memoryExtracted?.extractedFacts?.length || 0,
+            category: memoryExtracted?.category
+          });
+        } catch (err) {
+          this.logger.error(`Memory extraction error: ${err.message}`);
+          memoryExtracted = null;
+        }
       }
       
       return { 
         success: true,
-        message: 'Message added successfully'
+        message: 'Message processed successfully',
+        memoryExtracted
       };
     } catch (error) {
-      this.logger.error(`Error adding message: ${error.message}`);
+      this.logger.error(`Error processing message: ${error.message}`);
       return { 
         success: false,
         message: `Error: ${error.message}`
@@ -176,13 +195,14 @@ export class ChatService {
    */
   async deleteSession(sessionId: string, userAddress: string): Promise<{ success: boolean, message: string }> {
     try {
-      await this.suiService.deleteSession(sessionId, userAddress);
+      // Backend doesn't delete from blockchain - frontend handles this
+      this.logger.log(`Delete request received for session ${sessionId}`);
       return {
         success: true,
-        message: 'Session deleted successfully'
+        message: 'Session deletion handled by frontend'
       };
     } catch (error) {
-      this.logger.error(`Error deleting session: ${error.message}`);
+      this.logger.error(`Error processing deletion: ${error.message}`);
       return {
         success: false,
         message: `Error: ${error.message}`
@@ -195,13 +215,14 @@ export class ChatService {
    */
   async updateSessionTitle(sessionId: string, userAddress: string, newTitle: string): Promise<{ success: boolean, message: string }> {
     try {
-      await this.suiService.updateSessionTitle(sessionId, userAddress, newTitle);
+      // Backend doesn't update blockchain - frontend handles this
+      this.logger.log(`Title update request received for session ${sessionId}`);
       return {
         success: true,
-        message: 'Session title updated successfully'
+        message: 'Session title update handled by frontend'
       };
     } catch (error) {
-      this.logger.error(`Error updating session title: ${error.message}`);
+      this.logger.error(`Error processing title update: ${error.message}`);
       return {
         success: false,
         message: `Error: ${error.message}`
@@ -253,15 +274,12 @@ export class ChatService {
    */
   async saveSummary(saveSummaryDto: SaveSummaryDto): Promise<{ success: boolean }> {
     try {
-      const success = await this.suiService.saveSessionSummary(
-        saveSummaryDto.sessionId,
-        saveSummaryDto.userAddress,
-        saveSummaryDto.summary
-      );
+      // Backend doesn't save to blockchain - frontend handles this
+      this.logger.log(`Summary save request received for session ${saveSummaryDto.sessionId}`);
       
-      return { success };
+      return { success: true };
     } catch (error) {
-      this.logger.error(`Error saving summary: ${error.message}`);
+      this.logger.error(`Error processing summary: ${error.message}`);
       return { success: false };
     }
   }
@@ -289,7 +307,7 @@ export class ChatService {
         const sessionId = messageDto.sessionId || messageDto.session_id;
         const userId = messageDto.userId || messageDto.user_id || messageDto.userAddress;
         const content = messageDto.text || messageDto.content;
-        const modelName = messageDto.model || messageDto.modelName || 'gemini-1.5-pro';
+        const modelName = messageDto.model || messageDto.modelName || 'gemini-2.0-flash';
         
         // Step 1: Fetch the chat history
         if (!sessionId) {
@@ -355,40 +373,33 @@ export class ChatService {
               // If originalUserMessage is provided, use that instead
               const userMessage = messageDto.originalUserMessage || content;
               
-              // Step 5: Save the completed message
-              await this.suiService.addMessageToSession(
-                sessionId,
-                userId,
-                'user',
-                userMessage
-              );
+              // Step 5: Messages are saved by the frontend
+              // Backend should not write to blockchain
+              this.logger.log('Messages will be saved by frontend after streaming completes');
               
-              await this.suiService.addMessageToSession(
-                sessionId,
-                userId,
-                'assistant',
-                fullResponse
-              );
+              // Step 6: Process for memory extraction (but don't store yet)
+              let memoryExtraction: MemoryExtraction | null = null;
+              try {
+                memoryExtraction = await this.checkForMemoryContent(userMessage, userId);
+              } catch (err) {
+                this.logger.error(`Memory extraction error: ${err.message}`);
+              }
               
-              // Step 6: Asynchronously process for summarization and memory ingestion
-              const memoryResult = await this.processCompletedMessage(
-                sessionId,
-                userId,
-                userMessage,
-                fullResponse
-              );
+              // Process for summarization
+              this.summarizationService.summarizeSessionIfNeeded(sessionId, userId);
               
-              memoryStored = memoryResult.memoryStored;
-              memoryId = memoryResult.memoryId;
+              memoryStored = false; // No longer auto-storing
+              memoryId = undefined;
               
-              // Send the final event with completion data
+              // Send the final event with completion data including memory extraction
               subject.next({ 
                 data: JSON.stringify({
                   type: 'end',
                   content: fullResponse,
                   intent: 'CHAT',
                   memoryStored,
-                  memoryId
+                  memoryId,
+                  memoryExtraction: memoryExtraction // Include extracted memory for frontend approval
                 })
               });
               
@@ -418,6 +429,7 @@ export class ChatService {
     entities?: any;
     memoryStored?: boolean;
     memoryId?: string;
+    memoryExtraction?: any;
   }> {
     try {
       // Get normalized values from DTO with fallbacks
@@ -474,35 +486,24 @@ export class ChatService {
       // If originalUserMessage is provided, use that instead
       const userMessage = messageDto.originalUserMessage || content;
       
-      // Step 5: Save messages
-      await this.suiService.addMessageToSession(
-        sessionId,
-        userId,
-        'user',
-        userMessage
-      );
+      // Step 6: Process for memory extraction (but don't store yet)
+      let memoryExtraction: MemoryExtraction | null = null;
+      try {
+        memoryExtraction = await this.checkForMemoryContent(userMessage, userId);
+      } catch (err) {
+        this.logger.error(`Memory extraction error: ${err.message}`);
+      }
       
-      await this.suiService.addMessageToSession(
-        sessionId,
-        userId,
-        'assistant',
-        response
-      );
-      
-      // Step 6: Process for memories
-      const memoryResult = await this.processCompletedMessage(
-        sessionId,
-        userId,
-        userMessage,
-        response
-      );
+      // Process for summarization
+      this.summarizationService.summarizeSessionIfNeeded(sessionId, userId);
       
       return {
         response,
         success: true,
         intent: 'CHAT',
-        memoryStored: memoryResult.memoryStored,
-        memoryId: memoryResult.memoryId
+        memoryStored: false, // No longer auto-storing
+        memoryId: undefined,
+        memoryExtraction: memoryExtraction // Include extracted memory for frontend approval
       };
     } catch (error) {
       this.logger.error(`Error sending message: ${error.message}`);
@@ -595,6 +596,34 @@ export class ChatService {
     } catch (error) {
       this.logger.error(`Error checking factual content: ${error.message}`);
       return false;
+    }
+  }
+
+  /**
+   * Check if message contains factual content that could be stored as memory
+   * Returns the extracted facts for frontend approval
+   */
+  private async checkForMemoryContent(message: string, userAddress: string): Promise<MemoryExtraction | null> {
+    try {
+      // Use the memory ingestion service's classifier to check if this should be saved
+      const classification = await this.memoryIngestionService['classifierService'].shouldSaveMemory(message);
+      
+      if (!classification.shouldSave) {
+        return null;
+      }
+      
+      // If it should be saved, return the extracted information for frontend approval
+      // Since ClassificationResult doesn't have extractedFacts, we'll use the message as the fact
+      return {
+        shouldSave: true,
+        category: classification.category,
+        content: message,
+        extractedFacts: [message], // Default to the full message as the extracted fact
+        confidence: classification.confidence || 0.8
+      };
+    } catch (error) {
+      this.logger.error(`Error checking memory content: ${error.message}`);
+      return null;
     }
   }
 }

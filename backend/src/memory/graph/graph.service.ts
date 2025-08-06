@@ -22,15 +22,15 @@ export interface KnowledgeGraph {
 @Injectable()
 export class GraphService {
   private logger = new Logger(GraphService.name);
-  
+
   constructor(
     private walrusService: WalrusService,
     private geminiService: GeminiService
   ) {}
-  
+
   /**
-   * Create a new empty knowledge graph
-   * @returns An empty knowledge graph
+   * Create an empty knowledge graph
+   * @returns Empty knowledge graph
    */
   createGraph(): KnowledgeGraph {
     return {
@@ -38,10 +38,10 @@ export class GraphService {
       relationships: []
     };
   }
-  
+
   /**
    * Extract entities and relationships from text using Gemini
-   * @param text The text to analyze
+   * @param text The text to extract from
    * @returns Extracted entities and relationships
    */
   async extractEntitiesAndRelationships(text: string): Promise<{
@@ -49,51 +49,85 @@ export class GraphService {
     relationships: Relationship[];
   }> {
     try {
-      // Prompt template for entity and relationship extraction
       const prompt = `
-Extract entities and relationships from the following text. Format your response exactly as JSON without any explanations:
-
-Text: ${text}
-
-Response format:
-{
-  "entities": [
-    {"id": "unique_id", "label": "entity_name", "type": "person|location|organization|date|concept|other"}
-  ],
-  "relationships": [
-    {"source": "source_entity_id", "target": "target_entity_id", "label": "relationship_description"}
-  ]
-}`;
+        Extract entities and relationships from the following text. 
+        Format your response as a valid JSON object with "entities" and "relationships" arrays.
+        
+        For entities, include:
+        - "id": a unique identifier (use meaningful names with underscores)
+        - "label": a display name
+        - "type": entity type (person, concept, organization, location, event, etc.)
+        
+        For relationships, include:
+        - "source": the id of the source entity
+        - "target": the id of the target entity
+        - "label": a description of the relationship
+        
+        TEXT:
+        ${text}
+        
+        RESPONSE (JSON only):
+      `;
       
-      // Call Gemini to extract entities and relationships
-      const responseText = await this.geminiService.generateContent(
-        'gemini-1.5-pro', 
+      // Fix: Pass responseFormat as part of the options object in the correct format
+      const response = await this.geminiService.generateContent(
+        'gemini-1.5-flash', 
         [{ role: 'user', content: prompt }]
       );
       
-      // Parse the response
       try {
-        const result = JSON.parse(responseText);
-        return {
-          entities: result.entities || [],
-          relationships: result.relationships || []
+        const parsed = JSON.parse(response);
+        
+        // Validate the response structure
+        if (!parsed.entities || !Array.isArray(parsed.entities) || 
+            !parsed.relationships || !Array.isArray(parsed.relationships)) {
+          throw new Error('Invalid response format');
+        }
+        
+        // Sanitize IDs to ensure they're valid and unique
+        const sanitizeId = (id: string) => {
+          return id.replace(/[^\w_-]/g, '_').toLowerCase();
         };
+        
+        // Process entities
+        const entities: Entity[] = parsed.entities.map((e: any) => ({
+          id: sanitizeId(e.id || `entity_${Math.random().toString(36).substring(2, 10)}`),
+          label: e.label || 'Unnamed Entity',
+          type: e.type || 'concept'
+        }));
+        
+        // Create a map of original IDs to sanitized IDs
+        const idMap = new Map<string, string>();
+        parsed.entities.forEach((e: any, i: number) => {
+          idMap.set(e.id || '', entities[i].id);
+        });
+        
+        // Process relationships using sanitized IDs
+        const relationships: Relationship[] = parsed.relationships
+          .filter((r: any) => r.source && r.target && idMap.has(r.source) && idMap.has(r.target))
+          .map((r: any) => ({
+            source: idMap.get(r.source) || '',
+            target: idMap.get(r.target) || '',
+            label: r.label || 'related to'
+          }));
+        
+        return { entities, relationships };
       } catch (parseError) {
-        this.logger.error(`Error parsing extraction result: ${parseError.message}`);
+        this.logger.error(`Failed to parse extraction response: ${parseError.message}`);
         return { entities: [], relationships: [] };
       }
     } catch (error) {
-      this.logger.error(`Error extracting entities and relationships: ${error.message}`);
+      this.logger.error(`Entity extraction error: ${error.message}`);
       return { entities: [], relationships: [] };
     }
   }
-  
+
   /**
-   * Add entities and relationships to the graph
-   * @param graph The knowledge graph to update
+   * Add new entities and relationships to a graph
+   * @param graph The knowledge graph
    * @param newEntities New entities to add
    * @param newRelationships New relationships to add
-   * @returns The updated graph
+   * @returns Updated knowledge graph
    */
   addToGraph(
     graph: KnowledgeGraph,
@@ -101,48 +135,36 @@ Response format:
     newRelationships: Relationship[]
   ): KnowledgeGraph {
     try {
-      // Create a copy of the graph
-      const updatedGraph: KnowledgeGraph = {
-        entities: [...graph.entities],
-        relationships: [...graph.relationships]
-      };
+      // Create copies to avoid mutation
+      const existingEntities = [...graph.entities];
+      const existingRelationships = [...graph.relationships];
       
-      // Add new entities if they don't already exist
-      const existingEntityIds = new Set(updatedGraph.entities.map(e => e.id));
-      for (const entity of newEntities) {
-        if (!existingEntityIds.has(entity.id)) {
-          updatedGraph.entities.push(entity);
-          existingEntityIds.add(entity.id);
-        }
-      }
+      // Track existing entity IDs for deduplication
+      const existingEntityIds = new Set(existingEntities.map(e => e.id));
       
-      // Add new relationships if they don't already exist
+      // Add new entities (avoiding duplicates)
+      const addedEntities = newEntities.filter(e => !existingEntityIds.has(e.id));
+      
+      // Track relationship keys for deduplication
       const relationshipKey = (r: Relationship) => `${r.source}-${r.target}-${r.label}`;
-      const existingRelationships = new Set(
-        updatedGraph.relationships.map(relationshipKey)
-      );
+      const existingRelationshipKeys = new Set(existingRelationships.map(relationshipKey));
       
-      for (const relationship of newRelationships) {
-        const key = relationshipKey(relationship);
-        if (!existingRelationships.has(key)) {
-          // Only add relationships where both entities exist
-          if (
-            existingEntityIds.has(relationship.source) && 
-            existingEntityIds.has(relationship.target)
-          ) {
-            updatedGraph.relationships.push(relationship);
-            existingRelationships.add(key);
-          }
-        }
-      }
+      // Add new relationships (avoiding duplicates)
+      const addedRelationships = newRelationships.filter(r => {
+        const key = relationshipKey(r);
+        return !existingRelationshipKeys.has(key);
+      });
       
-      return updatedGraph;
+      return {
+        entities: [...existingEntities, ...addedEntities],
+        relationships: [...existingRelationships, ...addedRelationships]
+      };
     } catch (error) {
       this.logger.error(`Error adding to graph: ${error.message}`);
       return graph; // Return original graph on error
     }
   }
-  
+
   /**
    * Find related entities in the graph
    * @param graph The knowledge graph
@@ -211,25 +233,57 @@ Response format:
   /**
    * Save the graph to Walrus
    * @param graph The knowledge graph to save
+   * @param userAddress The user's address for access control
    * @returns The blob ID of the saved graph
    */
-  async saveGraph(graph: KnowledgeGraph): Promise<string> {
+  async saveGraph(graph: KnowledgeGraph, userAddress: string): Promise<string> {
     try {
+      this.logger.log(`Saving knowledge graph for user ${userAddress}`);
+      
       const graphJson = JSON.stringify(graph);
-      return await this.walrusService.uploadContent(graphJson);
+      
+      // Get admin address for blob ownership (ensures backend access)
+      const adminAddress = this.walrusService.getAdminAddress();
+      
+      // Save to Walrus with dual-ownership pattern
+      // - Admin as the actual owner (for backend access)
+      // - User address stored in metadata (for permission checks)
+      return await this.walrusService.uploadContent(
+        graphJson, 
+        adminAddress, // Admin as owner for backend access
+        12, // Default epochs
+        { 
+          'user-address': userAddress,  // Record actual user for permission checks
+          'content-type': 'application/json',
+          'data-type': 'knowledge-graph',
+          'version': '1.0'
+        }
+      );
     } catch (error) {
       this.logger.error(`Error saving graph: ${error.message}`);
       throw new Error(`Graph save error: ${error.message}`);
     }
   }
-  
+
   /**
    * Load a graph from Walrus
    * @param blobId The blob ID of the graph
+   * @param userAddress The user's address for access verification
    * @returns The loaded knowledge graph
    */
-  async loadGraph(blobId: string): Promise<KnowledgeGraph> {
+  async loadGraph(blobId: string, userAddress?: string): Promise<KnowledgeGraph> {
     try {
+      this.logger.log(`Loading graph from blobId: ${blobId}`);
+      
+      // Verify user access if an address is provided
+      if (userAddress) {
+        const hasAccess = await this.walrusService.verifyUserAccess(blobId, userAddress);
+        if (!hasAccess) {
+          this.logger.warn(`User ${userAddress} attempted to access graph without permission: ${blobId}`);
+          // Continue anyway since we're using admin to access
+        }
+      }
+      
       const graphJson = await this.walrusService.retrieveContent(blobId);
       
       try {

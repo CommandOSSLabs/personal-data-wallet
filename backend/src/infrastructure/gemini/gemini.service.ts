@@ -26,7 +26,7 @@ export class GeminiService {
    * Generate content using Gemini model (non-streaming)
    */
   async generateContent(
-    modelName: string = 'gemini-1.5-pro',
+    modelName: string = 'gemini-2.0-flash',
     history: { role: string; content: string }[] = [],
     systemPrompt?: string
   ): Promise<string> {
@@ -36,12 +36,18 @@ export class GeminiService {
       // Format the chat history
       const formattedHistory = this.formatChatHistory(history);
       
-      // Add system prompt if provided
+      // Add system prompt if provided - Gemini doesn't support system role
       const parts = formattedHistory.slice();
       if (systemPrompt) {
+        // Instead of using 'system' role (not supported), add as a 'user' message at the beginning
         parts.unshift({
-          role: 'system',
+          role: 'user',
           parts: [{ text: systemPrompt }]
+        });
+        // Add a model response to keep the conversation flowing naturally
+        parts.unshift({
+          role: 'model',
+          parts: [{ text: 'I understand. I\'ll help you with that.' }]
         });
       }
       
@@ -66,7 +72,7 @@ export class GeminiService {
    * Generate content stream using Gemini model
    */
   generateContentStream(
-    modelName: string = 'gemini-1.5-pro',
+    modelName: string = 'gemini-2.0-flash',
     history: { role: string; content: string }[] = [],
     systemPrompt?: string
   ): Observable<string> {
@@ -79,12 +85,18 @@ export class GeminiService {
         // Format the chat history
         const formattedHistory = this.formatChatHistory(history);
         
-        // Add system prompt if provided
+        // Add system prompt if provided - Gemini doesn't support system role
         const parts = formattedHistory.slice();
         if (systemPrompt) {
+          // Instead of using 'system' role (not supported), add as a 'user' message at the beginning
           parts.unshift({
-            role: 'system',
+            role: 'user',
             parts: [{ text: systemPrompt }]
+          });
+          // Add a model response to keep the conversation flowing naturally
+          parts.unshift({
+            role: 'model',
+            parts: [{ text: 'I understand. I will help you with that.' }]
           });
         }
         

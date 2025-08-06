@@ -14,7 +14,6 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ChatController = void 0;
 const common_1 = require("@nestjs/common");
-const rxjs_1 = require("rxjs");
 const chat_service_1 = require("./chat.service");
 const chat_message_dto_1 = require("./dto/chat-message.dto");
 const create_session_dto_1 = require("./dto/create-session.dto");
@@ -51,8 +50,26 @@ let ChatController = class ChatController {
     async saveSummary(saveSummaryDto) {
         return this.chatService.saveSummary(saveSummaryDto);
     }
-    streamChat(messageDto) {
-        return this.chatService.streamChatResponse(messageDto);
+    async streamChat(messageDto, response) {
+        response.setHeader('Content-Type', 'text/event-stream');
+        response.setHeader('Cache-Control', 'no-cache');
+        response.setHeader('Connection', 'keep-alive');
+        response.setHeader('Access-Control-Allow-Origin', '*');
+        const observable = this.chatService.streamChatResponse(messageDto);
+        observable.subscribe({
+            next: (event) => {
+                response.write(`data: ${event.data}\n\n`);
+            },
+            error: (error) => {
+                console.error('Streaming error:', error);
+                response.write(`data: ${JSON.stringify({ type: 'error', message: error.message })}\n\n`);
+                response.end();
+            },
+            complete: () => {
+                response.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+                response.end();
+            }
+        });
     }
     async sendMessage(messageDto) {
         return this.chatService.sendMessage(messageDto);
@@ -120,11 +137,12 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], ChatController.prototype, "saveSummary", null);
 __decorate([
-    (0, common_1.Sse)('stream'),
+    (0, common_1.Post)('stream'),
     __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [chat_message_dto_1.ChatMessageDto]),
-    __metadata("design:returntype", rxjs_1.Observable)
+    __metadata("design:paramtypes", [chat_message_dto_1.ChatMessageDto, Object]),
+    __metadata("design:returntype", Promise)
 ], ChatController.prototype, "streamChat", null);
 __decorate([
     (0, common_1.Post)(''),

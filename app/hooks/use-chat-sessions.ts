@@ -6,6 +6,7 @@ import { ChatSession, Message } from '@/app/types'
 import { useSuiAuth } from './use-sui-auth'
 import { useSuiBlockchain } from '../services/suiBlockchainService'
 import { chatApi } from '../api/chatApi'
+import { DEFAULT_MODEL_ID } from '@/app/config/models'
 
 export function useChatSessions() {
   const queryClient = useQueryClient()
@@ -58,13 +59,13 @@ export function useChatSessions() {
 
       try {
         // Create session directly on blockchain via wallet
-        const sessionId = await service.createChatSession('gemini-1.5-pro')
+        const sessionId = await service.createChatSession(DEFAULT_MODEL_ID)
         
         // Notify backend about the new session for indexing
         await chatApi.createSession({
           userAddress,
           title,
-          modelName: 'gemini-1.5-pro',
+          modelName: DEFAULT_MODEL_ID,
           suiObjectId: sessionId
         })
         
@@ -98,20 +99,23 @@ export function useChatSessions() {
     mutationFn: async ({ 
       sessionId, 
       content, 
-      type
+      type,
+      executeBatch = false
     }: {
       sessionId: string
       content: string
       type: 'user' | 'assistant'
+      executeBatch?: boolean
     }) => {
       if (!userAddress) throw new Error('No user address')
 
       try {
-        // Add message directly on blockchain via wallet
+        // Add message to batch and optionally execute
         await service.addMessageToSession(
           sessionId,
           type === 'user' ? 'user' : 'assistant',
-          content
+          content,
+          executeBatch
         )
         
         // Notify backend about the new message for indexing
@@ -185,10 +189,11 @@ export function useChatSessions() {
   const addMessageToSession = useCallback(async (
     sessionId: string, 
     content: string, 
-    type: 'user' | 'assistant'
+    type: 'user' | 'assistant',
+    executeBatch = false
   ) => {
     return new Promise((resolve, reject) => {
-      addMessageMutation.mutate({ sessionId, content, type }, {
+      addMessageMutation.mutate({ sessionId, content, type, executeBatch }, {
         onSuccess: () => {
           resolve(true)
         },
@@ -206,6 +211,15 @@ export function useChatSessions() {
   const selectSession = useCallback((sessionId: string) => {
     setCurrentSessionId(sessionId)
   }, [])
+  
+  const executePendingTransactions = useCallback(async (): Promise<boolean> => {
+    try {
+      return await service.executePendingTransactions()
+    } catch (error) {
+      console.error('Error executing pending transactions:', error)
+      return false
+    }
+  }, [service])
 
   // Auto-select first session if none selected
   useEffect(() => {
@@ -241,6 +255,7 @@ export function useChatSessions() {
     addMessageToSession,
     deleteSession,
     selectSession,
+    executePendingTransactions,
     isCreatingSession: createSessionMutation.isPending,
     isAddingMessage: addMessageMutation.isPending,
     isDeletingSession: deleteSessionMutation.isPending

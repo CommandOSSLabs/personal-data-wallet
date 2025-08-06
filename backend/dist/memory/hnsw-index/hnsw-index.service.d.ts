@@ -1,5 +1,5 @@
-import { WalrusService } from '../../infrastructure/walrus/walrus.service';
 import * as hnswlib from 'hnswlib-node';
+import { WalrusService } from '../../infrastructure/walrus/walrus.service';
 export declare class HnswIndexService {
     private walrusService;
     private logger;
@@ -13,8 +13,8 @@ export declare class HnswIndexService {
         ids: number[];
         distances: number[];
     };
-    saveIndex(index: hnswlib.HierarchicalNSW): Promise<string>;
-    loadIndex(blobId: string): Promise<{
+    saveIndex(index: hnswlib.HierarchicalNSW, userAddress: string): Promise<string>;
+    loadIndex(blobId: string, userAddress?: string): Promise<{
         index: hnswlib.HierarchicalNSW;
         serialized: Buffer;
     }>;

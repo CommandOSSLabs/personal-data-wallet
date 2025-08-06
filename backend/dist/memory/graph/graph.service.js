@@ -31,63 +31,78 @@ let GraphService = GraphService_1 = class GraphService {
     async extractEntitiesAndRelationships(text) {
         try {
             const prompt = `
-Extract entities and relationships from the following text. Format your response exactly as JSON without any explanations:
-
-Text: ${text}
-
-Response format:
-{
-  "entities": [
-    {"id": "unique_id", "label": "entity_name", "type": "person|location|organization|date|concept|other"}
-  ],
-  "relationships": [
-    {"source": "source_entity_id", "target": "target_entity_id", "label": "relationship_description"}
-  ]
-}`;
-            const responseText = await this.geminiService.generateContent('gemini-1.5-pro', [{ role: 'user', content: prompt }]);
+        Extract entities and relationships from the following text. 
+        Format your response as a valid JSON object with "entities" and "relationships" arrays.
+        
+        For entities, include:
+        - "id": a unique identifier (use meaningful names with underscores)
+        - "label": a display name
+        - "type": entity type (person, concept, organization, location, event, etc.)
+        
+        For relationships, include:
+        - "source": the id of the source entity
+        - "target": the id of the target entity
+        - "label": a description of the relationship
+        
+        TEXT:
+        ${text}
+        
+        RESPONSE (JSON only):
+      `;
+            const response = await this.geminiService.generateContent('gemini-1.5-flash', [{ role: 'user', content: prompt }]);
             try {
-                const result = JSON.parse(responseText);
-                return {
-                    entities: result.entities || [],
-                    relationships: result.relationships || []
+                const parsed = JSON.parse(response);
+                if (!parsed.entities || !Array.isArray(parsed.entities) ||
+                    !parsed.relationships || !Array.isArray(parsed.relationships)) {
+                    throw new Error('Invalid response format');
+                }
+                const sanitizeId = (id) => {
+                    return id.replace(/[^\w_-]/g, '_').toLowerCase();
                 };
+                const entities = parsed.entities.map((e) => ({
+                    id: sanitizeId(e.id || `entity_${Math.random().toString(36).substring(2, 10)}`),
+                    label: e.label || 'Unnamed Entity',
+                    type: e.type || 'concept'
+                }));
+                const idMap = new Map();
+                parsed.entities.forEach((e, i) => {
+                    idMap.set(e.id || '', entities[i].id);
+                });
+                const relationships = parsed.relationships
+                    .filter((r) => r.source && r.target && idMap.has(r.source) && idMap.has(r.target))
+                    .map((r) => ({
+                    source: idMap.get(r.source) || '',
+                    target: idMap.get(r.target) || '',
+                    label: r.label || 'related to'
+                }));
+                return { entities, relationships };
             }
             catch (parseError) {
-                this.logger.error(`Error parsing extraction result: ${parseError.message}`);
+                this.logger.error(`Failed to parse extraction response: ${parseError.message}`);
                 return { entities: [], relationships: [] };
             }
         }
         catch (error) {
-            this.logger.error(`Error extracting entities and relationships: ${error.message}`);
+            this.logger.error(`Entity extraction error: ${error.message}`);
             return { entities: [], relationships: [] };
         }
     }
     addToGraph(graph, newEntities, newRelationships) {
         try {
-            const updatedGraph = {
-                entities: [...graph.entities],
-                relationships: [...graph.relationships]
-            };
-            const existingEntityIds = new Set(updatedGraph.entities.map(e => e.id));
-            for (const entity of newEntities) {
-                if (!existingEntityIds.has(entity.id)) {
-                    updatedGraph.entities.push(entity);
-                    existingEntityIds.add(entity.id);
-                }
-            }
+            const existingEntities = [...graph.entities];
+            const existingRelationships = [...graph.relationships];
+            const existingEntityIds = new Set(existingEntities.map(e => e.id));
+            const addedEntities = newEntities.filter(e => !existingEntityIds.has(e.id));
             const relationshipKey = (r) => `${r.source}-${r.target}-${r.label}`;
-            const existingRelationships = new Set(updatedGraph.relationships.map(relationshipKey));
-            for (const relationship of newRelationships) {
-                const key = relationshipKey(relationship);
-                if (!existingRelationships.has(key)) {
-                    if (existingEntityIds.has(relationship.source) &&
-                        existingEntityIds.has(relationship.target)) {
-                        updatedGraph.relationships.push(relationship);
-                        existingRelationships.add(key);
-                    }
-                }
-            }
-            return updatedGraph;
+            const existingRelationshipKeys = new Set(existingRelationships.map(relationshipKey));
+            const addedRelationships = newRelationships.filter(r => {
+                const key = relationshipKey(r);
+                return !existingRelationshipKeys.has(key);
+            });
+            return {
+                entities: [...existingEntities, ...addedEntities],
+                relationships: [...existingRelationships, ...addedRelationships]
+            };
         }
         catch (error) {
             this.logger.error(`Error adding to graph: ${error.message}`);
@@ -131,18 +146,32 @@ Response format:
             return [];
         }
     }
-    async saveGraph(graph) {
+    async saveGraph(graph, userAddress) {
         try {
+            this.logger.log(`Saving knowledge graph for user ${userAddress}`);
             const graphJson = JSON.stringify(graph);
-            return await this.walrusService.uploadContent(graphJson);
+            const adminAddress = this.walrusService.getAdminAddress();
+            return await this.walrusService.uploadContent(graphJson, adminAddress, 12, {
+                'user-address': userAddress,
+                'content-type': 'application/json',
+                'data-type': 'knowledge-graph',
+                'version': '1.0'
+            });
         }
         catch (error) {
             this.logger.error(`Error saving graph: ${error.message}`);
             throw new Error(`Graph save error: ${error.message}`);
         }
     }
-    async loadGraph(blobId) {
+    async loadGraph(blobId, userAddress) {
         try {
+            this.logger.log(`Loading graph from blobId: ${blobId}`);
+            if (userAddress) {
+                const hasAccess = await this.walrusService.verifyUserAccess(blobId, userAddress);
+                if (!hasAccess) {
+                    this.logger.warn(`User ${userAddress} attempted to access graph without permission: ${blobId}`);
+                }
+            }
             const graphJson = await this.walrusService.retrieveContent(blobId);
             try {
                 return JSON.parse(graphJson);

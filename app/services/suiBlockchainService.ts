@@ -3,21 +3,31 @@
 import { useWallet } from '@suiet/wallet-kit'
 import { Transaction } from '@mysten/sui/transactions'
 import { SuiClient } from '@mysten/sui/client'
+import { getSharedBatchService } from './BatchTransactionService'
+import { getEnhancedTransactionService } from './EnhancedTransactionService'
 
 // Define the package ID to be used for our Move contracts
-const PACKAGE_ID = process.env.NEXT_PUBLIC_SUI_PACKAGE_ID || '0x18df5680add6cc42ca87ac3373eb7dc61910c18b0da0e42383ebec35897399ea'
-const SUI_NETWORK = process.env.NEXT_PUBLIC_SUI_NETWORK || 'devnet'
-const SUI_API_URL = process.env.NEXT_PUBLIC_SUI_API_URL || 'https://fullnode.devnet.sui.io:443'
+// Hardcoding values for testnet
+const PACKAGE_ID = '0x8ae699f05fbbf9c314118d53bfdd6e43c4daa12b7a785a972128f1efaf65b50c'
+const SUI_NETWORK = 'testnet'
+const SUI_API_URL = 'https://fullnode.testnet.sui.io:443'
+
+console.log('Using SUI_PACKAGE_ID:', PACKAGE_ID)
+console.log('Using SUI_NETWORK:', SUI_NETWORK)
+console.log('Using SUI_API_URL:', SUI_API_URL)
+
+// Create a shared SUI client instance to be used outside of React components
+const sharedSuiClient = new SuiClient({
+  url: SUI_API_URL
+})
 
 export class SuiBlockchainService {
   private client: SuiClient
-  private wallet: ReturnType<typeof useWallet>
+  private wallet: any
   
-  constructor(wallet: ReturnType<typeof useWallet>) {
+  constructor(wallet: any) {
     // Initialize the Sui client with network configuration
-    this.client = new SuiClient({
-      url: SUI_API_URL
-    })
+    this.client = sharedSuiClient
     this.wallet = wallet
   }
 
@@ -27,37 +37,69 @@ export class SuiBlockchainService {
       throw new Error('Wallet not connected')
     }
     
+    console.log('Creating chat session with model:', modelName)
+    console.log('Wallet connected:', this.wallet.connected)
+    console.log('Wallet account:', this.wallet.account)
+    console.log('Wallet chain:', this.wallet.chain)
+    
     try {
+      // Check wallet balance first
+      const balance = await this.client.getBalance({
+        owner: this.wallet.account.address,
+        coinType: '0x2::sui::SUI'
+      })
+      
+      console.log('Wallet SUI balance:', balance)
+      
+      if (BigInt(balance.totalBalance) === BigInt(0)) {
+        throw new Error('Insufficient SUI balance. Please get some SUI from a faucet for gas fees.')
+      }
+      
       // Build the transaction
       const tx = new Transaction()
       
       // Call the create_session function from our Move package
+      console.log('Using package ID:', PACKAGE_ID)
+      const target = `${PACKAGE_ID}::chat_sessions::create_session`
+      console.log('Target function:', target)
+      
       tx.moveCall({
-        target: `${PACKAGE_ID}::pdw::chat_sessions::create_session`,
+        target,
         arguments: [
           tx.pure.string(modelName), // model name string
         ]
       })
 
+      console.log('Transaction built, signing and executing...')
       // Sign and execute the transaction using the connected wallet
       const result = await this.wallet.signAndExecuteTransactionBlock({
-        transactionBlock: tx as any,
-        options: {
-          showEffects: true,
-          showEvents: true,
-          showObjectChanges: true,
-        }
+        transactionBlock: tx as any
       })
       
+      console.log('Transaction executed, result:', result)
+      
       // Extract the created object ID from events
-      const sessionId = this.extractObjectIdFromEvents(result)
+      const sessionId = await this.extractObjectIdFromEvents(result)
       if (!sessionId) {
+        console.error('Failed to extract session ID. Full result:', JSON.stringify(result, null, 2))
         throw new Error('Failed to extract session ID from transaction result')
       }
       
       return sessionId
     } catch (error) {
       console.error('Error creating chat session:', error)
+      console.error('Error details:', JSON.stringify(error, null, 2))
+      
+      // Check if the error is related to the package not found
+      if (error && typeof error === 'object' && 'message' in error && 
+          typeof error.message === 'string' && 
+          error.message.includes('DependentPackageNotFound')) {
+        console.error('Package not found error. Make sure you are connected to testnet and the package ID is correct.')
+        console.error('Current package ID:', PACKAGE_ID)
+        console.error('Current network:', SUI_NETWORK)
+        console.error('Current API URL:', SUI_API_URL)
+      }
+      
       throw error
     }
   }
@@ -66,33 +108,57 @@ export class SuiBlockchainService {
   async addMessageToSession(
     sessionId: string, 
     role: string,
-    content: string
+    content: string,
+    executeBatch = false
   ): Promise<boolean> {
     if (!this.wallet.connected || !this.wallet.account) {
       throw new Error('Wallet not connected')
     }
     
     try {
-      const tx = new Transaction()
+      // Use enhanced service for better batching and pre-approval
+      const enhancedService = getEnhancedTransactionService();
+      enhancedService.addChatMessage(PACKAGE_ID, sessionId, role, content);
       
-      tx.moveCall({
-        target: `${PACKAGE_ID}::pdw::chat_sessions::add_message_to_session`,
-        arguments: [
-          tx.object(sessionId),    // session ID
-          tx.pure.string(role),    // role (user or assistant)
-          tx.pure.string(content), // message content
-        ]
-      })
-
-      await this.wallet.signAndExecuteTransactionBlock({
-        transactionBlock: tx as any,
-        options: { showEffects: true }
-      })
+      // Execute the batch immediately if requested or let it auto-execute when threshold reached
+      if (executeBatch) {
+        return await enhancedService.flush(this.wallet);
+      }
       
-      return true
+      return true;
     } catch (error) {
       console.error('Error adding message to session:', error)
       throw error
+    }
+  }
+  
+  // Execute any pending batched transactions
+  async executePendingTransactions(): Promise<boolean> {
+    if (!this.wallet.connected || !this.wallet.account) {
+      throw new Error('Wallet not connected')
+    }
+    
+    try {
+      const enhancedService = getEnhancedTransactionService();
+      return await enhancedService.flush(this.wallet);
+    } catch (error) {
+      console.error('Error executing pending transactions:', error)
+      throw error
+    }
+  }
+  
+  // Request pre-approval for multiple transactions
+  async requestPreApproval(): Promise<boolean> {
+    if (!this.wallet.connected || !this.wallet.account) {
+      throw new Error('Wallet not connected')
+    }
+    
+    try {
+      const enhancedService = getEnhancedTransactionService();
+      return await enhancedService.requestPreApproval(this.wallet);
+    } catch (error) {
+      console.error('Error requesting pre-approval:', error)
+      return false
     }
   }
 
@@ -109,7 +175,7 @@ export class SuiBlockchainService {
       
       // Call the delete_session function we added to the contract
       tx.moveCall({
-        target: `${PACKAGE_ID}::pdw::chat_sessions::delete_session`,
+        target: `${PACKAGE_ID}::chat_sessions::delete_session`,
         arguments: [
           tx.object(sessionId)  // session ID
         ]
@@ -140,7 +206,7 @@ export class SuiBlockchainService {
       const tx = new Transaction()
       
       tx.moveCall({
-        target: `${PACKAGE_ID}::pdw::chat_sessions::save_session_summary`,
+        target: `${PACKAGE_ID}::chat_sessions::save_session_summary`,
         arguments: [
           tx.object(sessionId),     // session ID
           tx.pure.string(summary),  // summary text
@@ -173,7 +239,7 @@ export class SuiBlockchainService {
       const tx = new Transaction()
       
       tx.moveCall({
-        target: `${PACKAGE_ID}::pdw::memory::create_memory_record`,
+        target: `${PACKAGE_ID}::memory::create_memory_record`,
         arguments: [
           tx.pure.string(category),
           tx.pure.u64(BigInt(vectorId)),
@@ -182,15 +248,10 @@ export class SuiBlockchainService {
       })
 
       const result = await this.wallet.signAndExecuteTransactionBlock({
-        transactionBlock: tx as any,
-        options: {
-          showEffects: true,
-          showEvents: true,
-          showObjectChanges: true,
-        }
+        transactionBlock: tx as any
       })
       
-      const memoryId = this.extractObjectIdFromEvents(result)
+      const memoryId = await this.extractObjectIdFromEvents(result)
       if (!memoryId) {
         throw new Error('Failed to extract memory ID from transaction result')
       }
@@ -215,7 +276,7 @@ export class SuiBlockchainService {
       const tx = new Transaction()
       
       tx.moveCall({
-        target: `${PACKAGE_ID}::pdw::memory::create_memory_index`,
+        target: `${PACKAGE_ID}::memory::create_memory_index`,
         arguments: [
           tx.pure.string(indexBlobId),
           tx.pure.string(graphBlobId),
@@ -223,15 +284,10 @@ export class SuiBlockchainService {
       })
 
       const result = await this.wallet.signAndExecuteTransactionBlock({
-        transactionBlock: tx as any,
-        options: {
-          showEffects: true,
-          showEvents: true,
-          showObjectChanges: true,
-        }
+        transactionBlock: tx as any
       })
       
-      const indexId = this.extractObjectIdFromEvents(result)
+      const indexId = await this.extractObjectIdFromEvents(result)
       if (!indexId) {
         throw new Error('Failed to extract index ID from transaction result')
       }
@@ -258,7 +314,7 @@ export class SuiBlockchainService {
       const tx = new Transaction()
       
       tx.moveCall({
-        target: `${PACKAGE_ID}::pdw::memory::update_memory_index`,
+        target: `${PACKAGE_ID}::memory::update_memory_index`,
         arguments: [
           tx.object(indexId),
           tx.pure.u64(BigInt(expectedVersion)),
@@ -279,27 +335,119 @@ export class SuiBlockchainService {
     }
   }
 
-  // Helper method to extract object ID from transaction events
-  private extractObjectIdFromEvents(result: any): string {
+  /**
+   * Delete a memory record from the blockchain
+   * @param memoryId The object ID of the memory to delete
+   * @returns True if successful, otherwise throws an error
+   */
+  async deleteMemory(memoryId: string): Promise<boolean> {
+    if (!this.wallet.connected || !this.wallet.account) {
+      throw new Error('Wallet not connected')
+    }
+
     try {
-      // Look for object creation events
-      for (const event of result.events || []) {
-        if (
-          event.type.includes('::pdw::chat_sessions::ChatSessionCreated') ||
-          event.type.includes('::pdw::memory::MemoryCreated') ||
-          event.type.includes('::pdw::memory::MemoryIndexCreated')
-        ) {
-          // Extract the ID from the event
-          return event.parsedJson?.id
-        }
+      console.log(`Deleting memory ${memoryId}...`)
+      // Build the transaction
+      const tx = new Transaction()
+      
+      tx.moveCall({
+        target: `${PACKAGE_ID}::memory_wallet::delete_memory`,
+        arguments: [
+          tx.object(memoryId), // memory object ID
+        ]
+      })
+
+      // Sign and execute the transaction
+      const result = await this.wallet.signAndExecuteTransactionBlock({
+        transactionBlock: tx as any,
+        options: { showEffects: true }
+      })
+      
+      console.log(`Memory deletion transaction completed with digest: ${result.digest}`)
+      return result.digest !== undefined && result.digest !== null
+    } catch (error) {
+      console.error('Error deleting memory:', error)
+      throw error
+    }
+  }
+
+  // Helper method to extract object ID from transaction events
+  private async extractObjectIdFromEvents(result: any): Promise<string> {
+    try {
+      console.log('Extracting object ID from result:', result)
+      
+      // Handle wallet kit response which may have different structure
+      if (!result) {
+        console.error('No result provided')
+        return ''
       }
       
-      // If no events found, try to extract from object changes
-      const created = (result.objectChanges || []).find(
-        (change: any) => change.type === 'created'
-      )
+      // Check if we have a digest
+      if (!result.digest) {
+        console.error('No transaction digest found')
+        return ''
+      }
       
-      return created?.objectId || ''
+      console.log('Transaction digest:', result.digest)
+      
+      // Use the digest to fetch full transaction details
+      try {
+        // Wait for transaction to be confirmed
+        console.log('Waiting for transaction confirmation...')
+        await new Promise(resolve => setTimeout(resolve, 2000)) // Wait 2 seconds for indexing
+        
+        console.log('Fetching transaction details using digest:', result.digest)
+        const txResult = await this.client.getTransactionBlock({
+          digest: result.digest,
+          options: {
+            showEffects: true,
+            showEvents: true,
+            showObjectChanges: true
+          }
+        })
+        
+        console.log('Retrieved transaction details:', txResult)
+        
+        // Look for created objects in objectChanges
+        if (txResult.objectChanges && Array.isArray(txResult.objectChanges)) {
+          console.log('Checking object changes from transaction')
+          for (const change of txResult.objectChanges) {
+            if (change.type === 'created') {
+              console.log('Found created object:', change.objectId)
+              return change.objectId
+            }
+          }
+        }
+        
+        // Look for created objects in effects
+        if (txResult.effects?.created && Array.isArray(txResult.effects.created)) {
+          console.log('Checking effects.created from transaction')
+          const created = txResult.effects.created[0]
+          if (created && created.reference) {
+            console.log('Found created object in effects:', created.reference.objectId)
+            return created.reference.objectId
+          }
+        }
+        
+        // Look for events that might indicate a creation
+        if (txResult.events && Array.isArray(txResult.events)) {
+          for (const event of txResult.events) {
+            if (event.type.includes('::chat_sessions::ChatSessionCreated')) {
+              console.log('Found ChatSessionCreated event:', event)
+              if (event.parsedJson && typeof event.parsedJson === 'object' && 'id' in event.parsedJson) {
+                console.log('Found object ID in event:', event.parsedJson.id)
+                return event.parsedJson.id as string
+              }
+            }
+          }
+        }
+        
+        console.error('No created objects found in transaction details')
+      } catch (err) {
+        console.error('Error fetching transaction details:', err)
+      }
+      
+      return ''
     } catch (error) {
       console.error('Error extracting object ID:', error)
       return ''
@@ -307,7 +455,25 @@ export class SuiBlockchainService {
   }
 }
 
-// Hook for using the Sui blockchain service
+// Non-hook version of the service - for use in non-React contexts
+let suiServiceWithMockWallet: SuiBlockchainService | null = null;
+
+export function getStaticSuiService() {
+  if (!suiServiceWithMockWallet) {
+    // Create a mock wallet for non-component contexts
+    const mockWallet = {
+      connected: false,
+      account: null,
+      signAndExecuteTransactionBlock: async () => {
+        throw new Error('Cannot execute transactions outside of React components - pass a real wallet instance')
+      }
+    };
+    suiServiceWithMockWallet = new SuiBlockchainService(mockWallet);
+  }
+  return suiServiceWithMockWallet;
+}
+
+// Hook for using the Sui blockchain service - ONLY call this in React components
 export function useSuiBlockchain() {
   const wallet = useWallet()
   const service = new SuiBlockchainService(wallet)

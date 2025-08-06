@@ -38,7 +38,7 @@ import {
 } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useDisclosure } from '@mantine/hooks'
-import { memoryApi } from '@/app/api/memoryApi'
+import { memoryIntegrationService } from '@/app/services/memoryIntegration'
 import { MemoryGraph } from './memory-graph'
 import { MemoryDecryptionModal } from './memory-decryption-modal'
 import { memoryDecryptionCache } from '@/app/services/memoryDecryptionCache'
@@ -101,16 +101,12 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
   const loadMemories = async () => {
     setLoading(true)
     try {
-      // Use empty query to get all memories for the user
-      const data = await memoryApi.searchMemories({
-        query: '',
-        userAddress,
-        k: 50
-      })
-      console.log('Memory API response:', data)
+      // Use direct blockchain access to get all memories
+      const data = await memoryIntegrationService.fetchUserMemories(userAddress)
+      console.log('Memories response:', data)
       
       // Handle different response formats
-      const memoryList = data.results || []
+      const memoryList = data.memories || []
       console.log('Processed memories:', memoryList)
       setMemories(memoryList)
       
@@ -124,10 +120,8 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
       let errorMessage = 'Failed to load memories';
       if (error?.code === 'ECONNABORTED') {
         errorMessage = 'Request timed out. The server might be under heavy load.';
-      } else if (error?.response) {
-        errorMessage = `Server error: ${error.response.status}`;
-      } else if (error?.request) {
-        errorMessage = 'No response from server. Check your connection.';
+      } else if (error?.message) {
+        errorMessage = `Error: ${error.message}`;
       }
       
       notifications.show({
@@ -139,28 +133,7 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
       })
       setMemories([])
       
-      // Retry once with smaller batch size on timeout
-      if (error?.code === 'ECONNABORTED') {
-        try {
-          const retryData = await memoryApi.searchMemories({
-            query: '',
-            userAddress,
-            k: 20 // Smaller batch
-          });
-          const retryMemoryList = retryData.results || [];
-          if (retryMemoryList.length > 0) {
-            setMemories(retryMemoryList);
-            notifications.show({
-              title: 'Partial Recovery',
-              message: 'Loaded some memories with reduced batch size',
-              color: 'yellow',
-              autoClose: 3000
-            });
-          }
-        } catch (retryError) {
-          console.error('Retry failed:', retryError);
-        }
-      }
+      // No need for retry as we're using local caching
     } finally {
       setLoading(false)
     }
@@ -171,11 +144,46 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
 
     setAddingMemory(true)
     try {
-      const data = await memoryApi.createMemory({
+      // Create memory extraction object
+      const memoryExtraction = {
+        shouldSave: true,
+        category: newMemoryCategory,
         content: newMemoryContent,
-        userAddress: userAddress,
-        category: newMemoryCategory
-      })
+        extractedFacts: [newMemoryContent], // Use full content as the fact
+        confidence: 1.0
+      };
+      
+      // Save directly to blockchain using memory integration service
+      const result = await memoryIntegrationService.saveApprovedMemory(
+        memoryExtraction,
+        userAddress
+      );
+      
+      if (!result.success || !result.memoryId) {
+        throw new Error(result.message || 'Failed to save memory to blockchain');
+      }
+      
+      // Add to local cache
+      const key = `memories_${userAddress}`;
+      const cached = localStorage.getItem(key);
+      const newMemory: Memory = {
+        id: result.memoryId,
+        content: newMemoryContent,
+        category: newMemoryCategory,
+        timestamp: new Date().toISOString(),
+        isEncrypted: true,
+        owner: userAddress
+      };
+      
+      if (cached) {
+        try {
+          const memories = JSON.parse(cached);
+          memories.push(newMemory);
+          localStorage.setItem(key, JSON.stringify(memories));
+        } catch (e) {
+          console.error('Error updating cache after add:', e);
+        }
+      }
       
       // Refresh the memories list
       await loadMemories()
@@ -186,28 +194,19 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
 
       notifications.show({
         title: 'Memory Added',
-        message: `Memory saved successfully! ID: ${data.embeddingId?.slice(0, 8)}...`,
+        message: `Memory saved successfully! ID: ${result.memoryId?.slice(0, 8)}...`,
         color: 'green',
         icon: <IconCheck size={16} />
       })
 
-      if (onMemoryAdded && data.success && data.embeddingId) {
-        // Create a Memory object from the response data
-        const newMemory: Memory = {
-          id: data.embeddingId,
-          content: newMemoryContent,
-          category: newMemoryCategory,
-          timestamp: new Date().toISOString(),
-          isEncrypted: true,
-          owner: userAddress
-        };
+      if (onMemoryAdded) {
         onMemoryAdded(newMemory);
       }
     } catch (error) {
       console.error('Failed to add memory:', error)
       notifications.show({
         title: 'Error',
-        message: 'Failed to save memory',
+        message: typeof error === 'string' ? error : (error instanceof Error ? error.message : 'Failed to save memory to blockchain'),
         color: 'red',
         icon: <IconX size={16} />
       })
@@ -224,13 +223,25 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
 
     setSearching(true)
     try {
-      const data = await memoryApi.searchMemories({
-        query: searchQuery,
-        userAddress,
-        category: selectedCategory || undefined,
-        k: 20
-      })
-      setSearchResults(data.results || [])
+      // First get all memories
+      const allMemories = await memoryIntegrationService.fetchUserMemories(userAddress)
+      
+      // Then filter for relevance using client-side search
+      let results = memoryIntegrationService.getMemoriesRelevantToText(
+        allMemories.memories || [],
+        searchQuery,
+        20 // Limit to 20 results
+      )
+      
+      // Apply category filter if selected
+      if (selectedCategory) {
+        results = results.filter(memory => 
+          memory.category === selectedCategory ||
+          memory.category?.toLowerCase() === selectedCategory.toLowerCase()
+        )
+      }
+      
+      setSearchResults(results)
     } catch (error) {
       console.error('Search failed:', error)
       notifications.show({
@@ -247,7 +258,25 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
 
   const deleteMemory = async (memoryId: string) => {
     try {
-      await memoryApi.deleteMemory(memoryId, userAddress)
+      // Import SUI service dynamically to avoid circular dependencies
+      const { getStaticSuiService } = await import('@/app/services/suiBlockchainService');
+      const service = getStaticSuiService();
+      
+      // Delete memory on blockchain
+      await service.deleteMemory(memoryId);
+      
+      // Clear the memory from local cache
+      const key = `memories_${userAddress}`;
+      const cached = localStorage.getItem(key);
+      if (cached) {
+        try {
+          const memories = JSON.parse(cached);
+          const filteredMemories = memories.filter((m: any) => m.id !== memoryId);
+          localStorage.setItem(key, JSON.stringify(filteredMemories));
+        } catch (e) {
+          console.error('Error updating cache after delete:', e);
+        }
+      }
       
       // Refresh the memories list
       await loadMemories()
@@ -258,7 +287,7 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
 
       notifications.show({
         title: 'Deleted',
-        message: 'Memory removed',
+        message: 'Memory removed from blockchain',
         color: 'blue',
         icon: <IconCheck size={16} />
       })
@@ -266,7 +295,7 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
       console.error('Failed to delete memory:', error)
       notifications.show({
         title: 'Error',
-        message: 'Failed to delete memory',
+        message: 'Failed to delete memory from blockchain',
         color: 'red',
         icon: <IconX size={16} />
       })

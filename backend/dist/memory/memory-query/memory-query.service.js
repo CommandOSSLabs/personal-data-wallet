@@ -85,9 +85,9 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
                 return [];
             }
             const { vector } = await this.embeddingService.embedText(query);
-            const { index } = await this.hnswIndexService.loadIndex(indexBlobId);
+            const { index } = await this.hnswIndexService.loadIndex(indexBlobId, userAddress);
             const searchResults = this.hnswIndexService.searchIndex(index, vector, limit * 2);
-            const graph = await this.graphService.loadGraph(graphBlobId);
+            const graph = await this.graphService.loadGraph(graphBlobId, userAddress);
             const entityToVectorMap = this.memoryIngestionService.getEntityToVectorMap(userAddress);
             const expandedVectorIds = this.graphService.findRelatedEntities(graph, searchResults.ids, entityToVectorMap, 1).map(entityId => entityToVectorMap[entityId])
                 .filter(Boolean);
@@ -132,7 +132,7 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
                 this.logger.log(`No memory index found for user ${userAddress}`);
                 return { results: [] };
             }
-            const { index } = await this.hnswIndexService.loadIndex(indexBlobId);
+            const { index } = await this.hnswIndexService.loadIndex(indexBlobId, userAddress);
             const searchResults = this.hnswIndexService.searchIndex(index, vector, k * 2);
             const results = [];
             for (const vectorId of searchResults.ids) {
@@ -177,7 +177,7 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
             }
             await this.suiService.deleteMemory(memoryId, userAddress);
             try {
-                await this.walrusService.deleteContent(memory.blobId);
+                await this.walrusService.deleteContent(memory.blobId, userAddress);
             }
             catch (walrusError) {
                 this.logger.warn(`Failed to delete from Walrus: ${walrusError.message}`);
