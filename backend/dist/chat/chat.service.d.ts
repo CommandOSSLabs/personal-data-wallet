@@ -8,7 +8,10 @@ import { SummarizationService } from './summarization/summarization.service';
 import { MemoryQueryService } from '../memory/memory-query/memory-query.service';
 import { MemoryIngestionService } from '../memory/memory-ingestion/memory-ingestion.service';
 import { AddMessageDto } from './dto/add-message.dto';
-import { ChatSession } from '../types/chat.types';
+import { ChatSession as ChatSessionType } from '../types/chat.types';
+import { Repository } from 'typeorm';
+import { ChatSession } from './entities/chat-session.entity';
+import { ChatMessage as ChatMessageEntity } from './entities/chat-message.entity';
 export interface MemoryExtraction {
     shouldSave: boolean;
     category: string;
@@ -25,11 +28,13 @@ export declare class ChatService {
     private memoryQueryService;
     private memoryIngestionService;
     private summarizationService;
+    private chatSessionRepository;
+    private chatMessageRepository;
     private logger;
-    constructor(geminiService: GeminiService, suiService: SuiService, memoryQueryService: MemoryQueryService, memoryIngestionService: MemoryIngestionService, summarizationService: SummarizationService);
+    constructor(geminiService: GeminiService, suiService: SuiService, memoryQueryService: MemoryQueryService, memoryIngestionService: MemoryIngestionService, summarizationService: SummarizationService, chatSessionRepository: Repository<ChatSession>, chatMessageRepository: Repository<ChatMessageEntity>);
     getSessions(userAddress: string): Promise<{
         success: boolean;
-        sessions: ChatSession[];
+        sessions: ChatSessionType[];
         message?: string;
     }>;
     getSession(sessionId: string, userAddress: string): Promise<{
@@ -38,10 +43,28 @@ export declare class ChatService {
             id: string;
             owner: string;
             title: string;
+            summary: string;
             messages: {
                 id: string;
                 content: string;
                 type: string;
+                timestamp: string;
+            }[];
+            created_at: string;
+            updated_at: string;
+            message_count: number;
+        };
+        message?: undefined;
+    } | {
+        success: boolean;
+        session: {
+            id: string;
+            owner: string;
+            title: string;
+            messages: {
+                id: string;
+                content: string;
+                type: any;
                 timestamp: string;
             }[];
             created_at: string;

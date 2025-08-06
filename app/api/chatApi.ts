@@ -32,6 +32,8 @@ export interface AddMessageRequest {
   userAddress: string
   content: string
   type: 'user' | 'assistant'
+  memoryId?: string
+  walrusHash?: string
 }
 
 export interface StreamChatRequest {

@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, IsIn, IsOptional } from 'class-validator';
 
 export class AddMessageDto {
   @IsString()
@@ -13,4 +13,12 @@ export class AddMessageDto {
   @IsNotEmpty()
   @IsIn(['user', 'assistant'])
   type: 'user' | 'assistant';
+
+  @IsString()
+  @IsOptional()
+  memoryId?: string;
+
+  @IsString()
+  @IsOptional()
+  walrusHash?: string;
 }

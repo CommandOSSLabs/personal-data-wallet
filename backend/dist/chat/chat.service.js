@@ -8,6 +8,9 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
 var ChatService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ChatService = void 0;
@@ -18,26 +21,73 @@ const sui_service_1 = require("../infrastructure/sui/sui.service");
 const summarization_service_1 = require("./summarization/summarization.service");
 const memory_query_service_1 = require("../memory/memory-query/memory-query.service");
 const memory_ingestion_service_1 = require("../memory/memory-ingestion/memory-ingestion.service");
+const typeorm_1 = require("@nestjs/typeorm");
+const typeorm_2 = require("typeorm");
+const chat_session_entity_1 = require("./entities/chat-session.entity");
+const chat_message_entity_1 = require("./entities/chat-message.entity");
+const uuid_1 = require("uuid");
 let ChatService = ChatService_1 = class ChatService {
     geminiService;
     suiService;
     memoryQueryService;
     memoryIngestionService;
     summarizationService;
+    chatSessionRepository;
+    chatMessageRepository;
     logger = new common_1.Logger(ChatService_1.name);
-    constructor(geminiService, suiService, memoryQueryService, memoryIngestionService, summarizationService) {
+    constructor(geminiService, suiService, memoryQueryService, memoryIngestionService, summarizationService, chatSessionRepository, chatMessageRepository) {
         this.geminiService = geminiService;
         this.suiService = suiService;
         this.memoryQueryService = memoryQueryService;
         this.memoryIngestionService = memoryIngestionService;
         this.summarizationService = summarizationService;
+        this.chatSessionRepository = chatSessionRepository;
+        this.chatMessageRepository = chatMessageRepository;
     }
     async getSessions(userAddress) {
         try {
-            const sessions = await this.suiService.getChatSessions(userAddress);
+            const dbSessions = await this.chatSessionRepository.find({
+                where: { userAddress },
+                order: { updatedAt: 'DESC' }
+            });
+            if (dbSessions.length > 0) {
+                const sessions = dbSessions.map(session => ({
+                    id: session.id,
+                    owner: session.userAddress,
+                    title: session.title,
+                    summary: session.summary,
+                    created_at: session.createdAt.toISOString(),
+                    updated_at: session.updatedAt.toISOString(),
+                    message_count: 0,
+                    sui_object_id: session.suiObjectId
+                }));
+                return {
+                    success: true,
+                    sessions
+                };
+            }
+            const blockchainSessions = await this.suiService.getChatSessions(userAddress);
+            if (blockchainSessions.length > 0) {
+                await Promise.all(blockchainSessions.map(async (session) => {
+                    try {
+                        await this.chatSessionRepository.save({
+                            id: session.id,
+                            title: session.title,
+                            summary: session.summary,
+                            userAddress,
+                            suiObjectId: session.id,
+                            isArchived: false,
+                            metadata: { source: 'blockchain' }
+                        });
+                    }
+                    catch (err) {
+                        this.logger.error(`Error saving blockchain session to DB: ${err.message}`);
+                    }
+                }));
+            }
             return {
                 success: true,
-                sessions
+                sessions: blockchainSessions
             };
         }
         catch (error) {
@@ -51,6 +101,31 @@ let ChatService = ChatService_1 = class ChatService {
     }
     async getSession(sessionId, userAddress) {
         try {
+            const dbSession = await this.chatSessionRepository.findOne({
+                where: { id: sessionId, userAddress },
+                relations: ['messages']
+            });
+            if (dbSession) {
+                const session = {
+                    id: dbSession.id,
+                    owner: dbSession.userAddress,
+                    title: dbSession.title,
+                    summary: dbSession.summary,
+                    messages: dbSession.messages.map(msg => ({
+                        id: msg.id,
+                        content: msg.content,
+                        type: msg.role,
+                        timestamp: msg.createdAt.toISOString(),
+                    })),
+                    created_at: dbSession.createdAt.toISOString(),
+                    updated_at: dbSession.updatedAt.toISOString(),
+                    message_count: dbSession.messages.length,
+                };
+                return {
+                    success: true,
+                    session
+                };
+            }
             const rawSession = await this.suiService.getChatSession(sessionId);
             if (rawSession.owner !== userAddress) {
                 throw new common_1.NotFoundException('Session not found or you do not have access');
@@ -70,6 +145,28 @@ let ChatService = ChatService_1 = class ChatService {
                 message_count: rawSession.messages.length,
                 sui_object_id: sessionId
             };
+            try {
+                const newDbSession = await this.chatSessionRepository.save({
+                    id: sessionId,
+                    title: rawSession.modelName,
+                    userAddress,
+                    suiObjectId: sessionId,
+                    isArchived: false,
+                    metadata: { source: 'blockchain' }
+                });
+                await Promise.all(rawSession.messages.map(async (msg, idx) => {
+                    await this.chatMessageRepository.save({
+                        id: `${sessionId}-${idx}`,
+                        role: msg.role,
+                        content: msg.content,
+                        sessionId: newDbSession.id,
+                        session: newDbSession
+                    });
+                }));
+            }
+            catch (err) {
+                this.logger.error(`Error saving blockchain session to DB: ${err.message}`);
+            }
             return {
                 success: true,
                 session
@@ -85,35 +182,31 @@ let ChatService = ChatService_1 = class ChatService {
     }
     async createSession(createSessionDto) {
         try {
-            let sessionId;
-            if (createSessionDto.suiObjectId) {
-                sessionId = createSessionDto.suiObjectId;
-                this.logger.log(`Using blockchain session ID created by frontend: ${sessionId}`);
+            if (!createSessionDto.userAddress) {
+                throw new common_1.BadRequestException('User address is required');
             }
-            else {
-                this.logger.error('Session must be created on blockchain by frontend first');
-                return {
-                    success: false,
-                    sessionId: undefined,
-                    session: undefined
-                };
-            }
-            let rawSession;
-            try {
-                rawSession = await this.suiService.getChatSession(sessionId);
-            }
-            catch (error) {
-                this.logger.error(`Failed to fetch session data: ${error.message}`);
-            }
+            const sessionId = createSessionDto.suiObjectId || (0, uuid_1.v4)();
+            const newSession = {
+                id: sessionId,
+                title: createSessionDto.title || createSessionDto.modelName || 'New Chat',
+                userAddress: createSessionDto.userAddress,
+                suiObjectId: createSessionDto.suiObjectId || undefined,
+                isArchived: false,
+                metadata: {
+                    modelName: createSessionDto.modelName || 'gemini-2.0-flash',
+                    source: createSessionDto.suiObjectId ? 'blockchain' : 'database'
+                }
+            };
+            const dbSession = await this.chatSessionRepository.save(newSession);
             const session = {
                 id: sessionId,
-                owner: rawSession?.owner || createSessionDto.userAddress,
-                title: createSessionDto.title || rawSession?.modelName || createSessionDto.modelName,
-                messages: rawSession?.messages || [],
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                message_count: rawSession?.messages?.length || 0,
-                sui_object_id: sessionId
+                owner: createSessionDto.userAddress,
+                title: createSessionDto.title || createSessionDto.modelName || 'New Chat',
+                messages: [],
+                created_at: dbSession.createdAt.toISOString(),
+                updated_at: dbSession.updatedAt.toISOString(),
+                message_count: 0,
+                sui_object_id: createSessionDto.suiObjectId
             };
             return { success: true, session, sessionId };
         }
@@ -140,6 +233,28 @@ let ChatService = ChatService_1 = class ChatService {
                     memoryExtracted = null;
                 }
             }
+            try {
+                const dbSession = await this.chatSessionRepository.findOne({
+                    where: { id: sessionId }
+                });
+                if (dbSession) {
+                    await this.chatMessageRepository.save({
+                        role: messageDto.type,
+                        content: messageDto.content,
+                        sessionId: dbSession.id,
+                        session: dbSession,
+                        memoryId: messageDto.memoryId,
+                        walrusHash: messageDto.walrusHash,
+                        metadata: {
+                            memoryExtracted: memoryExtracted ? true : false
+                        }
+                    });
+                    await this.chatSessionRepository.update({ id: sessionId }, { updatedAt: new Date() });
+                }
+            }
+            catch (err) {
+                this.logger.error(`Error saving message to DB: ${err.message}`);
+            }
             return {
                 success: true,
                 message: 'Message processed successfully',
@@ -156,10 +271,14 @@ let ChatService = ChatService_1 = class ChatService {
     }
     async deleteSession(sessionId, userAddress) {
         try {
+            await this.chatSessionRepository.delete({
+                id: sessionId,
+                userAddress
+            });
             this.logger.log(`Delete request received for session ${sessionId}`);
             return {
                 success: true,
-                message: 'Session deletion handled by frontend'
+                message: 'Session deleted from database. Blockchain deletion handled by frontend.'
             };
         }
         catch (error) {
@@ -172,10 +291,11 @@ let ChatService = ChatService_1 = class ChatService {
     }
     async updateSessionTitle(sessionId, userAddress, newTitle) {
         try {
+            await this.chatSessionRepository.update({ id: sessionId, userAddress }, { title: newTitle });
             this.logger.log(`Title update request received for session ${sessionId}`);
             return {
                 success: true,
-                message: 'Session title update handled by frontend'
+                message: 'Session title updated in database. Blockchain update handled by frontend.'
             };
         }
         catch (error) {
@@ -196,6 +316,26 @@ let ChatService = ChatService_1 = class ChatService {
                         success: false,
                         message: 'Session does not belong to the specified user'
                     };
+                }
+                const newSession = {
+                    id: sessionId,
+                    title: title || rawSession.modelName,
+                    userAddress,
+                    suiObjectId: sessionId,
+                    isArchived: false,
+                    metadata: { source: 'blockchain' }
+                };
+                const dbSession = await this.chatSessionRepository.save(newSession);
+                if (rawSession.messages && Array.isArray(rawSession.messages)) {
+                    await Promise.all(rawSession.messages.map(async (msg, idx) => {
+                        await this.chatMessageRepository.save({
+                            id: `${sessionId}-${idx}`,
+                            role: msg.role,
+                            content: msg.content,
+                            sessionId: dbSession.id,
+                            session: dbSession
+                        });
+                    }));
                 }
             }
             catch (error) {
@@ -220,6 +360,7 @@ let ChatService = ChatService_1 = class ChatService {
     }
     async saveSummary(saveSummaryDto) {
         try {
+            await this.chatSessionRepository.update({ id: saveSummaryDto.sessionId }, { summary: saveSummaryDto.summary });
             this.logger.log(`Summary save request received for session ${saveSummaryDto.sessionId}`);
             return { success: true };
         }
@@ -254,8 +395,22 @@ let ChatService = ChatService_1 = class ChatService {
                 if (!content) {
                     throw new Error('Message content is required for streaming chat');
                 }
-                const chatSession = await this.suiService.getChatSession(sessionId);
-                const chatHistory = [...chatSession.messages, { role: 'user', content }];
+                let chatHistory = [];
+                const dbSession = await this.chatSessionRepository.findOne({
+                    where: { id: sessionId },
+                    relations: ['messages']
+                });
+                if (dbSession && dbSession.messages) {
+                    chatHistory = dbSession.messages.map(msg => ({
+                        role: msg.role,
+                        content: msg.content
+                    }));
+                    chatHistory.push({ role: 'user', content });
+                }
+                else {
+                    const chatSession = await this.suiService.getChatSession(sessionId);
+                    chatHistory = [...chatSession.messages, { role: 'user', content }];
+                }
                 let relevantMemories = [];
                 if (messageDto.memoryContext) {
                     this.logger.log('Using provided memory context');
@@ -263,7 +418,7 @@ let ChatService = ChatService_1 = class ChatService {
                 else {
                     relevantMemories = await this.memoryQueryService.findRelevantMemories(content, userId);
                 }
-                const systemPrompt = this.constructPrompt(chatSession.summary, relevantMemories, messageDto.memoryContext || '');
+                const systemPrompt = this.constructPrompt(dbSession?.summary || '', relevantMemories, messageDto.memoryContext || '');
                 const responseStream = this.geminiService.generateContentStream(modelName, chatHistory, systemPrompt);
                 responseStream.subscribe({
                     next: (chunk) => {
@@ -282,7 +437,15 @@ let ChatService = ChatService_1 = class ChatService {
                     complete: async () => {
                         try {
                             const userMessage = messageDto.originalUserMessage || content;
-                            this.logger.log('Messages will be saved by frontend after streaming completes');
+                            if (dbSession) {
+                                await this.chatMessageRepository.save({
+                                    role: 'assistant',
+                                    content: fullResponse,
+                                    sessionId: dbSession.id,
+                                    session: dbSession
+                                });
+                                await this.chatSessionRepository.update({ id: sessionId }, { updatedAt: new Date() });
+                            }
                             let memoryExtraction = null;
                             try {
                                 memoryExtraction = await this.checkForMemoryContent(userMessage, userId);
@@ -334,8 +497,23 @@ let ChatService = ChatService_1 = class ChatService {
             if (!content) {
                 throw new Error('Message content is required for chat');
             }
-            const chatSession = await this.suiService.getChatSession(sessionId);
-            const chatHistory = [...chatSession.messages, { role: 'user', content }];
+            let chatHistory = [];
+            let dbSession = null;
+            dbSession = await this.chatSessionRepository.findOne({
+                where: { id: sessionId },
+                relations: ['messages']
+            });
+            if (dbSession && dbSession.messages) {
+                chatHistory = dbSession.messages.map(msg => ({
+                    role: msg.role,
+                    content: msg.content
+                }));
+                chatHistory.push({ role: 'user', content });
+            }
+            else {
+                const chatSession = await this.suiService.getChatSession(sessionId);
+                chatHistory = [...chatSession.messages, { role: 'user', content }];
+            }
             let relevantMemories = [];
             if (messageDto.memoryContext) {
                 this.logger.log('Using provided memory context');
@@ -343,8 +521,23 @@ let ChatService = ChatService_1 = class ChatService {
             else {
                 relevantMemories = await this.memoryQueryService.findRelevantMemories(content, userId);
             }
-            const systemPrompt = this.constructPrompt(chatSession.summary, relevantMemories, messageDto.memoryContext || '');
+            const systemPrompt = this.constructPrompt(dbSession?.summary || '', relevantMemories, messageDto.memoryContext || '');
             const response = await this.geminiService.generateContent(modelName, chatHistory, systemPrompt);
+            if (dbSession) {
+                await this.chatMessageRepository.save({
+                    role: 'user',
+                    content: content,
+                    sessionId: dbSession.id,
+                    session: dbSession
+                });
+                await this.chatMessageRepository.save({
+                    role: 'assistant',
+                    content: response,
+                    sessionId: dbSession.id,
+                    session: dbSession
+                });
+                await this.chatSessionRepository.update({ id: sessionId }, { updatedAt: new Date() });
+            }
             const userMessage = messageDto.originalUserMessage || content;
             let memoryExtraction = null;
             try {
@@ -449,10 +642,14 @@ let ChatService = ChatService_1 = class ChatService {
 exports.ChatService = ChatService;
 exports.ChatService = ChatService = ChatService_1 = __decorate([
     (0, common_1.Injectable)(),
+    __param(5, (0, typeorm_1.InjectRepository)(chat_session_entity_1.ChatSession)),
+    __param(6, (0, typeorm_1.InjectRepository)(chat_message_entity_1.ChatMessage)),
     __metadata("design:paramtypes", [gemini_service_1.GeminiService,
         sui_service_1.SuiService,
         memory_query_service_1.MemoryQueryService,
         memory_ingestion_service_1.MemoryIngestionService,
-        summarization_service_1.SummarizationService])
+        summarization_service_1.SummarizationService,
+        typeorm_2.Repository,
+        typeorm_2.Repository])
 ], ChatService);
 //# sourceMappingURL=chat.service.js.map

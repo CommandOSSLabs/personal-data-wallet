@@ -93,6 +93,11 @@ export class HnswIndexService {
    */
   async saveIndex(index: hnswlib.HierarchicalNSW, userAddress: string): Promise<string> {
     try {
+      // Validate userAddress
+      if (!userAddress || userAddress === 'undefined') {
+        throw new Error('User address is required for saving index');
+      }
+      
       this.logger.log(`Saving HNSW index for user ${userAddress}`);
       
       // Create a temporary file path for serialization
@@ -126,6 +131,11 @@ export class HnswIndexService {
       );
       
       this.logger.log(`Index saved to Walrus with blobId ${blobId}`);
+      
+      // Wait a bit to ensure blob is propagated to storage nodes
+      this.logger.log('Waiting for blob propagation...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
       return blobId;
     } catch (error) {
       this.logger.error(`Error saving index: ${error.message}`);

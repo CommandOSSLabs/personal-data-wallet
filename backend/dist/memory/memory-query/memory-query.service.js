@@ -46,13 +46,13 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
             const memories = [];
             for (const record of memoryRecords) {
                 try {
-                    const encryptedContent = await this.walrusService.retrieveContent(record.blobId);
+                    const content = await this.walrusService.retrieveContent(record.blobId);
                     memories.push({
                         id: record.id,
-                        content: encryptedContent,
+                        content: content,
                         category: record.category,
                         timestamp: new Date().toISOString(),
-                        isEncrypted: true,
+                        isEncrypted: false,
                         owner: userAddress,
                         walrusHash: record.blobId
                     });
@@ -101,9 +101,8 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
                         if (seenBlobIds.has(memory.blobId))
                             continue;
                         seenBlobIds.add(memory.blobId);
-                        const encryptedContent = await this.walrusService.retrieveContent(memory.blobId);
-                        const decryptedContent = await this.sealService.decrypt(encryptedContent, userAddress);
-                        memories.push(decryptedContent);
+                        const content = await this.walrusService.retrieveContent(memory.blobId);
+                        memories.push(content);
                         if (memories.length >= limit)
                             break;
                     }
@@ -141,13 +140,13 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
                     for (const memoryObj of memoryObjects) {
                         if (category && memoryObj.category !== category)
                             continue;
-                        const encryptedContent = await this.walrusService.retrieveContent(memoryObj.blobId);
+                        const content = await this.walrusService.retrieveContent(memoryObj.blobId);
                         results.push({
                             id: memoryObj.id,
-                            content: encryptedContent,
+                            content: content,
                             category: memoryObj.category,
                             timestamp: new Date().toISOString(),
-                            isEncrypted: true,
+                            isEncrypted: false,
                             owner: userAddress,
                             similarity_score: searchResults.distances[searchResults.ids.indexOf(vectorId)],
                             walrusHash: memoryObj.blobId
@@ -247,9 +246,9 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
     }
     async getMemoryContentByHash(hash) {
         try {
-            const encryptedContent = await this.walrusService.retrieveContent(hash);
+            const content = await this.walrusService.retrieveContent(hash);
             return {
-                content: encryptedContent,
+                content: content,
                 success: true
             };
         }

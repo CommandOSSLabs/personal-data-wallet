@@ -307,26 +307,62 @@ export class WalrusService {
    * @returns The file buffer
    */
   async downloadFile(blobId: string): Promise<Buffer> {
-    try {
-      this.logger.log(`Downloading file from blobId: ${blobId}`);
-      
-      // Get file from the blob ID
-      const [file] = await this.walrusClient.getFiles({ 
-        ids: [blobId] 
-      });
-      
-      if (!file) {
-        throw new Error(`File with blob ID ${blobId} not found`);
+    const maxRetries = 3;
+    let lastError: Error | null = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        this.logger.log(`Downloading file from blobId: ${blobId} (attempt ${attempt}/${maxRetries})`);
+        
+        // Wait a bit if this is a retry
+        if (attempt > 1) {
+          const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+          this.logger.log(`Waiting ${waitTime}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+        
+        // Get file from the blob ID
+        const [file] = await this.walrusClient.getFiles({ 
+          ids: [blobId] 
+        });
+        
+        if (!file) {
+          // Try alternative retrieval method
+          this.logger.warn(`File not found with getFiles, trying direct retrieval...`);
+          
+          // Sometimes the blob might need time to propagate
+          if (attempt < maxRetries) {
+            throw new Error(`File with blob ID ${blobId} not found (will retry)`);
+          }
+          throw new Error(`File with blob ID ${blobId} not found after ${maxRetries} attempts`);
+        }
+        
+        // Get binary data
+        const bytes = await file.bytes();
+        
+        this.logger.log(`Successfully downloaded file ${blobId}`);
+        return Buffer.from(bytes);
+      } catch (error) {
+        lastError = error as Error;
+        this.logger.warn(`Download attempt ${attempt}/${maxRetries} failed: ${lastError.message}`);
+        
+        // If it's a network error and not the last attempt, retry
+        if (attempt < maxRetries && 
+            (lastError.message.includes('fetch failed') || 
+             lastError.message.includes('not found') ||
+             lastError.message.includes('timeout'))) {
+          continue;
+        }
+        
+        // If this is the last attempt or a non-retryable error, throw
+        if (attempt === maxRetries) {
+          break;
+        }
       }
-      
-      // Get binary data
-      const bytes = await file.bytes();
-      
-      return Buffer.from(bytes);
-    } catch (error) {
-      this.logger.error(`Error downloading file from Walrus: ${error.message}`);
-      throw new Error(`Walrus file download error: ${error.message}`);
     }
+    
+    this.logger.error(`Failed to download file after ${maxRetries} attempts: ${lastError?.message}`);
+    throw new Error(`Walrus file download error after ${maxRetries} attempts: ${lastError?.message}`);
   }
 
   /**
@@ -411,6 +447,10 @@ export class WalrusService {
             });
             
             this.logger.log(`Upload completed successfully on attempt ${attempt}`);
+            // Log the blob IDs for debugging
+            results.forEach((result, index) => {
+              this.logger.log(`File ${index}: blobId=${result.blobId}`);
+            });
             return results;
           } catch (writeError: any) {
             // If writeFiles fails, fall back to manual flow

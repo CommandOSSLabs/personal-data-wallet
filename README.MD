@@ -1,178 +1,130 @@
 # Personal Data Wallet
 
-A decentralized chat application featuring streaming chat, on-chain session history, and an encrypted persistent memory layer using vector search and knowledge graphs, all secured by Sui blockchain.
+A decentralized personal data wallet that securely stores your memories on the blockchain while keeping chat sessions in a PostgreSQL database.
 
-## Architecture
+## Architecture Overview
 
-This application consists of three primary components:
+The system uses a hybrid storage approach:
 
-1. **NestJS Backend (Application)**: Orchestrates all business logic, including chat streaming, RAG, memory classification, and communication with external services.
+1. **On-chain Storage (Sui Blockchain + Walrus)**
+   - HNSW Index for vector similarity search
+   - Embedding vectors for memory retrieval
+   - Memory content (encrypted)
+   - Memory metadata and relationships
 
-2. **Walrus (Data Store)**: Used for off-chain bulk data storage:
-   - Encrypted Content Blobs: Individual encrypted user memories
-   - HNSW Index File: Vector search index
-   - Knowledge Graph File: JSON connecting memory entities
+2. **Off-chain Storage (PostgreSQL)**
+   - Chat sessions
+   - Chat messages
+   - User preferences
+   - Application state
 
-3. **Sui Blockchain (Ledger)**: On-chain source of truth for ownership and data pointers, storing chat history and pointers to user's data on Walrus.
+## Setup Instructions
 
-## Prerequisites
+### Prerequisites
 
-- Node.js v18+
-- Sui CLI (for smart contract deployment)
-- Docker and Docker Compose
-- Google API Key for Gemini AI
-- Walrus API Key
+- Node.js 18+
+- PostgreSQL 14+
+- Docker and Docker Compose (optional)
+- Sui wallet with testnet funds
 
-## Installation and Setup
+### Environment Setup
 
-1. **Clone the repository**
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/personal-data-wallet.git
+   cd personal-data-wallet
+   ```
 
-```bash
-git clone https://github.com/yourusername/personal-data-wallet.git
-cd personal-data-wallet
-```
+2. Install dependencies:
+   ```
+   npm install
+   cd backend && npm install
+   ```
 
-2. **Set up environment variables**
+3. Configure environment variables:
+   ```
+   cp backend/.env.example backend/.env
+   ```
+   Edit the `.env` file with your database credentials and Sui wallet information.
 
-Create a `.env` file in the project root:
+4. Set up PostgreSQL:
+   ```
+   # Create database
+   createdb personal_data_wallet
+   ```
+   
+   Or use Docker:
+   ```
+   docker-compose up -d postgres
+   ```
 
-```
-SUI_NETWORK=devnet
-SUI_PACKAGE_ID=<your_deployed_package_id>
-SUI_ADMIN_PRIVATE_KEY=<your_sui_private_key>
-GOOGLE_API_KEY=<your_google_api_key>
-WALRUS_API_KEY=<your_walrus_api_key>
-WALRUS_API_URL=https://api.walrus.ai/v1
-SEAL_MASTER_KEY=<your_seal_master_key>
-```
+5. Start the backend:
+   ```
+   cd backend
+   npm run start:dev
+   ```
 
-3. **Deploy the Sui smart contracts**
+6. Start the frontend:
+   ```
+   # In the project root
+   npm run dev
+   ```
 
-```bash
-cd smart-contract
-sui client publish --gas-budget 100000000
-```
+## Database Schema
 
-After deployment, copy the package ID to your `.env` file.
+### Chat Sessions
+- `id`: UUID (primary key)
+- `title`: String
+- `summary`: String (optional)
+- `userAddress`: String
+- `suiObjectId`: String (optional, for blockchain reference)
+- `isArchived`: Boolean
+- `metadata`: JSONB
+- `createdAt`: Timestamp
+- `updatedAt`: Timestamp
 
-4. **Start the application using Docker Compose**
+### Chat Messages
+- `id`: UUID (primary key)
+- `role`: String (user/assistant)
+- `content`: Text
+- `sessionId`: UUID (foreign key)
+- `memoryId`: String (optional, reference to blockchain memory)
+- `walrusHash`: String (optional, reference to Walrus storage)
+- `metadata`: JSONB
+- `createdAt`: Timestamp
 
-```bash
-docker-compose up -d
-```
+## On-chain Structure
+
+### Memory Module
+- Memory records
+- Memory indices
+- Vector storage
+- Relationship graphs
+
+### Chat Sessions Module
+- Session metadata
+- Message references
 
 ## API Endpoints
 
-### Chat API
-
-- `POST /api/chat/session` - Create a new chat session
-  - Body: `{ "modelName": "gemini-1.5-pro", "userAddress": "0x..." }`
-
-- `SSE /api/chat/message` - Stream a chat message (Server-Sent Events)
-  - Body: `{ "content": "Hello", "modelName": "gemini-1.5-pro", "sessionId": "0x...", "userAddress": "0x..." }`
-
-- `POST /api/chat/summary` - Save a summary for a chat session
-  - Body: `{ "sessionId": "0x...", "summary": "Chat about weather", "userAddress": "0x..." }`
-
 ### Memory API
+- `POST /api/memories` - Create new memory
+- `GET /api/memories?user={address}` - Get all memories for a user
+- `GET /api/memories/{id}?user={address}` - Get a specific memory
+- `POST /api/memories/search` - Search memories
+- `POST /api/memories/{id}` - Update a memory
+- `DELETE /api/memories/{id}` - Delete a memory
+- `POST /api/memories/process` - Process a memory without creating it
+- `POST /api/memories/save-approved` - Save an approved memory
 
-- `POST /api/memory` - Create a new memory
-  - Body: `{ "content": "My favorite color is blue", "category": "preference", "userAddress": "0x..." }`
-
-- `GET /api/memory/query` - Query relevant memories
-  - Query params: `?query=favorite+color&userAddress=0x...&limit=5`
-
-## Consuming the Chat Streaming Endpoint
-
-Here's how a frontend client would consume the SSE streaming endpoint:
-
-```javascript
-// Example frontend code using EventSource API
-function startChatStream() {
-  const userMessage = "Tell me about climate change";
-  const sessionId = "0x123..."; // From previous createSession call
-  const userAddress = "0x456..."; // User's Sui address
-  
-  // Create the EventSource
-  const eventSource = new EventSource(`/api/chat/message?content=${encodeURIComponent(userMessage)}&sessionId=${sessionId}&userAddress=${userAddress}&modelName=gemini-1.5-pro`);
-  
-  let fullResponse = '';
-  
-  // Handle incoming message chunks
-  eventSource.onmessage = (event) => {
-    const chunk = event.data;
-    fullResponse += chunk;
-    
-    // Update UI with the chunk
-    appendToChat(chunk);
-  };
-  
-  // Handle completion
-  eventSource.onerror = () => {
-    // Stream is complete or errored
-    eventSource.close();
-    
-    // Process the complete response if needed
-    processCompleteResponse(fullResponse);
-  };
-}
-
-function appendToChat(text) {
-  const chatWindow = document.getElementById('chat-window');
-  chatWindow.innerHTML += text;
-}
-
-function processCompleteResponse(text) {
-  console.log('Full response received:', text);
-  // Additional processing if needed
-}
-```
-
-## Project Structure
-
-```
-├── backend-v2/              # NestJS Backend
-│   ├── src/
-│   │   ├── controllers/     # API Controllers
-│   │   ├── dto/             # Data Transfer Objects
-│   │   ├── modules/         # NestJS Modules
-│   │   ├── services/        # Service Layer
-│   │   ├── app.module.ts    # Main App Module
-│   │   └── main.ts          # Application Entry Point
-│   ├── Dockerfile           # Backend Docker Configuration
-│   └── package.json         # Backend Dependencies
-├── smart-contract/          # Sui Move Package
-│   ├── sources/
-│   │   ├── chat_sessions.move  # Chat Session Contract
-│   │   └── memory.move         # Memory Contract
-│   └── Move.toml            # Move Package Config
-└── docker-compose.yml       # Docker Compose Configuration
-```
-
-## Development
-
-For local development:
-
-1. **Run services individually**
-
-```bash
-# Backend
-cd backend-v2
-npm install
-npm run start:dev
-
-# Local Sui Node (in a separate terminal)
-sui start
-```
-
-2. **Run tests**
-
-```bash
-# Backend tests
-cd backend-v2
-npm test
-```
+### Chat API
+- `POST /api/chat/sessions` - Create a new chat session
+- `GET /api/chat/sessions?user={address}` - Get all sessions for a user
+- `GET /api/chat/sessions/{id}` - Get a specific chat session
+- `POST /api/chat/sessions/{id}/messages` - Add a message to a session
+- `POST /api/chat/stream` - Stream chat responses
+- `DELETE /api/chat/sessions/{id}` - Delete a chat session
 
 ## License
 
-This project is licensed under the MIT License.
+MIT

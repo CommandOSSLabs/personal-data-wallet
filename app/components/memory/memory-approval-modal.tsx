@@ -42,7 +42,15 @@ export function MemoryApprovalModal({
         onApproved?.(result.memoryId)
         onClose()
       } else {
-        setError(result.message || 'Failed to save memory')
+        // If the error is about index creation, provide more helpful message
+        if (result.message?.includes('Failed to create index on blockchain')) {
+          setError(
+            'Failed to create memory index on blockchain. Please check your wallet connection and try again. ' +
+            'Make sure you have enough SUI for gas fees.'
+          )
+        } else {
+          setError(result.message || 'Failed to save memory')
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error occurred')

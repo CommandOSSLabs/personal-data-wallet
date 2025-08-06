@@ -15,6 +15,8 @@ class AddMessageDto {
     userAddress;
     content;
     type;
+    memoryId;
+    walrusHash;
 }
 exports.AddMessageDto = AddMessageDto;
 __decorate([
@@ -33,4 +35,14 @@ __decorate([
     (0, class_validator_1.IsIn)(['user', 'assistant']),
     __metadata("design:type", String)
 ], AddMessageDto.prototype, "type", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], AddMessageDto.prototype, "memoryId", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], AddMessageDto.prototype, "walrusHash", void 0);
 //# sourceMappingURL=add-message.dto.js.map

@@ -23,6 +23,14 @@ export class MemoryIndexService {
    */
   async prepareIndexForCreation(userAddress: string): Promise<PrepareIndexResponseDto> {
     try {
+      // Validate userAddress
+      if (!userAddress || userAddress === 'undefined') {
+        return {
+          success: false,
+          message: 'User address is required'
+        };
+      }
+      
       this.logger.log(`Preparing memory index data for user ${userAddress}`);
       
       // Create empty index

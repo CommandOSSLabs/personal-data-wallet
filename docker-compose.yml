@@ -1,6 +1,23 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=personal_data_wallet
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # NestJS Backend
   backend:
     build:
@@ -17,33 +34,24 @@ services:
       - WALRUS_API_KEY=${WALRUS_API_KEY}
       - WALRUS_API_URL=${WALRUS_API_URL}
       - SEAL_MASTER_KEY=${SEAL_MASTER_KEY}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=postgres
+      - DB_DATABASE=personal_data_wallet
+      - DB_SYNC=true
+      - DB_LOGGING=true
     volumes:
       - ./backend:/app
       - /app/node_modules
     depends_on:
+      - postgres
       - sui-node
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 5
-
-  # Local Sui Node
-  sui-node:
-    image: mysten/sui-tools:devnet
-    ports:
-      - "9000:9000" # JSON-RPC
-      - "9184:9184" # Metrics
-    volumes:
-      - ./sui-data:/sui-data
-    command: sui-test-validator
-    environment:
-      - SUI_CONFIG_DIR=/sui-data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
   # Frontend
   frontend:
@@ -63,68 +71,5 @@ services:
       - /app/node_modules
       - /app/.next
 
-  # Sui Contract Deployer
-  contract-deployer:
-    image: mysten/sui-tools:devnet
-    volumes:
-      - ./smart-contract:/smart-contract
-      - ./sui-data:/sui-data
-    depends_on:
-      - sui-node
-    environment:
-      - SUI_CONFIG_DIR=/sui-data
-    entrypoint: ["/bin/bash", "-c"]
-    command: |
-      "
-      # Wait for sui-node to be available
-      while ! curl -s http://sui-node:9000 > /dev/null; do
-        echo 'Waiting for sui-node to be ready...'
-        sleep 5
-      done
-      
-      # Navigate to contract directory
-      cd /smart-contract
-      
-      # Build the contract
-      sui move build
-      
-      # Publish the contract and save the output
-      echo 'Publishing contract...'
-      sui client publish --gas-budget 100000000 --json > /sui-data/publish_output.json
-      
-      # Extract package ID
-      PACKAGE_ID=$(cat /sui-data/publish_output.json | grep -o '\"packageId\":\"0x[a-fA-F0-9]*\"' | head -1 | cut -d '\"' -f 4)
-      echo \"Package ID: $${PACKAGE_ID}\"
-      
-      # Write package ID to environment file for backend to use
-      echo \"SUI_PACKAGE_ID=$${PACKAGE_ID}\" > /sui-data/contract.env
-      
-      # Keep container running for debugging
-      tail -f /dev/null
-      "
-    restart: unless-stopped
-
-  # Test runner for backend API
-  test-runner:
-    image: node:18-alpine
-    volumes:
-      - ./backend:/app
-    depends_on:
-      - backend
-    working_dir: /app
-    environment:
-      - API_URL=http://backend:3000
-    entrypoint: ["/bin/sh", "-c"]
-    command: |
-      "
-      # Wait for backend to be available
-      while ! wget -q --spider http://backend:3000/api/health; do
-        echo 'Waiting for backend to be ready...'
-        sleep 5
-      done
-      
-      # Run the endpoint tests
-      echo 'Running endpoint tests...'
-      node test-endpoints.js
-      "
-    restart: on-failure
+volumes:
+  postgres_data:

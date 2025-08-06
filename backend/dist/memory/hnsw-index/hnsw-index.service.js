@@ -97,6 +97,9 @@ let HnswIndexService = HnswIndexService_1 = class HnswIndexService {
     }
     async saveIndex(index, userAddress) {
         try {
+            if (!userAddress || userAddress === 'undefined') {
+                throw new Error('User address is required for saving index');
+            }
             this.logger.log(`Saving HNSW index for user ${userAddress}`);
             const tempFilePath = `./tmp_hnsw_${Date.now()}.bin`;
             index.writeIndexSync(tempFilePath);
@@ -112,6 +115,8 @@ let HnswIndexService = HnswIndexService_1 = class HnswIndexService {
                 'version': '1.0'
             });
             this.logger.log(`Index saved to Walrus with blobId ${blobId}`);
+            this.logger.log('Waiting for blob propagation...');
+            await new Promise(resolve => setTimeout(resolve, 3000));
             return blobId;
         }
         catch (error) {

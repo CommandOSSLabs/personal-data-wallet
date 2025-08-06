@@ -291,6 +291,7 @@ class MemoryIndexService {
         options: {
           showEffects: true,
           showObjectChanges: true,
+          showEvents: true,
         }
       })
 
@@ -330,26 +331,79 @@ class MemoryIndexService {
    */
   private async extractObjectId(result: any): Promise<string | null> {
     try {
-      // Check object changes first (most reliable)
+      console.log('Initial transaction result:', JSON.stringify(result, null, 2))
+      
+      // If we have a digest, fetch the full transaction details
+      if (result.digest) {
+        console.log('Transaction digest:', result.digest)
+        
+        // Import SuiClient dynamically to get transaction details
+        const { SuiClient } = await import('@mysten/sui/client')
+        const client = new SuiClient({ url: 'https://fullnode.testnet.sui.io:443' })
+        
+        // Wait for transaction to be indexed
+        console.log('Waiting for transaction confirmation...')
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        
+        try {
+          const txResult = await client.getTransactionBlock({
+            digest: result.digest,
+            options: {
+              showEffects: true,
+              showEvents: true,
+              showObjectChanges: true
+            }
+          })
+          
+          console.log('Retrieved full transaction details:', JSON.stringify(txResult, null, 2))
+          
+          // Look for created objects in objectChanges
+          if (txResult.objectChanges && Array.isArray(txResult.objectChanges)) {
+            for (const change of txResult.objectChanges) {
+              if (change.type === 'created') {
+                console.log('Found created object:', change.objectId)
+                return change.objectId
+              }
+            }
+          }
+          
+          // Look for created objects in effects
+          if (txResult.effects?.created && Array.isArray(txResult.effects.created)) {
+            for (const created of txResult.effects.created) {
+              if (created.reference && created.reference.objectId) {
+                console.log('Found created object in effects:', created.reference.objectId)
+                return created.reference.objectId
+              }
+            }
+          }
+          
+          // Look for events with object IDs (specifically MemoryIndexUpdated)
+          if (txResult.events && Array.isArray(txResult.events)) {
+            for (const event of txResult.events) {
+              if (event.type.includes('::memory::MemoryIndexUpdated') && event.parsedJson) {
+                console.log('Found MemoryIndexUpdated event:', event.parsedJson)
+                if (event.parsedJson.id) {
+                  return event.parsedJson.id
+                }
+              }
+            }
+          }
+        } catch (fetchError) {
+          console.error('Error fetching transaction details:', fetchError)
+        }
+      }
+      
+      // Fallback to checking immediate result
       if (result.objectChanges && Array.isArray(result.objectChanges)) {
         for (const change of result.objectChanges) {
           if (change.type === 'created') {
-            console.log('Found created object:', change.objectId)
+            console.log('Found created object in immediate result:', change.objectId)
             return change.objectId
           }
         }
       }
 
-      // Check effects as fallback
-      if (result.effects?.created && Array.isArray(result.effects.created)) {
-        const created = result.effects.created[0]
-        if (created && created.reference) {
-          console.log('Found created object in effects:', created.reference.objectId)
-          return created.reference.objectId
-        }
-      }
-
-      console.error('No created objects found in transaction result')
+      console.error('No created objects found')
       return null
     } catch (error) {
       console.error('Error extracting object ID:', error)

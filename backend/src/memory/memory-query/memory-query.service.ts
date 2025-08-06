@@ -36,16 +36,15 @@ export class MemoryQueryService {
       // Populate memories with data
       for (const record of memoryRecords) {
         try {
-          // Get encrypted content
-          const encryptedContent = await this.walrusService.retrieveContent(record.blobId);
+          // Get content from Walrus (unencrypted for now)
+          const content = await this.walrusService.retrieveContent(record.blobId);
           
-          // We return encrypted content to frontend and only decrypt when needed
           memories.push({
             id: record.id,
-            content: encryptedContent, // Keep content encrypted
+            content: content, // Unencrypted content
             category: record.category,
             timestamp: new Date().toISOString(), // Use creation time from record if available
-            isEncrypted: true,
+            isEncrypted: false,
             owner: userAddress,
             walrusHash: record.blobId
           });
@@ -124,13 +123,10 @@ export class MemoryQueryService {
             if (seenBlobIds.has(memory.blobId)) continue;
             seenBlobIds.add(memory.blobId);
             
-            // Get encrypted content
-            const encryptedContent = await this.walrusService.retrieveContent(memory.blobId);
+            // Get content from Walrus (unencrypted)
+            const content = await this.walrusService.retrieveContent(memory.blobId);
             
-            // Decrypt content
-            const decryptedContent = await this.sealService.decrypt(encryptedContent, userAddress);
-            
-            memories.push(decryptedContent);
+            memories.push(content);
             
             if (memories.length >= limit) break;
           }
@@ -186,16 +182,16 @@ export class MemoryQueryService {
             // Skip if category filter is applied and doesn't match
             if (category && memoryObj.category !== category) continue;
             
-            // Get encrypted content
-            const encryptedContent = await this.walrusService.retrieveContent(memoryObj.blobId);
+            // Get content from Walrus (unencrypted)
+            const content = await this.walrusService.retrieveContent(memoryObj.blobId);
             
-            // Add to results - we keep it encrypted and let frontend decrypt when needed
+            // Add to results
             results.push({
               id: memoryObj.id,
-              content: encryptedContent,
+              content: content,
               category: memoryObj.category,
               timestamp: new Date().toISOString(),
-              isEncrypted: true,
+              isEncrypted: false,
               owner: userAddress,
               similarity_score: searchResults.distances[searchResults.ids.indexOf(vectorId)],
               walrusHash: memoryObj.blobId
@@ -340,12 +336,12 @@ export class MemoryQueryService {
    */
   async getMemoryContentByHash(hash: string): Promise<{ content: string, success: boolean }> {
     try {
-      // Retrieve encrypted content from Walrus
-      const encryptedContent = await this.walrusService.retrieveContent(hash);
+      // Retrieve content from Walrus (unencrypted)
+      const content = await this.walrusService.retrieveContent(hash);
       
-      // Return the content (can be encrypted)
+      // Return the content
       return {
-        content: encryptedContent,
+        content: content,
         success: true
       };
     } catch (error) {

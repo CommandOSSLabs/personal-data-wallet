@@ -148,6 +148,9 @@ let GraphService = GraphService_1 = class GraphService {
     }
     async saveGraph(graph, userAddress) {
         try {
+            if (!userAddress || userAddress === 'undefined') {
+                throw new Error('User address is required for saving graph');
+            }
             this.logger.log(`Saving knowledge graph for user ${userAddress}`);
             const graphJson = JSON.stringify(graph);
             const adminAddress = this.walrusService.getAdminAddress();

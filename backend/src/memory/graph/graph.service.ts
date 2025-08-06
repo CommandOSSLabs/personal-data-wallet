@@ -238,6 +238,11 @@ export class GraphService {
    */
   async saveGraph(graph: KnowledgeGraph, userAddress: string): Promise<string> {
     try {
+      // Validate userAddress
+      if (!userAddress || userAddress === 'undefined') {
+        throw new Error('User address is required for saving graph');
+      }
+      
       this.logger.log(`Saving knowledge graph for user ${userAddress}`);
       
       const graphJson = JSON.stringify(graph);

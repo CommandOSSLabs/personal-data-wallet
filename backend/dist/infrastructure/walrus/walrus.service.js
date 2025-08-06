@@ -204,21 +204,46 @@ let WalrusService = WalrusService_1 = class WalrusService {
         }
     }
     async downloadFile(blobId) {
-        try {
-            this.logger.log(`Downloading file from blobId: ${blobId}`);
-            const [file] = await this.walrusClient.getFiles({
-                ids: [blobId]
-            });
-            if (!file) {
-                throw new Error(`File with blob ID ${blobId} not found`);
+        const maxRetries = 3;
+        let lastError = null;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                this.logger.log(`Downloading file from blobId: ${blobId} (attempt ${attempt}/${maxRetries})`);
+                if (attempt > 1) {
+                    const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+                    this.logger.log(`Waiting ${waitTime}ms before retry...`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                }
+                const [file] = await this.walrusClient.getFiles({
+                    ids: [blobId]
+                });
+                if (!file) {
+                    this.logger.warn(`File not found with getFiles, trying direct retrieval...`);
+                    if (attempt < maxRetries) {
+                        throw new Error(`File with blob ID ${blobId} not found (will retry)`);
+                    }
+                    throw new Error(`File with blob ID ${blobId} not found after ${maxRetries} attempts`);
+                }
+                const bytes = await file.bytes();
+                this.logger.log(`Successfully downloaded file ${blobId}`);
+                return Buffer.from(bytes);
             }
-            const bytes = await file.bytes();
-            return Buffer.from(bytes);
+            catch (error) {
+                lastError = error;
+                this.logger.warn(`Download attempt ${attempt}/${maxRetries} failed: ${lastError.message}`);
+                if (attempt < maxRetries &&
+                    (lastError.message.includes('fetch failed') ||
+                        lastError.message.includes('not found') ||
+                        lastError.message.includes('timeout'))) {
+                    continue;
+                }
+                if (attempt === maxRetries) {
+                    break;
+                }
+            }
         }
-        catch (error) {
-            this.logger.error(`Error downloading file from Walrus: ${error.message}`);
-            throw new Error(`Walrus file download error: ${error.message}`);
-        }
+        this.logger.error(`Failed to download file after ${maxRetries} attempts: ${lastError?.message}`);
+        throw new Error(`Walrus file download error after ${maxRetries} attempts: ${lastError?.message}`);
     }
     async deleteContent(blobId, userAddress) {
         try {
@@ -263,6 +288,9 @@ let WalrusService = WalrusService_1 = class WalrusService {
                             signer: this.adminKeypair,
                         });
                         this.logger.log(`Upload completed successfully on attempt ${attempt}`);
+                        results.forEach((result, index) => {
+                            this.logger.log(`File ${index}: blobId=${result.blobId}`);
+                        });
                         return results;
                     }
                     catch (writeError) {

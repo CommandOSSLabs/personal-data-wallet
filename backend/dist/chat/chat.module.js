@@ -12,12 +12,18 @@ const chat_controller_1 = require("./chat.controller");
 const chat_service_1 = require("./chat.service");
 const summarization_service_1 = require("./summarization/summarization.service");
 const memory_module_1 = require("../memory/memory.module");
+const typeorm_1 = require("@nestjs/typeorm");
+const chat_session_entity_1 = require("./entities/chat-session.entity");
+const chat_message_entity_1 = require("./entities/chat-message.entity");
 let ChatModule = class ChatModule {
 };
 exports.ChatModule = ChatModule;
 exports.ChatModule = ChatModule = __decorate([
     (0, common_1.Module)({
-        imports: [memory_module_1.MemoryModule],
+        imports: [
+            typeorm_1.TypeOrmModule.forFeature([chat_session_entity_1.ChatSession, chat_message_entity_1.ChatMessage]),
+            memory_module_1.MemoryModule
+        ],
         controllers: [chat_controller_1.ChatController],
         providers: [chat_service_1.ChatService, summarization_service_1.SummarizationService],
         exports: [chat_service_1.ChatService, summarization_service_1.SummarizationService]
