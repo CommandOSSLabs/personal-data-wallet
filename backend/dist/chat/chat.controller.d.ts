@@ -76,6 +76,10 @@ export declare class ChatController {
     saveSummary(saveSummaryDto: SaveSummaryDto): Promise<{
         success: boolean;
     }>;
+    renameSession(sessionId: string, title: string, userAddress: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
     streamChat(messageDto: ChatMessageDto, response: Response): Promise<void>;
     sendMessage(messageDto: ChatMessageDto): Promise<{
         response: string;

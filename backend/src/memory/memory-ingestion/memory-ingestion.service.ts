@@ -150,6 +150,8 @@ export class MemoryIngestionService {
   async processNewMemory(memoryDto: CreateMemoryDto): Promise<{
     success: boolean;
     memoryId?: string;
+    blobId?: string;
+    vectorId?: number;
     message?: string;
     requiresIndexCreation?: boolean;
     indexBlobId?: string;
@@ -236,26 +238,18 @@ export class MemoryIngestionService {
         this.logger.log(`New user - graph will be created when first batch is processed`);
       }
 
-      // Step 10: Create the on-chain memory record (skip in demo mode)
-      let memoryId: string;
-      if (!this.isDemoMode()) {
-        memoryId = await this.suiService.createMemoryRecord(
-          memoryDto.userAddress,
-          memoryDto.category,
-          vectorId,
-          contentBlobId
-        );
-      } else {
-        // Generate a demo memory ID
-        memoryId = `demo_memory_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        this.logger.log(`Demo mode: Generated memory ID ${memoryId} (no blockchain record)`);
-      }
+      // Step 10: Generate a temporary memory ID for backend tracking
+      // Note: Blockchain records should be created by the frontend with user signatures
+      const memoryId = `backend_temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      this.logger.log(`Memory processed with temporary ID: ${memoryId} (blockchain record should be created by frontend)`);
 
       this.logger.log(`Memory created successfully with ID: ${memoryId}. Vector queued for batch processing.`);
 
       return {
         success: true,
         memoryId,
+        blobId: contentBlobId, // Return the real blob ID for frontend
+        vectorId: vectorId,    // Return the vector ID for frontend
         message: 'Memory saved successfully. Search index will be updated shortly.'
       };
     } catch (error) {
@@ -475,9 +469,9 @@ export class MemoryIngestionService {
 
   /**
    * Process an approved memory from the frontend
-   * This method prepares the memory for storage but does not write to blockchain
-   * @param saveMemoryDto Memory data approved by the user
-   * @returns Processing result with data for frontend blockchain operations
+   * This method handles storage and indexing after the frontend has created the blockchain record
+   * @param saveMemoryDto Memory data approved by the user (includes suiObjectId from frontend)
+   * @returns Processing result
    */
   async processApprovedMemory(saveMemoryDto: SaveMemoryDto): Promise<{
     success: boolean;
@@ -488,6 +482,8 @@ export class MemoryIngestionService {
   }> {
     try {
       const { content, category, userAddress, suiObjectId } = saveMemoryDto;
+
+      this.logger.log(`Processing approved memory for user ${userAddress} with blockchain ID: ${suiObjectId}`);
       
       // If the frontend already created the memory object on blockchain
       if (suiObjectId) {

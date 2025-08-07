@@ -131,6 +131,27 @@ module pdw::memory {
         transfer::transfer(memory, owner);
     }
 
+    /// Delete a memory record 
+    public entry fun delete_memory_record(
+        memory: Memory,
+        ctx: &TxContext
+    ) {
+        let sender = tx_context::sender(ctx);
+        assert!(sender == memory.owner, ENonOwner);
+
+        // Emit deletion event
+        sui::event::emit(MemoryCreated {
+            id: object::uid_to_inner(&memory.id),
+            owner: memory.owner,
+            category: memory.category,
+            vector_id: memory.vector_id
+        });
+
+        // Delete the memory object
+        let Memory { id, owner: _, category: _, vector_id: _, blob_id: _ } = memory;
+        object::delete(id);
+    }
+
     // Accessor functions
     public fun get_index_blob_id(memory_index: &MemoryIndex): &String {
         &memory_index.index_blob_id

@@ -119,6 +119,15 @@ export function ChatInterface() {
   // This prevents unwanted session creation on page reload
 
   const handleSendMessage = async (messageText: string) => {
+    console.log('🚀 handleSendMessage called with:', messageText);
+    console.log('🚀 Current streaming state:', { isStreaming, currentSessionLoading });
+
+    // Prevent sending if already processing
+    if (isStreaming || currentSessionLoading) {
+      console.log('❌ Blocked message send - already processing');
+      return;
+    }
+
     // Ensure we have an active session
     let sessionId = currentSessionId
     if (!sessionId) {
@@ -304,22 +313,41 @@ export function ChatInterface() {
                   const currentSession = getCurrentSession()
                   const hasBackendMessages = currentSession && currentSession.messages.length > 0
 
-                  if ((hasBackendMessages || !currentSessionLoading) && !memorySelectionModalOpened) {
-                    console.log('Clearing temporary messages - backend messages loaded:', hasBackendMessages)
+                  // Check if the user message specifically exists in backend messages
+                  const userMessageExists = currentSession?.messages.some(msg =>
+                    msg.type === 'user' &&
+                    msg.content === tempUserMessage?.content &&
+                    Math.abs(new Date(msg.timestamp).getTime() - new Date(tempUserMessage?.timestamp || '').getTime()) < 30000
+                  )
+
+                  if (hasBackendMessages && userMessageExists) {
+                    console.log('Clearing temporary messages - user message found in backend:', userMessageExists)
                     setStreamingMessageId(null)
                     setStreamingMessage(null)
                     setTempUserMessage(null)
                   } else {
-                    console.log('Keeping temporary messages - backend messages not yet loaded or memory modal open')
-                    // Retry clearing after another delay
+                    console.log('Keeping temporary messages - user message not yet in backend. HasBackend:', hasBackendMessages, 'UserExists:', userMessageExists)
+                    // Retry clearing after another delay, but keep user message visible
                     setTimeout(() => {
-                      // Only clear if memory modal is closed
-                      if (!memorySelectionModalOpened) {
+                      // Check again if user message exists in backend
+                      const currentSession = getCurrentSession()
+                      const userMessageExists = currentSession?.messages.some(msg =>
+                        msg.type === 'user' &&
+                        msg.content === tempUserMessage?.content
+                      )
+
+                      if (userMessageExists) {
+                        console.log('User message now found in backend, clearing temporary messages')
                         setStreamingMessageId(null)
                         setStreamingMessage(null)
                         setTempUserMessage(null)
+                      } else {
+                        // Keep user message visible but clear streaming
+                        setStreamingMessageId(null)
+                        setStreamingMessage(null)
+                        console.log('User message still not in backend, keeping temporary user message visible')
                       }
-                    }, 1000)
+                    }, 2000)
                   }
                 }, 300) // Additional delay to ensure backend messages are displayed
               }, 800) // Increased delay to ensure query refetch completes
@@ -421,6 +449,34 @@ export function ChatInterface() {
     deleteSession(sessionId)
   }
 
+  const handleRenameSession = async (sessionId: string, newTitle: string) => {
+    try {
+      // Call backend API to rename session
+      const response = await fetch('/api/chat/sessions/rename', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionId,
+          title: newTitle,
+          userAddress
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to rename session')
+      }
+
+      // Refresh sessions to show updated title
+      // The useChatSessions hook will automatically refetch
+      console.log(`Session ${sessionId} renamed to: ${newTitle}`)
+    } catch (error) {
+      console.error('Failed to rename session:', error)
+      alert('Failed to rename session. Please try again.')
+    }
+  }
+
 
   if (sessionsLoading || memoriesLoading) {
     return (
@@ -448,6 +504,7 @@ export function ChatInterface() {
           onNewChat={handleNewChat}
           onSelectSession={handleSelectSession}
           onDeleteSession={handleDeleteSession}
+          onRenameSession={handleRenameSession}
           onClearMemories={clearMemories}
         />
       </AppShell.Navbar>
@@ -552,9 +609,9 @@ export function ChatInterface() {
               })
             }
 
-            // Add temporary messages during active states OR when memory modal is open
-            // This ensures user messages remain visible during memory selection
-            if ((isRefreshingSession || isStreaming || currentSessionLoading || memorySelectionModalOpened) && tempUserMessage) {
+            // Add temporary messages during active states OR when memory modal is open OR when user message not yet in backend
+            // This ensures user messages remain visible during memory selection and until saved to backend
+            if (tempUserMessage && (isRefreshingSession || isStreaming || currentSessionLoading || memorySelectionModalOpened)) {
               const isDuplicate = sessionMessages.some(msg =>
                 msg.type === 'user' &&
                 msg.content === tempUserMessage?.content &&
@@ -620,7 +677,7 @@ export function ChatInterface() {
               userAddress={userAddress}
               onForceFlush={() => {
                 // Refresh memory indicator after force flush
-                memoryIndicator.setStored(memoryIndicator.stored);
+                memoryIndicator.setStored(memoryIndicator.memoriesStored);
               }}
             />
           </div>

@@ -246,64 +246,65 @@ class MemoryIntegrationService {
   }
 
   /**
-   * Fetch all memories for a user and auto-decrypt them
+   * Fetch all memories for a user directly from the blockchain
    */
   async fetchUserMemories(userAddress: string): Promise<{
     memories: any[]
     total: number
   }> {
     try {
-      // Get memories directly from blockchain
-      // First try to get from local storage cache
-      const cachedMemories = this.getMemoriesFromCache(userAddress);
-      if (cachedMemories && cachedMemories.length > 0) {
-        console.log(`Found ${cachedMemories.length} cached memories for ${userAddress}`);
-        // Auto-decrypt memories in background
-        this.autoDecryptMemories(cachedMemories);
+      console.log('Fetching memories directly from Sui blockchain for user:', userAddress);
+
+      // Get memories directly from blockchain (no cache)
+      const { SuiBlockchainService } = await import('@/app/services/suiBlockchainService');
+
+      // Create a service instance with a mock wallet for read-only operations
+      const mockWallet = {
+        connected: false,
+        account: null,
+        signAndExecuteTransactionBlock: async () => {
+          throw new Error('Read-only operation - no signing required');
+        }
+      };
+
+      const suiService = new SuiBlockchainService(mockWallet);
+      
+      // Get user memories directly from blockchain
+      const blockchainResult = await suiService.getUserMemories(userAddress);
+
+      if (blockchainResult.memories.length === 0) {
+        console.log('No memories found on blockchain for user:', userAddress);
         return {
-          memories: cachedMemories,
-          total: cachedMemories.length
+          memories: [],
+          total: 0
         };
       }
-      
-      // If no cached memories, fetch from blockchain
-      const { getStaticSuiService } = await import('@/app/services/suiBlockchainService');
-      const suiService = getStaticSuiService();
-      
-      // Get user memories from blockchain (using mock data for now)
-      const mockMemories = [
-        {
-          id: `mem-${Date.now()}-1`,
-          content: "I like pizza with extra cheese",
-          category: "preference",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        },
-        {
-          id: `mem-${Date.now()}-2`,
-          content: "I live in San Francisco",
-          category: "location",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        },
-        {
-          id: `mem-${Date.now()}-3`,
-          content: "My favorite color is blue",
-          category: "preference",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }
-      ];
-      
-      // Cache the memories
-      this.saveMemoriesToCache(userAddress, mockMemories);
-      
-      // Auto-decrypt memories in background
-      this.autoDecryptMemories(mockMemories);
-      
+
+      // Transform blockchain data to frontend format
+      const memories = blockchainResult.memories.map(memory => ({
+        id: memory.id,
+        content: memory.content || 'Loading content...', // Will be fetched by cache service
+        category: memory.category,
+        created_at: new Date().toISOString(), // TODO: Get actual timestamp from blockchain
+        updated_at: new Date().toISOString(),
+        isEncrypted: memory.isEncrypted !== false, // Default to encrypted
+        owner: memory.owner,
+        walrusHash: memory.blobId,
+        vectorId: memory.vectorId,
+        suiObjectId: memory.id
+      }));
+
+      console.log(`Fetched ${memories.length} memories from blockchain for user ${userAddress}`);
+
+      // Auto-load content for all memories in background
+      await this.autoLoadMemoryContent(memories);
+
+      // Cache the memories for performance (after content is loaded)
+      this.saveMemoriesToCache(userAddress, memories);
+
       return {
-        memories: mockMemories,
-        total: mockMemories.length
+        memories,
+        total: memories.length
       }
     } catch (error) {
       console.error('Failed to fetch user memories:', error);
@@ -313,7 +314,62 @@ class MemoryIntegrationService {
       }
     }
   }
-  
+
+  /**
+   * Auto-load content for memories in background
+   */
+  private async autoLoadMemoryContent(memories: any[]): Promise<void> {
+    try {
+      console.log(`Auto-loading content for ${memories.length} memories`);
+
+      // Import the cache service
+      const { memoryDecryptionCache } = await import('./memoryDecryptionCache');
+
+      // Load content for all memories in parallel (with concurrency limit)
+      const batchSize = 3; // Process 3 at a time to avoid overwhelming the API
+      for (let i = 0; i < memories.length; i += batchSize) {
+        const batch = memories.slice(i, i + batchSize);
+
+        await Promise.all(
+          batch.map(async (memory) => {
+            if (memory.walrusHash && memory.walrusHash !== 'temp_blob_id') {
+              try {
+                console.log(`Loading content for memory ${memory.id} from ${memory.walrusHash}`);
+                const content = await memoryDecryptionCache.getDecryptedContent(memory.walrusHash);
+
+                if (content) {
+                  // Update the memory object with real content
+                  memory.content = content;
+                  memory.isEncrypted = false;
+                  console.log(`Content loaded for memory ${memory.id}: ${content.substring(0, 50)}...`);
+                } else {
+                  memory.content = 'Content not available';
+                  memory.isEncrypted = false;
+                }
+              } catch (error) {
+                console.error(`Failed to load content for memory ${memory.id}:`, error);
+                memory.content = 'Failed to load content';
+                memory.isEncrypted = true;
+              }
+            } else {
+              memory.content = 'Invalid storage reference';
+              memory.isEncrypted = false;
+            }
+          })
+        );
+
+        // Small delay between batches to be nice to the API
+        if (i + batchSize < memories.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+
+      console.log(`Content loading completed for ${memories.length} memories`);
+    } catch (error) {
+      console.error('Error auto-loading memory content:', error);
+    }
+  }
+
   // Helper methods for local caching
   private getMemoriesFromCache(userAddress: string): any[] {
     try {

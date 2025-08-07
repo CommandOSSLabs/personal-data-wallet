@@ -106,7 +106,7 @@ class MemoryRetrievalService {
   }
 
   /**
-   * Get all memories for a user with caching
+   * Get all memories for a user directly from blockchain with caching
    */
   async getUserMemories(userAddress: string, forceRefresh = false): Promise<any[]> {
     // Check cache first unless force refresh
@@ -115,14 +115,40 @@ class MemoryRetrievalService {
     const now = Date.now()
 
     if (!forceRefresh && cachedData && cachedData.timestamp && (now - cachedData.timestamp) < this.memoryCacheTTL) {
-      console.log('Using cached memories')
+      console.log('Using cached memories from blockchain data')
       return cachedData.memories
     }
 
     try {
-      // Fetch from blockchain/backend
-      const response = await memoryApi.getMemories(userAddress)
-      const memories = response.memories || []
+      // Fetch directly from blockchain instead of backend API
+      const { SuiBlockchainService } = await import('@/app/services/suiBlockchainService');
+
+      // Create a service instance with a mock wallet for read-only operations
+      const mockWallet = {
+        connected: false,
+        account: null,
+        signAndExecuteTransactionBlock: async () => {
+          throw new Error('Read-only operation - no signing required');
+        }
+      };
+
+      const suiService = new SuiBlockchainService(mockWallet);
+      const blockchainResult = await suiService.getUserMemories(userAddress);
+
+      // Transform blockchain data to expected format
+      const memories = blockchainResult.memories.map(memory => ({
+        id: memory.id,
+        content: memory.content || 'Loading content...', // Will be fetched by cache service
+        category: memory.category,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        blobId: memory.blobId,
+        vectorId: memory.vectorId,
+        owner: memory.owner,
+        suiObjectId: memory.id,
+        isEncrypted: memory.isEncrypted !== false, // Default to encrypted
+        walrusHash: memory.blobId // Add walrusHash for cache service
+      }));
 
       // Update cache
       this.cachedMemories[cacheKey] = {
@@ -130,10 +156,67 @@ class MemoryRetrievalService {
         timestamp: now
       }
 
+      console.log(`Fetched ${memories.length} memories from blockchain for user ${userAddress}`);
+
+      // Auto-load content for memories
+      await this.autoLoadMemoryContent(memories);
+
       return memories
     } catch (error) {
-      console.error('Error getting user memories:', error)
+      console.error('Error getting user memories from blockchain:', error)
       return []
+    }
+  }
+
+  /**
+   * Auto-load content for memories in background
+   */
+  private async autoLoadMemoryContent(memories: any[]): Promise<void> {
+    try {
+      console.log(`Auto-loading content for ${memories.length} memories`);
+
+      // Load content for all memories in parallel (with concurrency limit)
+      const batchSize = 3; // Process 3 at a time to avoid overwhelming the API
+      for (let i = 0; i < memories.length; i += batchSize) {
+        const batch = memories.slice(i, i + batchSize);
+
+        await Promise.all(
+          batch.map(async (memory) => {
+            if (memory.walrusHash && memory.walrusHash !== 'temp_blob_id') {
+              try {
+                console.log(`Loading content for memory ${memory.id} from ${memory.walrusHash}`);
+                const content = await memoryDecryptionCache.getDecryptedContent(memory.walrusHash);
+
+                if (content) {
+                  // Update the memory object with real content
+                  memory.content = content;
+                  memory.isEncrypted = false;
+                  console.log(`Content loaded for memory ${memory.id}: ${content.substring(0, 50)}...`);
+                } else {
+                  memory.content = 'Content not available';
+                  memory.isEncrypted = false;
+                }
+              } catch (error) {
+                console.error(`Failed to load content for memory ${memory.id}:`, error);
+                memory.content = 'Failed to load content';
+                memory.isEncrypted = true;
+              }
+            } else {
+              memory.content = 'Invalid storage reference';
+              memory.isEncrypted = false;
+            }
+          })
+        );
+
+        // Small delay between batches to be nice to the API
+        if (i + batchSize < memories.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+
+      console.log(`Content loading completed for ${memories.length} memories`);
+    } catch (error) {
+      console.error('Error auto-loading memory content:', error);
     }
   }
 

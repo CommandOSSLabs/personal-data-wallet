@@ -8,7 +8,7 @@ import { getEnhancedTransactionService } from './EnhancedTransactionService'
 
 // Define the package ID to be used for our Move contracts
 // Hardcoding values for testnet
-const PACKAGE_ID = '0x8ae699f05fbbf9c314118d53bfdd6e43c4daa12b7a785a972128f1efaf65b50c'
+const PACKAGE_ID = '0xef2acd8cfed039a44c82f99e2e0a32f50ed8306b7c507e1826d5bc6b73738ef0'
 const SUI_NETWORK = 'testnet'
 const SUI_API_URL = 'https://fullnode.testnet.sui.io:443'
 
@@ -225,10 +225,181 @@ export class SuiBlockchainService {
     }
   }
 
+  // Get all memory records for a user from the blockchain with content
+  async getUserMemories(userAddress: string): Promise<{
+    memories: Array<{
+      id: string;
+      category: string;
+      vectorId: number;
+      blobId: string;
+      owner: string;
+      content?: string;
+      isEncrypted?: boolean;
+    }>;
+    total: number;
+  }> {
+    try {
+      console.log('Fetching memories from blockchain for user:', userAddress);
+
+      // Query all Memory objects owned by the user
+      const response = await this.client.getOwnedObjects({
+        owner: userAddress,
+        filter: {
+          StructType: `${PACKAGE_ID}::memory::Memory`
+        },
+        options: {
+          showContent: true,
+          showType: true
+        }
+      });
+
+      console.log('Raw blockchain response:', response);
+
+      const memories = [];
+
+      for (const item of response.data) {
+        if (item.data?.content && 'fields' in item.data.content) {
+          const fields = item.data.content.fields as any;
+
+          const memory = {
+            id: item.data.objectId,
+            category: fields.category || 'unknown',
+            vectorId: parseInt(fields.vector_id) || 0,
+            blobId: fields.blob_id || '',
+            owner: fields.owner || userAddress,
+            content: undefined as string | undefined,
+            isEncrypted: true
+          };
+
+          // Don't fetch content here to avoid infinite loops
+          // Content will be fetched on-demand by the frontend
+          if (memory.blobId && memory.blobId !== 'temp_blob_id') {
+            // Mark as available for fetching
+            memory.isEncrypted = true; // Will be decrypted when fetched
+          } else {
+            console.log(`Memory ${memory.id} has invalid blobId: ${memory.blobId}`);
+            memory.content = 'Content not available (invalid storage reference)';
+            memory.isEncrypted = false;
+          }
+
+          memories.push(memory);
+        }
+      }
+
+      console.log(`Found ${memories.length} memories on blockchain for user ${userAddress}`);
+
+      return {
+        memories,
+        total: memories.length
+      };
+
+    } catch (error) {
+      console.error('Error fetching user memories from blockchain:', error);
+      return {
+        memories: [],
+        total: 0
+      };
+    }
+  }
+
+  // Fetch content from storage (local or Walrus)
+  private async fetchContentFromStorage(blobId: string): Promise<string> {
+    try {
+      // Check if it's a local storage blob ID
+      if (blobId.startsWith('local_') || blobId.startsWith('demo_')) {
+        console.log(`Fetching content from local storage: ${blobId}`);
+
+        // Call backend to retrieve content from local storage
+        const response = await fetch(`/api/storage/retrieve/${blobId}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch from local storage: ${response.statusText}`);
+        }
+
+        const data = await response.text();
+        return data;
+      } else {
+        // It's a Walrus blob ID
+        console.log(`Fetching content from Walrus: ${blobId}`);
+
+        // Call backend to retrieve content from Walrus
+        const response = await fetch(`/api/storage/retrieve/${blobId}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch from Walrus: ${response.statusText}`);
+        }
+
+        const data = await response.text();
+        return data;
+      }
+    } catch (error) {
+      console.error(`Error fetching content for blob ${blobId}:`, error);
+      throw error;
+    }
+  }
+
+  // Get memory index for a user from the blockchain
+  async getUserMemoryIndex(userAddress: string): Promise<{
+    indexId: string;
+    version: number;
+    indexBlobId: string;
+    graphBlobId: string;
+  } | null> {
+    try {
+      console.log('Fetching memory index from blockchain for user:', userAddress);
+
+      // Query MemoryIndex objects owned by the user
+      const response = await this.client.getOwnedObjects({
+        owner: userAddress,
+        filter: {
+          StructType: `${PACKAGE_ID}::memory::MemoryIndex`
+        },
+        options: {
+          showContent: true,
+          showType: true
+        }
+      });
+
+      if (response.data.length === 0) {
+        console.log('No memory index found for user:', userAddress);
+        return null;
+      }
+
+      // Get the first (and should be only) memory index
+      const indexObject = response.data[0];
+      if (indexObject.data?.content && 'fields' in indexObject.data.content) {
+        const fields = indexObject.data.content.fields as any;
+
+        return {
+          indexId: indexObject.data.objectId,
+          version: parseInt(fields.version) || 1,
+          indexBlobId: fields.index_blob_id || '',
+          graphBlobId: fields.graph_blob_id || ''
+        };
+      }
+
+      return null;
+
+    } catch (error) {
+      console.error('Error fetching user memory index from blockchain:', error);
+      return null;
+    }
+  }
+
   // Create a memory record on the blockchain
   async createMemoryRecord(
-    category: string, 
-    vectorId: number, 
+    category: string,
+    vectorId: number,
     blobId: string
   ): Promise<string> {
     if (!this.wallet.connected || !this.wallet.account) {

@@ -2,6 +2,7 @@
 
 import { Transaction } from '@mysten/sui/transactions'
 import { httpApi } from '@/app/api/httpApi'
+import { SuiBlockchainService } from './suiBlockchainService'
 
 // Types for memory index management
 export interface MemoryIndexState {
@@ -422,20 +423,22 @@ class MemoryIndexService {
     wallet: any
   ): Promise<CreateMemoryResponse> {
     try {
-      // First attempt to create the memory
-      let response = await httpApi.post('/api/memories', {
+      console.log('Creating memory with blockchain integration...');
+
+      // Step 1: First process the memory content in the backend to get vectorId and blobId
+      let backendResponse = await httpApi.post('/api/memories', {
         content,
         category,
         userAddress
       }) as CreateMemoryResponse
 
       // Check if index creation is required
-      if (!response.success && response.requiresIndexCreation) {
+      if (!backendResponse.success && backendResponse.requiresIndexCreation) {
         console.log('Index creation required, creating index...')
-        
+
         // Ensure index exists
         const indexId = await this.ensureMemoryIndex(userAddress, wallet)
-        
+
         if (!indexId) {
           return {
             success: false,
@@ -445,14 +448,51 @@ class MemoryIndexService {
 
         // Retry memory creation
         console.log('Retrying memory creation after index creation...')
-        response = await httpApi.post('/api/memories', {
+        backendResponse = await httpApi.post('/api/memories', {
           content,
           category,
           userAddress
         }) as CreateMemoryResponse
       }
 
-      return response
+      if (!backendResponse.success) {
+        return backendResponse;
+      }
+
+      // Step 2: Create blockchain record with user signature
+      console.log('Creating blockchain memory record...');
+      const suiBlockchainService = new SuiBlockchainService(wallet);
+
+      try {
+        const suiObjectId = await suiBlockchainService.createMemoryRecord(
+          category,
+          backendResponse.vectorId || 1, // Use vectorId from backend response
+          backendResponse.blobId || 'temp_blob_id' // Use blobId from backend response
+        );
+
+        console.log('Blockchain record created:', suiObjectId);
+
+        // Step 3: Call backend to finalize the memory with the real Sui object ID
+        const finalResponse = await httpApi.post('/api/memories/save-approved', {
+          content,
+          category,
+          userAddress,
+          suiObjectId // Real Sui object ID, not backend temp ID
+        });
+
+        return {
+          success: true,
+          memoryId: suiObjectId, // Return the real Sui object ID
+          message: 'Memory saved successfully to blockchain and indexed'
+        };
+
+      } catch (blockchainError) {
+        console.error('Blockchain record creation failed:', blockchainError);
+        return {
+          success: false,
+          message: `Failed to create blockchain record: ${blockchainError instanceof Error ? blockchainError.message : 'Unknown error'}`
+        };
+      }
     } catch (error) {
       console.error('Error creating memory:', error)
       return {
