@@ -18,30 +18,24 @@ import {
   Alert,
   Loader,
   Center,
-  Progress,
-  Tooltip,
-  Box
+  Tooltip
 } from '@mantine/core'
 import {
   IconPlus,
   IconSearch,
   IconBrain,
   IconTrash,
-  IconEdit,
   IconCategory,
   IconClock,
-  IconLock,
-  IconLockOpen,
   IconCheck,
-  IconX,
-  IconBolt
+  IconX
 } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useDisclosure } from '@mantine/hooks'
+import { useWallet } from '@suiet/wallet-kit'
 import { memoryIntegrationService } from '@/app/services/memoryIntegration'
 import { MemoryGraph } from './memory-graph'
-import { MemoryDecryptionModal } from './memory-decryption-modal'
-import { memoryDecryptionCache } from '@/app/services/memoryDecryptionCache'
+// Removed MemoryDecryptionModal import - content loads automatically now
 
 interface Memory {
   id: string
@@ -71,24 +65,18 @@ const MEMORY_CATEGORIES = [
 ]
 
 export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: MemoryManagerProps) {
+  const wallet = useWallet()
   const [memories, setMemories] = useState<Memory[]>([])
   const [loading, setLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('browse')
-  
+
   // Add memory modal
   const [addModalOpened, { open: openAddModal, close: closeAddModal }] = useDisclosure(false)
-  const [decryptModalOpened, { open: openDecryptModal, close: closeDecryptModal }] = useDisclosure(false)
-  const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null)
   const [newMemoryContent, setNewMemoryContent] = useState('')
   const [newMemoryCategory, setNewMemoryCategory] = useState('general')
   const [addingMemory, setAddingMemory] = useState(false)
-  
-  // Batch decryption state
-  const [isDecryptingAll, setIsDecryptingAll] = useState(false)
-  const [decryptProgress, setDecryptProgress] = useState(0)
-  const [decryptedMemories, setDecryptedMemories] = useState<Set<string>>(new Set())
 
   // Search results
   const [searchResults, setSearchResults] = useState<Memory[]>([])
@@ -156,7 +144,8 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
       // Save directly to blockchain using memory integration service
       const result = await memoryIntegrationService.saveApprovedMemory(
         memoryExtraction,
-        userAddress
+        userAddress,
+        wallet
       );
       
       if (!result.success || !result.memoryId) {
@@ -258,12 +247,9 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
 
   const deleteMemory = async (memoryId: string) => {
     try {
-      // Import SUI service dynamically to avoid circular dependencies
-      const { getStaticSuiService } = await import('@/app/services/suiBlockchainService');
-      const service = getStaticSuiService();
-      
-      // Delete memory on blockchain
-      await service.deleteMemory(memoryId);
+      // Note: For demo purposes, we'll hide the memory locally rather than delete from blockchain
+      // In a production system, you might want to add a delete function to the smart contract
+      console.log(`Hiding memory ${memoryId} from local view`);
       
       // Clear the memory from local cache
       const key = `memories_${userAddress}`;
@@ -286,99 +272,23 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
       onMemoryDeleted?.(memoryId)
 
       notifications.show({
-        title: 'Deleted',
-        message: 'Memory removed from blockchain',
+        title: 'Memory Hidden',
+        message: 'Memory removed from view (still stored on blockchain)',
         color: 'blue',
         icon: <IconCheck size={16} />
       })
     } catch (error) {
-      console.error('Failed to delete memory:', error)
+      console.error('Failed to hide memory:', error)
       notifications.show({
         title: 'Error',
-        message: 'Failed to delete memory from blockchain',
+        message: 'Failed to remove memory from view',
         color: 'red',
         icon: <IconX size={16} />
       })
     }
   }
   
-  const decryptAllMemories = async () => {
-    if (isDecryptingAll || memories.length === 0) return;
-    
-    setIsDecryptingAll(true);
-    setDecryptProgress(0);
-    
-    try {
-      const encryptedMemories = memories.filter(m => 
-        m.isEncrypted && !decryptedMemories.has(m.id) && m.walrusHash
-      );
-      
-      if (encryptedMemories.length === 0) {
-        notifications.show({
-          title: 'No Encrypted Memories',
-          message: 'There are no encrypted memories to decrypt.',
-          color: 'blue'
-        });
-        setIsDecryptingAll(false);
-        return;
-      }
-      
-      // Process in small batches to avoid overwhelming the API
-      const batchSize = 3;
-      const totalMemories = encryptedMemories.length;
-      let processedCount = 0;
-      
-      // Update progress tracking
-      const updateProgress = () => {
-        processedCount++;
-        setDecryptProgress(Math.floor((processedCount / totalMemories) * 100));
-      };
-      
-      for (let i = 0; i < encryptedMemories.length; i += batchSize) {
-        const batch = encryptedMemories.slice(i, i + batchSize);
-        
-        await Promise.all(batch.map(async memory => {
-          try {
-            if (memory.walrusHash) {
-              // Use our caching service for decryption
-              const content = await memoryDecryptionCache.getDecryptedContent(memory.walrusHash);
-              if (content) {
-                // Add to our decrypted set
-                setDecryptedMemories(prev => {
-                  const newSet = new Set(prev);
-                  newSet.add(memory.id);
-                  return newSet;
-                });
-                // Also mark in the cache
-                memoryDecryptionCache.markMemoryDecrypted(memory.id);
-              }
-            }
-          } catch (err) {
-            console.error(`Failed to decrypt memory ${memory.id}:`, err);
-          } finally {
-            updateProgress();
-          }
-        }));
-      }
-      
-      notifications.show({
-        title: 'Decryption Complete',
-        message: `Successfully decrypted ${processedCount} memories.`,
-        color: 'green',
-        icon: <IconLockOpen size={16} />
-      });
-      
-    } catch (error) {
-      console.error('Failed to decrypt all memories:', error);
-      notifications.show({
-        title: 'Decryption Failed',
-        message: 'An error occurred while decrypting memories.',
-        color: 'red'
-      });
-    } finally {
-      setIsDecryptingAll(false);
-    }
-  }
+  // Removed decryptAllMemories function - content loads automatically now
 
   const getCategoryColor = (category: string) => {
     return MEMORY_CATEGORIES.find(c => c.value === category)?.color || 'gray'
@@ -408,22 +318,7 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
               >
                 {MEMORY_CATEGORIES.find(c => c.value === memory.category)?.label || memory.category}
               </Badge>
-              {memory.isEncrypted && (
-                <Badge 
-                  color={decryptedMemories.has(memory.id) ? "teal" : "blue"}
-                  variant={decryptedMemories.has(memory.id) ? "filled" : "outline"}
-                  size="xs"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => {
-                    setSelectedMemory(memory)
-                    openDecryptModal()
-                  }}
-                >
-                  {decryptedMemories.has(memory.id) ? 
-                    <><IconLockOpen size={10} /> Decrypted</> : 
-                    <><IconLock size={10} /> Encrypted</>}
-                </Badge>
-              )}
+              {/* Encryption badge removed - content loads automatically */}
               {showSimilarity && memory.similarity && (
                 <Badge color="green" variant="light" size="xs">
                   {(memory.similarity * 100).toFixed(1)}% match
@@ -446,14 +341,16 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
                   </svg>
                 </ActionIcon>
               )}
-              <ActionIcon
-                variant="subtle"
-                color="red"
-                size="sm"
-                onClick={() => deleteMemory(memory.id)}
-              >
-                <IconTrash size={14} />
-              </ActionIcon>
+              <Tooltip label="Hide from view (keeps on blockchain)">
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  size="sm"
+                  onClick={() => deleteMemory(memory.id)}
+                >
+                  <IconTrash size={14} />
+                </ActionIcon>
+              </Tooltip>
             </Group>
           </Group>
           
@@ -485,18 +382,6 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
           <Text size="lg" fw={600}>Memory Manager</Text>
           
           <Group gap="sm">
-            <Tooltip label="Decrypt all memories at once">
-              <Button
-                leftSection={isDecryptingAll ? <Loader size={14} /> : <IconBolt size={16} />}
-                variant="light"
-                color="teal"
-                onClick={decryptAllMemories}
-                disabled={isDecryptingAll || memories.length === 0}
-              >
-                Decrypt All
-              </Button>
-            </Tooltip>
-            
             <Button
               leftSection={<IconPlus size={16} />}
               onClick={openAddModal}
@@ -506,28 +391,7 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
           </Group>
         </Group>
         
-        {isDecryptingAll && (
-          <Box style={{ position: 'relative' }} mb="xs">
-            <Progress 
-              value={decryptProgress} 
-              size="sm" 
-              color="teal"
-              striped
-              animated
-            />
-            <Text
-              size="xs"
-              style={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)'
-              }}
-            >
-              {decryptProgress}% Complete
-            </Text>
-          </Box>
-        )}
+        {/* Progress bar removed - content loads automatically */}
 
         <Tabs value={activeTab} onChange={(value) => setActiveTab(value || 'browse')}>
           <Tabs.List>
@@ -679,15 +543,7 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
         </Stack>
       </Modal>
 
-      {/* Memory Decryption Modal */}
-      {selectedMemory && (
-        <MemoryDecryptionModal
-          opened={decryptModalOpened}
-          onClose={closeDecryptModal}
-          memory={selectedMemory}
-          userAddress={userAddress}
-        />
-      )}
+      {/* Decryption modal removed - content loads automatically */}
     </>
   )
 }

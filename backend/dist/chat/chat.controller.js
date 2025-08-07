@@ -47,6 +47,9 @@ let ChatController = class ChatController {
     async saveSummary(saveSummaryDto) {
         return this.chatService.saveSummary(saveSummaryDto);
     }
+    async renameSession(sessionId, title, userAddress) {
+        return this.chatService.updateSessionTitle(sessionId, userAddress, title);
+    }
     async streamChat(messageDto, response) {
         response.setHeader('Content-Type', 'text/event-stream');
         response.setHeader('Cache-Control', 'no-cache');
@@ -151,6 +154,17 @@ __decorate([
     __metadata("design:paramtypes", [save_summary_dto_1.SaveSummaryDto]),
     __metadata("design:returntype", Promise)
 ], ChatController.prototype, "saveSummary", null);
+__decorate([
+    (0, common_1.Post)('sessions/:sessionId/rename'),
+    (0, swagger_1.ApiOperation)({ summary: 'Rename a chat session' }),
+    (0, swagger_1.ApiResponse)({ status: 200, description: 'Session renamed successfully' }),
+    __param(0, (0, common_1.Param)('sessionId')),
+    __param(1, (0, common_1.Body)('title')),
+    __param(2, (0, common_1.Body)('userAddress')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", Promise)
+], ChatController.prototype, "renameSession", null);
 __decorate([
     (0, common_1.Post)('stream'),
     (0, swagger_1.ApiOperation)({ summary: 'Stream chat responses using Server-Sent Events' }),

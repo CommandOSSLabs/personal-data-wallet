@@ -22,9 +22,16 @@ export function ChatInput({ onSendMessage, onInputChange, isLoading, disabled }:
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (message.trim() && !isLoading) {
+    if (message.trim() && !isLoading && !disabled) {
+      console.log('Sending message:', message.trim())
       onSendMessage(message.trim())
       setMessage('')
+    } else {
+      console.log('Message not sent:', {
+        hasMessage: !!message.trim(),
+        isLoading,
+        disabled
+      })
     }
   }
 

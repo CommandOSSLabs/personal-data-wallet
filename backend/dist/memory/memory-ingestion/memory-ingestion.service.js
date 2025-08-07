@@ -138,18 +138,14 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
             else {
                 this.logger.log(`New user - graph will be created when first batch is processed`);
             }
-            let memoryId;
-            if (!this.isDemoMode()) {
-                memoryId = await this.suiService.createMemoryRecord(memoryDto.userAddress, memoryDto.category, vectorId, contentBlobId);
-            }
-            else {
-                memoryId = `demo_memory_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-                this.logger.log(`Demo mode: Generated memory ID ${memoryId} (no blockchain record)`);
-            }
+            const memoryId = `backend_temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+            this.logger.log(`Memory processed with temporary ID: ${memoryId} (blockchain record should be created by frontend)`);
             this.logger.log(`Memory created successfully with ID: ${memoryId}. Vector queued for batch processing.`);
             return {
                 success: true,
                 memoryId,
+                blobId: contentBlobId,
+                vectorId: vectorId,
                 message: 'Memory saved successfully. Search index will be updated shortly.'
             };
         }
@@ -288,6 +284,7 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
     async processApprovedMemory(saveMemoryDto) {
         try {
             const { content, category, userAddress, suiObjectId } = saveMemoryDto;
+            this.logger.log(`Processing approved memory for user ${userAddress} with blockchain ID: ${suiObjectId}`);
             if (suiObjectId) {
                 this.logger.log(`Using existing memory object ID: ${suiObjectId}`);
                 const processResult = await this.processMemory({

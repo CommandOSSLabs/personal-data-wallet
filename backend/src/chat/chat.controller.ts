@@ -91,6 +91,17 @@ export class ChatController {
     return this.chatService.saveSummary(saveSummaryDto);
   }
 
+  @Post('sessions/:sessionId/rename')
+  @ApiOperation({ summary: 'Rename a chat session' })
+  @ApiResponse({ status: 200, description: 'Session renamed successfully' })
+  async renameSession(
+    @Param('sessionId') sessionId: string,
+    @Body('title') title: string,
+    @Body('userAddress') userAddress: string
+  ) {
+    return this.chatService.updateSessionTitle(sessionId, userAddress, title);
+  }
+
   @Post('stream')
   @ApiOperation({ summary: 'Stream chat responses using Server-Sent Events' })
   @ApiResponse({ status: 200, description: 'Streaming chat response' })

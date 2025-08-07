@@ -882,6 +882,13 @@ export class ChatService {
         /i live/i,
         /i work/i,
         /i have/i,
+        /i love/i,
+        /i like/i,
+        /i enjoy/i,
+        /i prefer/i,
+        /i hate/i,
+        /i dislike/i,
+        /my favorite/i,
         /remember/i
       ];
       

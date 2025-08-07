@@ -13,6 +13,7 @@ const infrastructure_module_1 = require("./infrastructure/infrastructure.module"
 const memory_module_1 = require("./memory/memory.module");
 const chat_module_1 = require("./chat/chat.module");
 const database_module_1 = require("./database/database.module");
+const storage_module_1 = require("./storage/storage.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -25,7 +26,8 @@ exports.AppModule = AppModule = __decorate([
             database_module_1.DatabaseModule,
             infrastructure_module_1.InfrastructureModule,
             memory_module_1.MemoryModule,
-            chat_module_1.ChatModule
+            chat_module_1.ChatModule,
+            storage_module_1.StorageModule
         ]
     })
 ], AppModule);

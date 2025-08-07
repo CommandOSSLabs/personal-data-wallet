@@ -194,9 +194,12 @@ export function useChatSessions() {
     return sessions.find(session => session.id === currentSessionId) || null
   }, [currentSessionId, sessions, currentSessionData])
 
-  const createNewSession = useCallback(async (): Promise<string> => {
+  const createNewSession = useCallback(async (title?: string): Promise<string> => {
     return new Promise((resolve, reject) => {
-      createSessionMutation.mutate('New Chat', {
+      // Generate smart title based on time if no title provided
+      const defaultTitle = title || `Chat ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+
+      createSessionMutation.mutate(defaultTitle, {
         onSuccess: (data) => {
           const sessionId = data.session?.id || ''
           resolve(sessionId)

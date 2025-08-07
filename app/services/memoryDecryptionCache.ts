@@ -33,7 +33,7 @@ class MemoryDecryptionCacheService {
       console.log(`Cache miss for memory: ${walrusHash.substring(0, 8)}..., fetching`);
       
       // Fetch from API if not in cache
-      const response = await fetch(`/api/memory/content/${walrusHash}`);
+      const response = await fetch(`/api/storage/retrieve/${walrusHash}`);
       if (!response.ok) {
         throw new Error(`Failed to fetch memory content: ${response.status}`);
       }

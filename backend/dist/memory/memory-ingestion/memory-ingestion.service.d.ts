@@ -56,6 +56,8 @@ export declare class MemoryIngestionService {
     processNewMemory(memoryDto: CreateMemoryDto): Promise<{
         success: boolean;
         memoryId?: string;
+        blobId?: string;
+        vectorId?: number;
         message?: string;
         requiresIndexCreation?: boolean;
         indexBlobId?: string;
