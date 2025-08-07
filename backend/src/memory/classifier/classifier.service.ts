@@ -14,6 +14,7 @@ export class ClassifierService {
   
   // Regex patterns for detecting factual statements
   private readonly factPatterns = [
+    // Personal information
     /my name is ([a-zA-Z\s]+)/i,
     /my email is ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i,
     /i live in ([a-zA-Z\s,]+)/i,
@@ -23,9 +24,29 @@ export class ClassifierService {
     /my birthday is ([a-zA-Z0-9\s,]+)/i,
     /my phone (?:number|#) is ([0-9+\-\s()]+)/i,
     /my address is ([a-zA-Z0-9\s,]+)/i,
+
+    // Preferences and likes/dislikes
+    /i love ([^.!?]+)/i,
+    /i like ([^.!?]+)/i,
+    /i enjoy ([^.!?]+)/i,
+    /i prefer ([^.!?]+)/i,
+    /i hate ([^.!?]+)/i,
+    /i dislike ([^.!?]+)/i,
+    /i don't like ([^.!?]+)/i,
+    /my favorite ([^.!?]+) is ([^.!?]+)/i,
+    /my favourite ([^.!?]+) is ([^.!?]+)/i,
+
+    // Explicit memory requests
     /remember that ([^.!?]+)/i,
     /don't forget that ([^.!?]+)/i,
     /please remember ([^.!?]+)/i,
+
+    // Personal facts
+    /i am ([^.!?]+)/i,
+    /i have ([^.!?]+)/i,
+    /i own ([^.!?]+)/i,
+    /i studied ([^.!?]+)/i,
+    /i graduated from ([^.!?]+)/i,
   ];
   
   // Map of regex patterns to categories
