@@ -31,6 +31,7 @@ export declare class ChatService {
     private chatSessionRepository;
     private chatMessageRepository;
     private logger;
+    private activeRequests;
     constructor(geminiService: GeminiService, suiService: SuiService, memoryQueryService: MemoryQueryService, memoryIngestionService: MemoryIngestionService, summarizationService: SummarizationService, chatSessionRepository: Repository<ChatSession>, chatMessageRepository: Repository<ChatMessageEntity>);
     getSessions(userAddress: string): Promise<{
         success: boolean;
@@ -64,7 +65,7 @@ export declare class ChatService {
             messages: {
                 id: string;
                 content: string;
-                type: any;
+                type: string;
                 timestamp: string;
             }[];
             created_at: string;

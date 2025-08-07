@@ -389,6 +389,38 @@ let SuiService = SuiService_1 = class SuiService {
             return [];
         }
     }
+    async getUserMemoryIndexes(userAddress) {
+        try {
+            const response = await this.client.getOwnedObjects({
+                owner: userAddress,
+                filter: {
+                    StructType: `${this.packageId}::memory::MemoryIndex`
+                },
+                options: {
+                    showContent: true,
+                },
+            });
+            const indexes = [];
+            for (const item of response.data) {
+                if (!item.data?.content)
+                    continue;
+                const content = item.data.content;
+                indexes.push({
+                    id: item.data.objectId,
+                    owner: content.fields.owner,
+                    version: Number(content.fields.version),
+                    indexBlobId: content.fields.index_blob_id,
+                    graphBlobId: content.fields.graph_blob_id,
+                });
+            }
+            indexes.sort((a, b) => b.version - a.version);
+            return indexes;
+        }
+        catch (error) {
+            this.logger.error(`Error getting user memory indexes: ${error.message}`);
+            return [];
+        }
+    }
     async getMemory(memoryId) {
         try {
             const object = await this.client.getObject({

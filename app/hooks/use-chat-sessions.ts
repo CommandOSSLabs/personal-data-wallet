@@ -4,18 +4,16 @@ import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ChatSession, Message } from '@/app/types'
 import { useSuiAuth } from './use-sui-auth'
-import { useSuiBlockchain } from '../services/suiBlockchainService'
 import { chatApi } from '../api/chatApi'
 import { DEFAULT_MODEL_ID } from '@/app/config/models'
 
 export function useChatSessions() {
   const queryClient = useQueryClient()
-  const { service, wallet } = useSuiBlockchain()
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   
   const { userAddress } = useSuiAuth()
   
-  // Query to get all user sessions
+  // Query to get all user sessions (without messages for performance)
   const {
     data: sessionsData,
     isLoading: sessionsLoading,
@@ -33,21 +31,42 @@ export function useChatSessions() {
     refetchOnWindowFocus: false,
     refetchOnMount: true,
   })
+
+  // Query to get current session with messages
+  const {
+    data: currentSessionData,
+    isLoading: currentSessionLoading,
+    error: currentSessionError
+  } = useQuery({
+    queryKey: ['chat-session', currentSessionId, userAddress],
+    queryFn: async () => {
+      if (!currentSessionId || !userAddress) return null
+
+      const response = await chatApi.getSession(currentSessionId, userAddress)
+      return response.session || null
+    },
+    enabled: !!currentSessionId && !!userAddress,
+    staleTime: 10000, // Shorter stale time for active session
+    refetchOnWindowFocus: false,
+    refetchOnMount: true,
+  })
   
   // Convert backend session format to frontend format
+  // Note: getSessions() returns sessions without messages for performance
+  // Individual session messages are loaded separately via getSession()
   const sessions: ChatSession[] = (sessionsData?.sessions || []).map((session) => ({
-    id: session.id,
-    title: session.title,
-    messages: session.messages.map(msg => ({
-      id: msg.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-      content: msg.content,
-      type: msg.type || (msg.role === 'user' ? 'user' : 'assistant'),
-      timestamp: msg.timestamp || new Date().toISOString(),
-      memoryDetected: msg.memory_detected,
-      memoryId: msg.memory_id
+    id: session?.id || '',
+    title: session?.title || 'Untitled Chat',
+    messages: (session?.messages || []).map(msg => ({
+      id: msg?.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      content: msg?.content || '',
+      type: msg?.type || (msg?.role === 'user' ? 'user' : 'assistant'),
+      timestamp: msg?.timestamp || new Date().toISOString(),
+      memoryDetected: msg?.memory_detected || false,
+      memoryId: msg?.memory_id || null
     })),
-    createdAt: new Date(session.created_at),
-    updatedAt: new Date(session.updated_at)
+    createdAt: new Date(session?.created_at || Date.now()),
+    updatedAt: new Date(session?.updated_at || Date.now())
   }))
 
   // Create session mutation
@@ -58,21 +77,17 @@ export function useChatSessions() {
       }
 
       try {
-        // Create session directly on blockchain via wallet
-        const sessionId = await service.createChatSession(DEFAULT_MODEL_ID)
-        
-        // Notify backend about the new session for indexing
-        await chatApi.createSession({
+        // Create session directly in PostgreSQL via backend
+        const response = await chatApi.createSession({
           userAddress,
           title,
-          modelName: DEFAULT_MODEL_ID,
-          suiObjectId: sessionId
+          modelName: DEFAULT_MODEL_ID
         })
         
         return { 
           success: true, 
           session: { 
-            id: sessionId, 
+            id: response.session?.id || '', 
             title 
           } 
         }
@@ -99,27 +114,17 @@ export function useChatSessions() {
     mutationFn: async ({ 
       sessionId, 
       content, 
-      type,
-      executeBatch = false
+      type
     }: {
       sessionId: string
       content: string
       type: 'user' | 'assistant'
-      executeBatch?: boolean
     }) => {
       if (!userAddress) throw new Error('No user address')
 
       try {
-        // Add message to batch and optionally execute
-        await service.addMessageToSession(
-          sessionId,
-          type === 'user' ? 'user' : 'assistant',
-          content,
-          executeBatch
-        )
-        
-        // Notify backend about the new message for indexing
-        await chatApi.addMessage(sessionId, {
+        // Add message directly to PostgreSQL via backend
+        const response = await chatApi.addMessage(sessionId, {
           userAddress,
           content,
           type
@@ -127,7 +132,7 @@ export function useChatSessions() {
         
         return { success: true }
       } catch (error) {
-        console.error('Error adding message to blockchain:', error)
+        console.error('Error adding message:', error)
         throw error
       }
     },
@@ -143,10 +148,7 @@ export function useChatSessions() {
       if (!userAddress) throw new Error('No user address')
 
       try {
-        // Delete session on blockchain
-        await service.deleteSession(sessionId)
-        
-        // Update backend index
+        // Delete session in PostgreSQL via backend
         await chatApi.deleteSession(sessionId, userAddress)
         
         return { success: true }
@@ -169,8 +171,28 @@ export function useChatSessions() {
   // Helper functions
   const getCurrentSession = useCallback((): ChatSession | null => {
     if (!currentSessionId) return null
+
+    // If we have current session data with messages, use that
+    if (currentSessionData) {
+      return {
+        id: currentSessionData.id,
+        title: currentSessionData.title,
+        messages: (currentSessionData.messages || []).map(msg => ({
+          id: msg?.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+          content: msg?.content || '',
+          type: msg?.type || (msg?.role === 'user' ? 'user' : 'assistant'),
+          timestamp: msg?.timestamp || new Date().toISOString(),
+          memoryDetected: msg?.memory_detected || false,
+          memoryId: msg?.memory_id || null
+        })),
+        createdAt: new Date(currentSessionData.created_at || Date.now()),
+        updatedAt: new Date(currentSessionData.updated_at || Date.now())
+      }
+    }
+
+    // Fallback to session list (without messages)
     return sessions.find(session => session.id === currentSessionId) || null
-  }, [currentSessionId, sessions])
+  }, [currentSessionId, sessions, currentSessionData])
 
   const createNewSession = useCallback(async (): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -189,11 +211,10 @@ export function useChatSessions() {
   const addMessageToSession = useCallback(async (
     sessionId: string, 
     content: string, 
-    type: 'user' | 'assistant',
-    executeBatch = false
+    type: 'user' | 'assistant'
   ) => {
     return new Promise((resolve, reject) => {
-      addMessageMutation.mutate({ sessionId, content, type, executeBatch }, {
+      addMessageMutation.mutate({ sessionId, content, type }, {
         onSuccess: () => {
           resolve(true)
         },
@@ -212,14 +233,10 @@ export function useChatSessions() {
     setCurrentSessionId(sessionId)
   }, [])
   
+  // This function is no longer needed with PostgreSQL
   const executePendingTransactions = useCallback(async (): Promise<boolean> => {
-    try {
-      return await service.executePendingTransactions()
-    } catch (error) {
-      console.error('Error executing pending transactions:', error)
-      return false
-    }
-  }, [service])
+    return true
+  }, [])
 
   // Auto-select first session if none selected
   useEffect(() => {
@@ -250,6 +267,8 @@ export function useChatSessions() {
     currentSessionId,
     sessionsLoading,
     sessionsError,
+    currentSessionLoading,
+    currentSessionError,
     getCurrentSession,
     createNewSession,
     addMessageToSession,

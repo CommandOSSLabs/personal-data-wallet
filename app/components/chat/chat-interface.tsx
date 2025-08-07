@@ -15,7 +15,8 @@ import { Message } from '@/app/types'
 import { memoryIntegrationService } from '@/app/services/memoryIntegration'
 import { MemoryIndicator, useMemoryIndicator } from '@/app/components/memory/memory-indicator'
 import { MemoryPanel } from '@/app/components/memory/memory-panel'
-import { MemoryApprovalModal } from '@/app/components/memory/memory-approval-modal'
+import { MemorySelectionModal } from '@/app/components/memory/memory-selection-modal'
+import { MemoryBatchStatus } from '@/app/components/memory/memory-batch-status'
 import { MemoryExtraction } from '@/app/services/memoryIntegration'
 import {
   AppShell,
@@ -45,9 +46,9 @@ export function ChatInterface() {
   // Memory manager modal
   const [memoryModalOpened, { open: openMemoryModal, close: closeMemoryModal }] = useDisclosure(false)
   
-  // Memory approval modal
-  const [memoryApprovalModalOpened, setMemoryApprovalModalOpened] = useState(false)
-  const [currentMemoryExtraction, setCurrentMemoryExtraction] = useState<MemoryExtraction | null>(null)
+  // Memory selection modal
+  const [memorySelectionModalOpened, setMemorySelectionModalOpened] = useState(false)
+  const [currentMemoryExtractions, setCurrentMemoryExtractions] = useState<MemoryExtraction[]>([])
 
   const { logout, userAddress } = useSuiAuth()
 
@@ -55,6 +56,7 @@ export function ChatInterface() {
     sessions,
     currentSessionId,
     sessionsLoading,
+    currentSessionLoading,
     getCurrentSession,
     createNewSession,
     addMessageToSession,
@@ -130,15 +132,7 @@ export function ChatInterface() {
       } catch (error) {
         // Log error for monitoring but show a user-friendly message
         console.error('Failed to create session:', error instanceof Error ? error.message : 'Unknown error')
-        
-        // Check if it's a gas coin error
-        if (error instanceof Error && error.message.includes('No valid gas coins found')) {
-          alert('You need SUI tokens to pay for gas fees. Please get some SUI from the testnet faucet at https://suifaucet.com')
-        } else if (error instanceof Error && error.message.includes('Insufficient SUI balance')) {
-          alert('Insufficient SUI balance. Please get some SUI from the testnet faucet at https://suifaucet.com')
-        } else {
-          alert('Failed to create chat session. Please try again.')
-        }
+        alert('Failed to create chat session. Please try again.')
         return
       }
     }
@@ -223,29 +217,56 @@ export function ChatInterface() {
         async (fullResponse: string, intent?: string, entities?: any, memoryStored?: boolean, memoryId?: string, memoryExtraction?: any) => {
           // Handle memory extraction results from backend
           if (memoryExtraction && memoryExtraction.shouldSave) {
-            // Show memory indicator - detected but not yet stored
-            memoryIndicator.setDetected(1);
-            memoryIndicator.setStored(0);
-            
-            // Update temporary user message with memory detection data
-            if (tempUserMessage) {
-              const updatedTempMessage: Message = {
-                ...tempUserMessage,
-                memoryDetected: true,
-                memoryExtraction: memoryExtraction
-              };
-              setTempUserMessage(updatedTempMessage);
+            // Convert single extraction to array for consistency
+            const extractions = Array.isArray(memoryExtraction) ? memoryExtraction : [memoryExtraction];
+            const validExtractions = extractions.filter(ext => ext && ext.shouldSave);
+
+            if (validExtractions.length > 0) {
+              // Defer state updates to avoid setState during render
+              setTimeout(() => {
+                // Show memory indicator - detected but not yet stored
+                memoryIndicator.setDetected(validExtractions.length);
+                memoryIndicator.setStored(0);
+
+                // Update temporary user message with memory detection data
+                if (tempUserMessage) {
+                  const updatedTempMessage: Message = {
+                    ...tempUserMessage,
+                    memoryDetected: true,
+                    memoryExtraction: validExtractions[0] // Keep first for backward compatibility
+                  };
+                  setTempUserMessage(updatedTempMessage);
+                }
+
+                // Store memory extractions but delay showing modal
+                console.log('Memories detected:', validExtractions);
+                setCurrentMemoryExtractions(validExtractions);
+
+                // Delay showing the memory modal until after the chat flow completes
+                // This ensures the user sees their message and the AI response first
+                setTimeout(() => {
+                  // Only show modal if we're not in the middle of streaming/refreshing
+                  if (!isStreaming && !isRefreshingSession) {
+                    setMemorySelectionModalOpened(true);
+                  } else {
+                    // If still streaming, wait a bit more
+                    setTimeout(() => {
+                      setMemorySelectionModalOpened(true);
+                    }, 2000);
+                  }
+                }, 1500); // 1.5 second delay to let the AI response complete
+              }, 0);
+            } else {
+              setTimeout(() => {
+                memoryIndicator.setDetected(0);
+                memoryIndicator.setStored(0);
+              }, 0);
             }
-            
-            // Show memory approval modal to user
-            console.log('Memory detected:', memoryExtraction);
-            
-            // Set current memory extraction and show modal
-            setCurrentMemoryExtraction(memoryExtraction);
-            setMemoryApprovalModalOpened(true);
           } else {
-            memoryIndicator.setDetected(0);
-            memoryIndicator.setStored(0);
+            setTimeout(() => {
+              memoryIndicator.setDetected(0);
+              memoryIndicator.setStored(0);
+            }, 0);
           }
 
           // Update the streaming message with the final content
@@ -257,55 +278,62 @@ export function ChatInterface() {
             setStreamingMessage(finalMessage)
           }
 
-                      // Add both messages to blockchain transaction batch
-            try {
-              // Add user message to batch
-              await addMessageToSession(
-                sessionId,
-                messageText,
-                'user',
-                false // Don't execute yet
-              )
-              
-              // Add assistant response to batch
-              await addMessageToSession(
-                sessionId,
-                fullResponse,
-                'assistant',
-                true // Execute the batch with both messages
-              )
-              
-              console.log('Messages saved to blockchain successfully')
-            } catch (error) {
-              console.error('Error saving messages to blockchain:', error)
-              // Continue even if blockchain save fails
-            }
+            // Note: Messages are automatically saved by the backend streaming endpoint
+            // No need to manually save them here to avoid duplicates
+            console.log('Messages automatically saved by backend streaming endpoint')
 
-          // Refresh the session to get the latest messages
-          setIsRefreshingSession(true)
-          
-          try {
-            // Invalidate and refetch session data
-            await queryClient.invalidateQueries({ queryKey: ['chat-sessions', userAddress] })
-            await queryClient.refetchQueries({ queryKey: ['chat-sessions', userAddress] })
-            
-            // Wait a moment to ensure the UI has updated with fresh data
-            setTimeout(() => {
-              setStreamingMessageId(null)
-              setStreamingMessage(null)
-              setTempUserMessage(null)
+          // Defer the session refresh to avoid setState during render
+          setTimeout(async () => {
+            setIsRefreshingSession(true)
+
+            try {
+              // Invalidate and refetch both session list and current session data
+              await queryClient.invalidateQueries({ queryKey: ['chat-sessions', userAddress] })
+              await queryClient.invalidateQueries({ queryKey: ['chat-session', sessionId, userAddress] })
+              await queryClient.refetchQueries({ queryKey: ['chat-sessions', userAddress] })
+              await queryClient.refetchQueries({ queryKey: ['chat-session', sessionId, userAddress] })
+
+              // Wait longer to ensure the backend data has been loaded and UI updated
+              setTimeout(() => {
+                setIsRefreshingSession(false)
+
+                // Only clear temporary messages after confirming backend messages are loaded
+                // AND memory modal is not open (to keep messages visible during memory selection)
+                setTimeout(() => {
+                  // Check if we have messages from the backend before clearing temp messages
+                  const currentSession = getCurrentSession()
+                  const hasBackendMessages = currentSession && currentSession.messages.length > 0
+
+                  if ((hasBackendMessages || !currentSessionLoading) && !memorySelectionModalOpened) {
+                    console.log('Clearing temporary messages - backend messages loaded:', hasBackendMessages)
+                    setStreamingMessageId(null)
+                    setStreamingMessage(null)
+                    setTempUserMessage(null)
+                  } else {
+                    console.log('Keeping temporary messages - backend messages not yet loaded or memory modal open')
+                    // Retry clearing after another delay
+                    setTimeout(() => {
+                      // Only clear if memory modal is closed
+                      if (!memorySelectionModalOpened) {
+                        setStreamingMessageId(null)
+                        setStreamingMessage(null)
+                        setTempUserMessage(null)
+                      }
+                    }, 1000)
+                  }
+                }, 300) // Additional delay to ensure backend messages are displayed
+              }, 800) // Increased delay to ensure query refetch completes
+            } catch (error) {
               setIsRefreshingSession(false)
-            }, 100)
-          } catch (error) {
-            setIsRefreshingSession(false)
-            
-            // Keep temporary messages longer if refresh failed
-            setTimeout(() => {
-              setStreamingMessageId(null)
-              setStreamingMessage(null)
-              setTempUserMessage(null)
-            }, 1000)
-          }
+
+              // Keep temporary messages longer if refresh failed
+              setTimeout(() => {
+                setStreamingMessageId(null)
+                setStreamingMessage(null)
+                setTempUserMessage(null)
+              }, 2000) // Longer delay for error case
+            }
+          }, 0)
         },
         // On error
         async (error: string) => {
@@ -323,8 +351,11 @@ export function ChatInterface() {
           
           try {
             await addMessageToSession(sessionId, errorMessage.content, 'assistant')
-            // Refresh session after saving error message
-            await queryClient.invalidateQueries({ queryKey: ['chat-sessions', userAddress] })
+            // Refresh session after saving error message (deferred to avoid render issues)
+            setTimeout(() => {
+              queryClient.invalidateQueries({ queryKey: ['chat-sessions', userAddress] })
+              queryClient.invalidateQueries({ queryKey: ['chat-session', sessionId, userAddress] })
+            }, 0)
           } catch (saveError) {
             // Silent error handling for production
           }
@@ -353,7 +384,11 @@ export function ChatInterface() {
 
       try {
         await addMessageToSession(sessionId, errorMessage.content, 'assistant')
-        await queryClient.invalidateQueries({ queryKey: ['sui-chat-sessions', userAddress] })
+        // Defer query invalidation to avoid render issues
+        setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: ['chat-sessions', userAddress] })
+          queryClient.invalidateQueries({ queryKey: ['chat-session', sessionId, userAddress] })
+        }, 0)
       } catch (saveError) {
         // Silent error handling for production
       }
@@ -503,40 +538,93 @@ export function ChatInterface() {
         <ChatWindow
           messages={(() => {
             const sessionMessages = currentSession?.messages || []
-            const allMessages = [...sessionMessages]
-            
-            // During session refresh, keep showing temporary messages to prevent flicker
-            if (isRefreshingSession || tempUserMessage) {
-              const isDuplicate = sessionMessages.some(msg => 
-                msg.type === 'user' && 
+            let allMessages = [...sessionMessages]
+
+            // Debug logging
+            if (process.env.NODE_ENV === 'development') {
+              console.log('Message display state:', {
+                sessionMessagesCount: sessionMessages.length,
+                tempUserMessage: !!tempUserMessage,
+                streamingMessage: !!streamingMessage,
+                isStreaming,
+                isRefreshingSession,
+                currentSessionLoading
+              })
+            }
+
+            // Add temporary messages during active states OR when memory modal is open
+            // This ensures user messages remain visible during memory selection
+            if ((isRefreshingSession || isStreaming || currentSessionLoading || memorySelectionModalOpened) && tempUserMessage) {
+              const isDuplicate = sessionMessages.some(msg =>
+                msg.type === 'user' &&
                 msg.content === tempUserMessage?.content &&
-                Math.abs(new Date(msg.timestamp).getTime() - new Date(tempUserMessage?.timestamp || '').getTime()) < 15000 // Within 15 seconds
+                Math.abs(new Date(msg.timestamp).getTime() - new Date(tempUserMessage?.timestamp || '').getTime()) < 15000
               )
-              if (!isDuplicate && tempUserMessage) {
+
+              if (!isDuplicate) {
                 allMessages.push(tempUserMessage)
-              } else if (isDuplicate && tempUserMessage) {
-                // If there's a duplicate from the backend, update the tempUserMessage with backend memory data
-                const backendMessage = sessionMessages.find(msg => 
-                  msg.type === 'user' && 
-                  msg.content === tempUserMessage?.content &&
-                  Math.abs(new Date(msg.timestamp).getTime() - new Date(tempUserMessage?.timestamp || '').getTime()) < 15000
-                )
-                // Use backend message data if available
               }
             }
-            
-            // Always show streaming message if active
+
+            // Add streaming message if active
             if (streamingMessage && (isStreaming || isRefreshingSession)) {
-              allMessages.push(streamingMessage)
+              // Check if streaming message is already in session messages
+              const streamingDuplicate = sessionMessages.some(msg =>
+                msg.id === streamingMessage.id ||
+                (msg.type === 'assistant' &&
+                 msg.content === streamingMessage.content &&
+                 Math.abs(new Date(msg.timestamp).getTime() - new Date(streamingMessage.timestamp).getTime()) < 15000)
+              )
+
+              if (!streamingDuplicate) {
+                allMessages.push(streamingMessage)
+              }
             }
-            
-            return allMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+
+            // Remove duplicates by ID and content with more robust logic
+            const uniqueMessages = allMessages.filter((message, index, array) => {
+              // First occurrence wins
+              const firstIndex = array.findIndex(m => {
+                // Exact ID match
+                if (m.id === message.id && message.id) return true
+
+                // Content and type match (for messages without IDs or with generated IDs)
+                if (m.content === message.content &&
+                    m.type === message.type &&
+                    message.content.trim() !== '') {
+                  // Additional check: timestamps should be close (within 30 seconds)
+                  const timeDiff = Math.abs(
+                    new Date(m.timestamp).getTime() - new Date(message.timestamp).getTime()
+                  )
+                  return timeDiff < 30000 // 30 seconds
+                }
+
+                return false
+              })
+
+              return firstIndex === index
+            })
+
+            return uniqueMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
           })()}
           isLoading={isStreaming}
           streamingMessageId={streamingMessageId}
           streamingContent={currentResponse}
           userAddress={userAddress || ''}
         />
+
+        {/* Memory Batch Status */}
+        {userAddress && (
+          <div style={{ padding: '0 16px' }}>
+            <MemoryBatchStatus
+              userAddress={userAddress}
+              onForceFlush={() => {
+                // Refresh memory indicator after force flush
+                memoryIndicator.setStored(memoryIndicator.stored);
+              }}
+            />
+          </div>
+        )}
 
         <ChatInput
           onSendMessage={handleSendMessage}
@@ -573,38 +661,48 @@ export function ChatInterface() {
         />
       </Modal>
 
-      {/* Memory Approval Modal */}
-      {currentMemoryExtraction && (
-        <MemoryApprovalModal
-          opened={memoryApprovalModalOpened}
-          onClose={() => {
-            setMemoryApprovalModalOpened(false);
-            setCurrentMemoryExtraction(null);
-            memoryIndicator.setDetected(0);
-          }}
-          memoryExtraction={currentMemoryExtraction}
-          userAddress={userAddress || ''}
-          onApproved={(memoryId) => {
-            console.log('Memory saved with ID:', memoryId);
-            memoryIndicator.setStored(1);
-            
-            // Refresh memories list after save
-            if (userAddress) {
-              memoryIntegrationService.fetchUserMemories(userAddress)
-                .then(response => {
-                  setMemories(response.memories || []);
-                })
-                .catch(error => {
-                  console.error('Error refreshing memories:', error);
-                });
-            }
-          }}
-          onRejected={() => {
-            console.log('Memory save rejected by user');
-            memoryIndicator.setDetected(0);
-          }}
-        />
-      )}
+      {/* Memory Selection Modal */}
+      <MemorySelectionModal
+        opened={memorySelectionModalOpened}
+        onClose={() => {
+          setMemorySelectionModalOpened(false);
+          setCurrentMemoryExtractions([]);
+          memoryIndicator.setDetected(0);
+
+          // Clear temporary messages now that modal is closed
+          // This ensures a clean chat interface after memory selection
+          setTimeout(() => {
+            setStreamingMessageId(null);
+            setStreamingMessage(null);
+            setTempUserMessage(null);
+          }, 100);
+        }}
+        extractedMemories={currentMemoryExtractions}
+        userAddress={userAddress || ''}
+        onMemoriesSaved={(memoryIds) => {
+          console.log('Memories saved with IDs:', memoryIds);
+          memoryIndicator.setStored(memoryIds.length);
+
+          // Refresh memories list after save
+          if (userAddress) {
+            memoryIntegrationService.fetchUserMemories(userAddress)
+              .then(response => {
+                setMemories(response.memories || []);
+              })
+              .catch(error => {
+                console.error('Error refreshing memories:', error);
+              });
+          }
+
+          // Close modal after successful save
+          setMemorySelectionModalOpened(false);
+          setCurrentMemoryExtractions([]);
+        }}
+        onError={(error) => {
+          console.error('Memory save error:', error);
+          // Keep modal open so user can retry
+        }}
+      />
     </AppShell>
   )
 }

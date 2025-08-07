@@ -41,7 +41,7 @@ export declare class ChatController {
             messages: {
                 id: string;
                 content: string;
-                type: any;
+                type: string;
                 timestamp: string;
             }[];
             created_at: string;

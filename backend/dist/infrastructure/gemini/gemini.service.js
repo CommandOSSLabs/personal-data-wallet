@@ -98,13 +98,14 @@ let GeminiService = GeminiService_1 = class GeminiService {
         })();
         return subject.asObservable();
     }
-    async embedText(text, modelName = 'embedding-001') {
+    async embedText(text, modelName = 'embedding-001', outputDimensionality = 768) {
         try {
             const embeddingModel = this.generativeAI.getGenerativeModel({
                 model: modelName,
             });
             const result = await embeddingModel.embedContent(text);
             const embedding = result.embedding.values;
+            this.logger.debug(`Generated embedding with ${embedding.length} dimensions using model ${modelName}`);
             return { vector: embedding };
         }
         catch (error) {

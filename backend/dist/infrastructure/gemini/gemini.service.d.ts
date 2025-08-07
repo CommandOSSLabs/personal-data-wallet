@@ -13,7 +13,7 @@ export declare class GeminiService {
         role: string;
         content: string;
     }[], systemPrompt?: string): Observable<string>;
-    embedText(text: string, modelName?: string): Promise<{
+    embedText(text: string, modelName?: string, outputDimensionality?: number): Promise<{
         vector: number[];
     }>;
     private getModel;

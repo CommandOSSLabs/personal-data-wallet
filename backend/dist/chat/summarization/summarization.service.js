@@ -30,7 +30,7 @@ let SummarizationService = SummarizationService_1 = class SummarizationService {
             if (!shouldSummarize) {
                 return;
             }
-            const summary = await this.generateSummary(session.messages);
+            const summary = await this.generateSummary(session.messages.map(msg => ({ role: msg.type, content: msg.content })));
             await this.suiService.saveSessionSummary(sessionId, userAddress, summary);
             this.logger.log(`Summarized session ${sessionId}`);
         }

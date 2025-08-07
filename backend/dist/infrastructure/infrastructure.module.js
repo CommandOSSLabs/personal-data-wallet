@@ -11,8 +11,12 @@ const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const sui_service_1 = require("./sui/sui.service");
 const walrus_service_1 = require("./walrus/walrus.service");
+const cached_walrus_service_1 = require("./walrus/cached-walrus.service");
 const seal_service_1 = require("./seal/seal.service");
 const gemini_service_1 = require("./gemini/gemini.service");
+const local_storage_service_1 = require("./local-storage/local-storage.service");
+const storage_service_1 = require("./storage/storage.service");
+const demo_storage_service_1 = require("./demo-storage/demo-storage.service");
 let InfrastructureModule = class InfrastructureModule {
 };
 exports.InfrastructureModule = InfrastructureModule;
@@ -27,14 +31,22 @@ exports.InfrastructureModule = InfrastructureModule = __decorate([
         providers: [
             sui_service_1.SuiService,
             walrus_service_1.WalrusService,
+            cached_walrus_service_1.CachedWalrusService,
             seal_service_1.SealService,
             gemini_service_1.GeminiService,
+            local_storage_service_1.LocalStorageService,
+            storage_service_1.StorageService,
+            demo_storage_service_1.DemoStorageService,
         ],
         exports: [
             sui_service_1.SuiService,
             walrus_service_1.WalrusService,
+            cached_walrus_service_1.CachedWalrusService,
             seal_service_1.SealService,
             gemini_service_1.GeminiService,
+            local_storage_service_1.LocalStorageService,
+            storage_service_1.StorageService,
+            demo_storage_service_1.DemoStorageService,
         ]
     })
 ], InfrastructureModule);

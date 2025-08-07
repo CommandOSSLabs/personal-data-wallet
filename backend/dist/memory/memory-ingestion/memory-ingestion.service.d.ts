@@ -5,8 +5,9 @@ import { HnswIndexService } from '../hnsw-index/hnsw-index.service';
 import { MemoryIndexService } from '../memory-index/memory-index.service';
 import { SealService } from '../../infrastructure/seal/seal.service';
 import { SuiService } from '../../infrastructure/sui/sui.service';
-import { WalrusService } from '../../infrastructure/walrus/walrus.service';
+import { StorageService } from '../../infrastructure/storage/storage.service';
 import { GeminiService } from '../../infrastructure/gemini/gemini.service';
+import { ConfigService } from '@nestjs/config';
 export interface CreateMemoryDto {
     content: string;
     category: string;
@@ -38,12 +39,14 @@ export declare class MemoryIngestionService {
     private memoryIndexService;
     private sealService;
     private suiService;
-    private walrusService;
+    private storageService;
     private geminiService;
+    private configService;
     private readonly logger;
     private entityToVectorMap;
     private nextVectorId;
-    constructor(classifierService: ClassifierService, embeddingService: EmbeddingService, graphService: GraphService, hnswIndexService: HnswIndexService, memoryIndexService: MemoryIndexService, sealService: SealService, suiService: SuiService, walrusService: WalrusService, geminiService: GeminiService);
+    constructor(classifierService: ClassifierService, embeddingService: EmbeddingService, graphService: GraphService, hnswIndexService: HnswIndexService, memoryIndexService: MemoryIndexService, sealService: SealService, suiService: SuiService, storageService: StorageService, geminiService: GeminiService, configService: ConfigService);
+    private isDemoMode;
     getNextVectorId(userAddress: string): number;
     getEntityToVectorMap(userAddress: string): Record<string, number>;
     processConversation(userMessage: string, assistantResponse: string, userAddress: string): Promise<{
@@ -82,5 +85,22 @@ export declare class MemoryIngestionService {
         blobId?: string;
         vectorId?: number;
         message?: string;
+    }>;
+    private ensureIndexInCache;
+    getBatchStats(): {
+        totalUsers: number;
+        totalPendingVectors: number;
+        activeBatchJobs: number;
+        cacheEntries: Array<{
+            userAddress: string;
+            pendingVectors: number;
+            lastModified: Date;
+            isDirty: boolean;
+            indexDimensions: number | string;
+        }>;
+    };
+    forceFlushUser(userAddress: string): Promise<{
+        success: boolean;
+        message: string;
     }>;
 }

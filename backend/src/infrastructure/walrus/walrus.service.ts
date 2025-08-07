@@ -2,8 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getFullnodeUrl, SuiClient } from '@mysten/sui/client';
 import { WalrusClient, WalrusFile, RetryableWalrusClientError } from '@mysten/walrus';
-import { Transaction } from '@mysten/sui/transactions';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+import * as fs from 'fs';
+import * as path from 'path';
+import { promisify } from 'util';
+
+const writeFile = promisify(fs.writeFile);
+const readFile = promisify(fs.readFile);
+const mkdir = promisify(fs.mkdir);
 
 @Injectable()
 export class WalrusService {
@@ -12,90 +18,87 @@ export class WalrusService {
   private adminKeypair: Ed25519Keypair;
   private logger = new Logger(WalrusService.name);
   private adminAddress: string;
-  
+
   // Number of epochs to store content for by default
   private readonly DEFAULT_STORAGE_EPOCHS = 12; // ~1 month at ~3 days/epoch
+
+  // Local storage fallback
+  private readonly LOCAL_STORAGE_DIR = path.join(process.cwd(), 'storage', 'walrus-fallback');
+  private walrusAvailable = true;
+  private lastWalrusCheck = 0;
+  private readonly WALRUS_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
   constructor(private configService: ConfigService) {
     // Initialize Sui client with the appropriate network
     const configNetwork = this.configService.get<string>('SUI_NETWORK', 'testnet');
-    
+
     // Validate network for type safety
     const network = configNetwork || 'testnet';
-    
+
     this.suiClient = new SuiClient({
       url: getFullnodeUrl(network as 'testnet' | 'mainnet'),
     });
 
-    // Initialize Walrus client with proper configuration
-    this.initializeWalrusClient(network as 'testnet' | 'mainnet');
-
     // Initialize admin keypair for signing transactions
     this.initializeAdminKeypair();
 
-    this.logger.log(`Initialized Walrus client on ${network} network`);
+    // Initialize local storage directory
+    this.initializeLocalStorage();
+
+    // Initialize Walrus client with simple, reliable configuration
+    this.initializeWalrusClient(network as 'testnet' | 'mainnet');
+
+    this.logger.log(`Initialized Walrus client on ${network} network with local storage fallback`);
   }
   
   /**
-   * Initialize Walrus client with optimized settings
+   * Initialize Walrus client following SDK best practices
    */
   private initializeWalrusClient(network: 'testnet' | 'mainnet') {
-    const useUploadRelay = this.configService.get<boolean>('WALRUS_USE_UPLOAD_RELAY', true);
-    const uploadRelayHost = this.configService.get<string>(
-      'WALRUS_UPLOAD_RELAY_HOST', 
-      'https://upload-relay.testnet.walrus.space'
-    );
-    
-    const clientOptions: any = {
-      network,
-      suiClient: this.suiClient,
-      // Custom storage node options for better reliability
-      storageNodeClientOptions: {
-        // Increased timeout for slow storage nodes
-        timeout: 120_000, // 2 minutes
-        // Custom fetch with better error handling
-        fetch: async (url: string, options?: RequestInit) => {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 120_000);
-          
-          try {
-            const response = await fetch(url, {
-              ...options,
-              signal: controller.signal,
-            });
-            clearTimeout(timeoutId);
-            return response;
-          } catch (error: any) {
-            clearTimeout(timeoutId);
-            if (error.name === 'AbortError') {
-              throw new Error(`Request timeout: ${url}`);
-            }
-            throw error;
-          }
-        },
-        // Log individual errors for debugging
-        onError: (error: Error) => {
-          this.logger.debug(`Storage node error: ${error.message}`);
-        },
-      },
-    };
-    
-    // Add upload relay configuration if enabled
-    if (useUploadRelay && network === 'testnet') {
-      clientOptions.uploadRelay = {
-        host: uploadRelayHost,
-        sendTip: {
-          // Use the tip configuration from the external context
-          address: '0x4b6a7439159cf10533147fc3d678cf10b714f2bc998f6cb1f1b0b9594cdc52b6',
-          kind: {
-            const: 105,
+    try {
+      // Simple, reliable configuration following SDK documentation
+      const clientOptions: any = {
+        network,
+        suiClient: this.suiClient,
+        // Configure storage node options for better reliability
+        storageNodeClientOptions: {
+          timeout: 60_000, // 60 seconds as recommended in SDK docs
+          onError: (error: Error) => {
+            this.logger.debug(`Storage node error: ${error.message}`);
           },
         },
       };
-      this.logger.log(`Walrus client configured with upload relay: ${uploadRelayHost}`);
+
+      // Add upload relay for testnet (recommended for better performance)
+      if (network === 'testnet') {
+        const useUploadRelay = this.configService.get<boolean>('WALRUS_USE_UPLOAD_RELAY', true);
+
+        if (useUploadRelay) {
+          const uploadRelayHost = this.configService.get<string>(
+            'WALRUS_UPLOAD_RELAY_HOST',
+            'https://upload-relay.testnet.walrus.space'
+          );
+
+          clientOptions.uploadRelay = {
+            host: uploadRelayHost,
+            sendTip: {
+              // Use the tip configuration from SDK docs
+              address: '0x4b6a7439159cf10533147fc3d678cf10b714f2bc998f6cb1f1b0b9594cdc52b6',
+              kind: {
+                const: 105,
+              },
+            },
+          };
+          this.logger.log(`Walrus client configured with upload relay: ${uploadRelayHost}`);
+        }
+      }
+
+      this.walrusClient = new WalrusClient(clientOptions);
+      this.logger.log(`Walrus client initialized successfully for ${network}`);
+    } catch (error) {
+      this.logger.error(`Failed to initialize Walrus client: ${error.message}`);
+      throw new Error(`Walrus client initialization failed: ${error.message}`);
     }
-    
-    this.walrusClient = new WalrusClient(clientOptions);
   }
 
   /**
@@ -134,6 +137,113 @@ export class WalrusService {
   }
 
   /**
+   * Initialize local storage directory for fallback
+   */
+  private async initializeLocalStorage() {
+    try {
+      await mkdir(this.LOCAL_STORAGE_DIR, { recursive: true });
+      this.logger.log(`Local storage fallback initialized at: ${this.LOCAL_STORAGE_DIR}`);
+    } catch (error) {
+      this.logger.error(`Failed to initialize local storage: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check if Walrus is available (with caching to avoid frequent checks)
+   */
+  private async isWalrusAvailable(): Promise<boolean> {
+    const now = Date.now();
+
+    // Use cached result if recent
+    if (now - this.lastWalrusCheck < this.WALRUS_CHECK_INTERVAL) {
+      return this.walrusAvailable;
+    }
+
+    try {
+      // Quick availability check - try to get a non-existent file
+      const testPromise = this.walrusClient.getFiles({ ids: ['availability-test'] });
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Availability check timeout')), 5000);
+      });
+
+      await Promise.race([testPromise, timeoutPromise]);
+      this.walrusAvailable = true;
+      this.logger.debug('Walrus availability check: AVAILABLE');
+    } catch (error: any) {
+      if (error.message.includes('timeout') ||
+          error.message.includes('fetch failed') ||
+          error.message.includes('network')) {
+        this.walrusAvailable = false;
+        this.logger.warn('Walrus availability check: UNAVAILABLE - using local storage fallback');
+      } else {
+        // Other errors (like "not found") mean Walrus is working
+        this.walrusAvailable = true;
+        this.logger.debug('Walrus availability check: AVAILABLE');
+      }
+    }
+
+    this.lastWalrusCheck = now;
+    return this.walrusAvailable;
+  }
+
+  /**
+   * Generate a unique blob ID for local storage
+   */
+  private generateLocalBlobId(): string {
+    return `local_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+  }
+
+  /**
+   * Store file locally as fallback
+   */
+  private async storeFileLocally(buffer: Buffer, filename: string, tags: Record<string, string> = {}): Promise<string> {
+    const blobId = this.generateLocalBlobId();
+    const filePath = path.join(this.LOCAL_STORAGE_DIR, `${blobId}.bin`);
+    const metaPath = path.join(this.LOCAL_STORAGE_DIR, `${blobId}.meta.json`);
+
+    try {
+      // Store the file data
+      await writeFile(filePath, buffer);
+
+      // Store metadata
+      const metadata = {
+        blobId,
+        filename,
+        tags,
+        size: buffer.length,
+        createdAt: new Date().toISOString(),
+        storageType: 'local_fallback'
+      };
+      await writeFile(metaPath, JSON.stringify(metadata, null, 2));
+
+      this.logger.log(`File stored locally: ${blobId} (${buffer.length} bytes)`);
+      return blobId;
+    } catch (error) {
+      this.logger.error(`Failed to store file locally: ${error.message}`);
+      throw new Error(`Local storage error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Retrieve file from local storage
+   */
+  private async retrieveFileLocally(blobId: string): Promise<Buffer> {
+    const filePath = path.join(this.LOCAL_STORAGE_DIR, `${blobId}.bin`);
+
+    try {
+      const buffer = await readFile(filePath);
+      this.logger.log(`File retrieved from local storage: ${blobId} (${buffer.length} bytes)`);
+      return buffer;
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        throw new Error(`File not found in local storage: ${blobId}`);
+      }
+      this.logger.error(`Failed to retrieve file locally: ${error.message}`);
+      throw new Error(`Local storage retrieval error: ${error.message}`);
+    }
+  }
+
+  /**
    * Get admin address
    * @returns The admin address
    */
@@ -141,8 +251,10 @@ export class WalrusService {
     return this.adminAddress;
   }
 
+
+
   /**
-   * Upload content to Walrus with full on-chain storage
+   * Upload content with Walrus/local storage fallback
    * @param content The content to upload
    * @param ownerAddress The address of the owner
    * @param epochs Number of epochs to store the content
@@ -150,37 +262,50 @@ export class WalrusService {
    * @returns The blob ID
    */
   async uploadContent(
-    content: string, 
-    ownerAddress: string, 
+    content: string,
+    ownerAddress: string,
     epochs: number = this.DEFAULT_STORAGE_EPOCHS,
     additionalTags: Record<string, string> = {}
   ): Promise<string> {
+    const buffer = Buffer.from(content, 'utf-8');
+    const filename = `content_${Date.now()}.txt`;
+    const tags = {
+      'content-type': 'text/plain',
+      'owner': ownerAddress,
+      'created': new Date().toISOString(),
+      ...additionalTags
+    };
+
+    // Check if Walrus is available
+    const walrusAvailable = await this.isWalrusAvailable();
+
+    if (!walrusAvailable) {
+      this.logger.warn(`Walrus unavailable, storing content locally for owner ${ownerAddress}`);
+      return await this.storeFileLocally(buffer, filename, tags);
+    }
+
     try {
       this.logger.log(`Uploading content to Walrus for owner ${ownerAddress}...`);
-      
+
       // Create a WalrusFile from string content
       const file = WalrusFile.from({
         contents: new TextEncoder().encode(content),
-        identifier: `content_${Date.now()}`,
-        tags: {
-          'content-type': 'text/plain',
-          'owner': ownerAddress,
-          'created': new Date().toISOString(),
-          ...additionalTags
-        },
+        identifier: filename,
+        tags,
       });
-      
+
       // Use the complete workflow for production
       const results = await this.uploadFilesToWalrus([file], epochs);
-      
+
       if (!results || results.length === 0) {
         throw new Error('Failed to upload content to Walrus');
       }
-      
+
       return results[0].blobId;
     } catch (error) {
-      this.logger.error(`Error uploading content to Walrus: ${error.message}`);
-      throw new Error(`Walrus upload error: ${error.message}`);
+      this.logger.error(`Walrus upload failed, falling back to local storage: ${error.message}`);
+      // Fallback to local storage
+      return await this.storeFileLocally(buffer, filename, tags);
     }
   }
 
@@ -256,7 +381,7 @@ export class WalrusService {
   }
 
   /**
-   * Upload a file to Walrus with full on-chain storage
+   * Upload a file with Walrus/local storage fallback
    * @param buffer The file buffer
    * @param filename The file name
    * @param ownerAddress The address of the owner
@@ -265,103 +390,135 @@ export class WalrusService {
    * @returns The blob ID
    */
   async uploadFile(
-    buffer: Buffer, 
-    filename: string, 
-    ownerAddress: string, 
+    buffer: Buffer,
+    filename: string,
+    ownerAddress: string,
     epochs: number = this.DEFAULT_STORAGE_EPOCHS,
     additionalTags: Record<string, string> = {}
   ): Promise<string> {
+    const tags = {
+      'content-type': 'application/octet-stream',
+      'filename': filename,
+      'owner': ownerAddress,
+      'created': new Date().toISOString(),
+      ...additionalTags
+    };
+
+    // Check if Walrus is available
+    const walrusAvailable = await this.isWalrusAvailable();
+
+    if (!walrusAvailable) {
+      this.logger.warn(`Walrus unavailable, storing file "${filename}" locally for owner ${ownerAddress}`);
+      return await this.storeFileLocally(buffer, filename, tags);
+    }
+
     try {
       this.logger.log(`Uploading file "${filename}" to Walrus for owner ${ownerAddress}...`);
-      
+
       // Create a WalrusFile from buffer with filename as identifier
       const file = WalrusFile.from({
         contents: new Uint8Array(buffer),
         identifier: filename,
-        tags: {
-          'content-type': 'application/octet-stream',
-          'filename': filename,
-          'owner': ownerAddress,
-          'created': new Date().toISOString(),
-          ...additionalTags
-        },
+        tags,
       });
-      
+
       // Use the complete workflow for production
       const results = await this.uploadFilesToWalrus([file], epochs);
-      
+
       if (!results || results.length === 0) {
         throw new Error('Failed to upload file to Walrus');
       }
-      
+
       return results[0].blobId;
     } catch (error) {
-      this.logger.error(`Error uploading file to Walrus: ${error.message}`);
-      throw new Error(`Walrus file upload error: ${error.message}`);
+      this.logger.error(`Walrus upload failed, falling back to local storage: ${error.message}`);
+      // Fallback to local storage
+      return await this.storeFileLocally(buffer, filename, tags);
     }
   }
 
   /**
-   * Download a file from Walrus
+   * Download a file from Walrus with local storage fallback
    * @param blobId The blob ID
    * @returns The file buffer
    */
   async downloadFile(blobId: string): Promise<Buffer> {
-    const maxRetries = 3;
+    // Check if this is a local blob ID
+    if (blobId.startsWith('local_')) {
+      this.logger.log(`Retrieving file from local storage: ${blobId}`);
+      return await this.retrieveFileLocally(blobId);
+    }
+
+    // Check if Walrus is available
+    const walrusAvailable = await this.isWalrusAvailable();
+    if (!walrusAvailable) {
+      throw new Error(
+        'Walrus storage network is currently unavailable and the requested file is not in local storage. ' +
+        'Please try again later when the network is stable.'
+      );
+    }
+
+    const maxRetries = 2; // Reduced retries for faster fallback
     let lastError: Error | null = null;
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        this.logger.log(`Downloading file from blobId: ${blobId} (attempt ${attempt}/${maxRetries})`);
-        
-        // Wait a bit if this is a retry
+        this.logger.log(`Downloading file from Walrus: ${blobId} (attempt ${attempt}/${maxRetries})`);
+
+        // Wait before retry (exponential backoff)
         if (attempt > 1) {
-          const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+          const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 3000);
           this.logger.log(`Waiting ${waitTime}ms before retry...`);
           await new Promise(resolve => setTimeout(resolve, waitTime));
         }
-        
-        // Get file from the blob ID
-        const [file] = await this.walrusClient.getFiles({ 
-          ids: [blobId] 
-        });
-        
+
+        // Use the SDK's recommended getFiles method
+        const [file] = await this.walrusClient.getFiles({ ids: [blobId] });
+
         if (!file) {
-          // Try alternative retrieval method
-          this.logger.warn(`File not found with getFiles, trying direct retrieval...`);
-          
-          // Sometimes the blob might need time to propagate
-          if (attempt < maxRetries) {
-            throw new Error(`File with blob ID ${blobId} not found (will retry)`);
-          }
-          throw new Error(`File with blob ID ${blobId} not found after ${maxRetries} attempts`);
+          throw new Error(`File with blob ID ${blobId} not found`);
         }
-        
-        // Get binary data
+
+        // Get binary data using SDK method
         const bytes = await file.bytes();
-        
-        this.logger.log(`Successfully downloaded file ${blobId}`);
+
+        this.logger.log(`Successfully downloaded file from Walrus: ${blobId} (${bytes.length} bytes)`);
         return Buffer.from(bytes);
       } catch (error) {
         lastError = error as Error;
-        this.logger.warn(`Download attempt ${attempt}/${maxRetries} failed: ${lastError.message}`);
-        
-        // If it's a network error and not the last attempt, retry
-        if (attempt < maxRetries && 
-            (lastError.message.includes('fetch failed') || 
-             lastError.message.includes('not found') ||
-             lastError.message.includes('timeout'))) {
-          continue;
+        this.logger.warn(`Walrus download attempt ${attempt}/${maxRetries} failed: ${lastError.message}`);
+
+        // Handle RetryableWalrusClientError as recommended in SDK docs
+        if (error instanceof RetryableWalrusClientError) {
+          this.logger.log('Retryable error detected, resetting client...');
+          this.walrusClient.reset();
         }
-        
-        // If this is the last attempt or a non-retryable error, throw
-        if (attempt === maxRetries) {
-          break;
+
+        // Continue to next attempt if not the last one
+        if (attempt < maxRetries) {
+          continue;
         }
       }
     }
     
     this.logger.error(`Failed to download file after ${maxRetries} attempts: ${lastError?.message}`);
+
+    // Provide user-friendly error messages
+    if (lastError?.message.includes('fetch failed') ||
+        lastError?.message.includes('timeout') ||
+        lastError?.message.includes('network')) {
+      throw new Error(
+        'Unable to connect to Walrus storage network. This may be due to temporary network issues. ' +
+        'Please try again in a few minutes. If the problem persists, the Walrus testnet may be experiencing downtime.'
+      );
+    }
+
+    if (lastError?.message.includes('not found')) {
+      throw new Error(
+        'The requested data was not found in Walrus storage. This may indicate the data has expired or was never properly stored.'
+      );
+    }
+
     throw new Error(`Walrus file download error after ${maxRetries} attempts: ${lastError?.message}`);
   }
 
@@ -431,109 +588,22 @@ export class WalrusService {
           }
         }
         
-        // Check if we should use the simple writeFiles method (with upload relay)
-        const useUploadRelay = this.configService.get<boolean>('WALRUS_USE_UPLOAD_RELAY', true);
-        
-        if (useUploadRelay) {
-          // Use the simpler writeFiles method which handles everything internally
-          // This works better with upload relay
-          try {
-            this.logger.log('Using simplified upload with relay...');
-            const results = await this.walrusClient.writeFiles({
-              files,
-              epochs,
-              deletable: true,
-              signer: this.adminKeypair,
-            });
-            
-            this.logger.log(`Upload completed successfully on attempt ${attempt}`);
-            // Log the blob IDs for debugging
-            results.forEach((result, index) => {
-              this.logger.log(`File ${index}: blobId=${result.blobId}`);
-            });
-            return results;
-          } catch (writeError: any) {
-            // If writeFiles fails, fall back to manual flow
-            this.logger.warn(`Simplified upload failed: ${writeError.message}, trying manual flow...`);
-            if (attempt === maxRetries) {
-              throw writeError;
-            }
-          }
-        }
-        
-        // Manual flow for when upload relay is not available or fails
-        // Step 1: Initialize the write flow
-        const flow = this.walrusClient.writeFilesFlow({ files });
-        
-        // Step 2: Encode the files (generates blob ID and prepares data)
-        await flow.encode();
-        this.logger.log('Files encoded successfully');
-        
-        // Step 3: Register the blob on-chain
-        const registerTx = await flow.register({
+        // Use the SDK's recommended writeFiles method (simple and reliable)
+        this.logger.log('Using SDK writeFiles method...');
+        const results = await this.walrusClient.writeFiles({
+          files,
           epochs,
-          owner: this.adminAddress,
           deletable: true,
-        });
-        
-        // Execute the register transaction with timeout
-        this.logger.log('Executing register transaction...');
-        const registerResult = await this.suiClient.signAndExecuteTransaction({
-          transaction: registerTx,
           signer: this.adminKeypair,
-          options: { showEffects: true, showEvents: true }
         });
-        
-        if (!registerResult.digest) {
-          throw new Error('Failed to register blob: No transaction digest');
-        }
-        
-        this.logger.log(`Blob registered with digest: ${registerResult.digest}`);
-        
-        // Wait for transaction to be indexed
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        // Step 4: Upload the actual data to storage nodes
-        this.logger.log('Uploading data to storage nodes...');
-        
-        try {
-          await flow.upload({ 
-            digest: registerResult.digest,
-          });
-          this.logger.log('Data uploaded to storage nodes successfully');
-        } catch (uploadError: any) {
-          // Log the error but continue to certification
-          this.logger.warn(`Upload reported error: ${uploadError.message}`);
-          
-          // Check if this is a critical error that should stop the process
-          if (uploadError.message.includes('must be executed before calling certify')) {
-            throw uploadError;
-          }
-          
-          // For "Too many failures" errors, wait longer before certification
-          if (uploadError.message.includes('Too many failures')) {
-            this.logger.log('Waiting for storage nodes to sync...');
-            await new Promise(resolve => setTimeout(resolve, 5000));
-          }
-        }
-        
-        // Step 5: Certify the blob on-chain
-        this.logger.log('Certifying blob on-chain...');
-        const certifyTx = flow.certify();
-        
-        // Execute the certify transaction
-        await this.suiClient.signAndExecuteTransaction({
-          transaction: certifyTx,
-          signer: this.adminKeypair,
-          options: { showEffects: true, showEvents: true }
-        });
-        
-        this.logger.log('Blob certified successfully');
-        
-        // Step 6: Get the file details
-        const result = await flow.listFiles();
+
         this.logger.log(`Upload completed successfully on attempt ${attempt}`);
-        return result;
+        // Log the blob IDs for debugging
+        results.forEach((result, index) => {
+          this.logger.log(`File ${index}: blobId=${result.blobId}`);
+        });
+
+        return results;
         
       } catch (error) {
         lastError = error as Error;

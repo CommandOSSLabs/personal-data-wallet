@@ -38,6 +38,13 @@ export declare class SuiService {
         category: string;
         blobId: string;
     }[]>;
+    getUserMemoryIndexes(userAddress: string): Promise<{
+        id: string;
+        owner: string;
+        version: number;
+        indexBlobId: string;
+        graphBlobId: string;
+    }[]>;
     getMemory(memoryId: string): Promise<{
         id: string;
         owner: string;

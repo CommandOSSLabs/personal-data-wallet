@@ -114,8 +114,18 @@ export class MemoryController {
   @Post('register-index')
   async registerIndex(@Body() registerIndexDto: RegisterIndexDto) {
     return this.memoryIndexService.registerMemoryIndex(
-      registerIndexDto.userAddress, 
+      registerIndexDto.userAddress,
       registerIndexDto.indexId
     );
+  }
+
+  @Get('batch-stats')
+  async getBatchStats() {
+    return this.memoryIngestionService.getBatchStats();
+  }
+
+  @Post('force-flush/:userAddress')
+  async forceFlush(@Param('userAddress') userAddress: string) {
+    return this.memoryIngestionService.forceFlushUser(userAddress);
   }
 }

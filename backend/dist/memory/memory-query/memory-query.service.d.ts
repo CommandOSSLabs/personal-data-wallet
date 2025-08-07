@@ -4,6 +4,7 @@ import { HnswIndexService } from '../hnsw-index/hnsw-index.service';
 import { SealService } from '../../infrastructure/seal/seal.service';
 import { SuiService } from '../../infrastructure/sui/sui.service';
 import { WalrusService } from '../../infrastructure/walrus/walrus.service';
+import { CachedWalrusService } from '../../infrastructure/walrus/cached-walrus.service';
 import { MemoryIngestionService } from '../memory-ingestion/memory-ingestion.service';
 import { GeminiService } from '../../infrastructure/gemini/gemini.service';
 import { Memory } from '../../types/memory.types';
@@ -14,10 +15,11 @@ export declare class MemoryQueryService {
     private sealService;
     private suiService;
     private walrusService;
+    private cachedWalrusService;
     private memoryIngestionService;
     private geminiService;
     private readonly logger;
-    constructor(embeddingService: EmbeddingService, graphService: GraphService, hnswIndexService: HnswIndexService, sealService: SealService, suiService: SuiService, walrusService: WalrusService, memoryIngestionService: MemoryIngestionService, geminiService: GeminiService);
+    constructor(embeddingService: EmbeddingService, graphService: GraphService, hnswIndexService: HnswIndexService, sealService: SealService, suiService: SuiService, walrusService: WalrusService, cachedWalrusService: CachedWalrusService, memoryIngestionService: MemoryIngestionService, geminiService: GeminiService);
     getUserMemories(userAddress: string): Promise<{
         memories: Memory[];
         success: boolean;

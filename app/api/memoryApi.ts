@@ -87,5 +87,42 @@ export const memoryApi = {
       console.error('Error deleting memory:', error);
       return { success: false };
     }
+  },
+  
+  /**
+   * Get memory context for a chat message
+   */
+  async getMemoryContext(
+    query: string, 
+    userAddress: string, 
+    userSignature: string
+  ): Promise<{ 
+    context: string, 
+    relevant_memories: any[],
+    query_metadata: {
+      query_time_ms: number,
+      memories_found: number,
+      context_length: number
+    }
+  }> {
+    try {
+      const response = await httpApi.post('/api/memories/context', {
+        query,
+        userAddress,
+        userSignature
+      });
+      return response;
+    } catch (error) {
+      console.error('Error getting memory context:', error);
+      return { 
+        context: '',
+        relevant_memories: [],
+        query_metadata: {
+          query_time_ms: 0,
+          memories_found: 0,
+          context_length: 0
+        }
+      };
+    }
   }
 };

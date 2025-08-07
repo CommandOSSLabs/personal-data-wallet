@@ -5,6 +5,7 @@ import { HnswIndexService } from '../hnsw-index/hnsw-index.service';
 import { SealService } from '../../infrastructure/seal/seal.service';
 import { SuiService } from '../../infrastructure/sui/sui.service';
 import { WalrusService } from '../../infrastructure/walrus/walrus.service';
+import { CachedWalrusService } from '../../infrastructure/walrus/cached-walrus.service';
 import { MemoryIngestionService } from '../memory-ingestion/memory-ingestion.service';
 import { GeminiService } from '../../infrastructure/gemini/gemini.service';
 import { Memory } from '../../types/memory.types';
@@ -20,6 +21,7 @@ export class MemoryQueryService {
     private sealService: SealService,
     private suiService: SuiService,
     private walrusService: WalrusService,
+    private cachedWalrusService: CachedWalrusService,
     private memoryIngestionService: MemoryIngestionService,
     private geminiService: GeminiService
   ) {}
@@ -36,8 +38,8 @@ export class MemoryQueryService {
       // Populate memories with data
       for (const record of memoryRecords) {
         try {
-          // Get content from Walrus (unencrypted for now)
-          const content = await this.walrusService.retrieveContent(record.blobId);
+          // Get content from Walrus with caching
+          const content = await this.cachedWalrusService.retrieveContent(record.blobId);
           
           memories.push({
             id: record.id,
@@ -123,8 +125,8 @@ export class MemoryQueryService {
             if (seenBlobIds.has(memory.blobId)) continue;
             seenBlobIds.add(memory.blobId);
             
-            // Get content from Walrus (unencrypted)
-            const content = await this.walrusService.retrieveContent(memory.blobId);
+            // Get content from Walrus with caching
+            const content = await this.cachedWalrusService.retrieveContent(memory.blobId);
             
             memories.push(content);
             
@@ -182,8 +184,8 @@ export class MemoryQueryService {
             // Skip if category filter is applied and doesn't match
             if (category && memoryObj.category !== category) continue;
             
-            // Get content from Walrus (unencrypted)
-            const content = await this.walrusService.retrieveContent(memoryObj.blobId);
+            // Get content from Walrus with caching
+            const content = await this.cachedWalrusService.retrieveContent(memoryObj.blobId);
             
             // Add to results
             results.push({
@@ -336,8 +338,8 @@ export class MemoryQueryService {
    */
   async getMemoryContentByHash(hash: string): Promise<{ content: string, success: boolean }> {
     try {
-      // Retrieve content from Walrus (unencrypted)
-      const content = await this.walrusService.retrieveContent(hash);
+      // Retrieve content from Walrus with caching
+      const content = await this.cachedWalrusService.retrieveContent(hash);
       
       // Return the content
       return {

@@ -74,6 +74,12 @@ let MemoryController = class MemoryController {
     async registerIndex(registerIndexDto) {
         return this.memoryIndexService.registerMemoryIndex(registerIndexDto.userAddress, registerIndexDto.indexId);
     }
+    async getBatchStats() {
+        return this.memoryIngestionService.getBatchStats();
+    }
+    async forceFlush(userAddress) {
+        return this.memoryIngestionService.forceFlushUser(userAddress);
+    }
 };
 exports.MemoryController = MemoryController;
 __decorate([
@@ -169,6 +175,19 @@ __decorate([
     __metadata("design:paramtypes", [register_index_dto_1.RegisterIndexDto]),
     __metadata("design:returntype", Promise)
 ], MemoryController.prototype, "registerIndex", null);
+__decorate([
+    (0, common_1.Get)('batch-stats'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], MemoryController.prototype, "getBatchStats", null);
+__decorate([
+    (0, common_1.Post)('force-flush/:userAddress'),
+    __param(0, (0, common_1.Param)('userAddress')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], MemoryController.prototype, "forceFlush", null);
 exports.MemoryController = MemoryController = __decorate([
     (0, common_1.Controller)('memories'),
     __metadata("design:paramtypes", [memory_ingestion_service_1.MemoryIngestionService,

@@ -85,4 +85,20 @@ export declare class MemoryController {
         success: boolean;
         message?: string;
     }>;
+    getBatchStats(): Promise<{
+        totalUsers: number;
+        totalPendingVectors: number;
+        activeBatchJobs: number;
+        cacheEntries: Array<{
+            userAddress: string;
+            pendingVectors: number;
+            lastModified: Date;
+            isDirty: boolean;
+            indexDimensions: number | string;
+        }>;
+    }>;
+    forceFlush(userAddress: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
 }

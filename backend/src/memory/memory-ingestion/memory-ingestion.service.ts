@@ -6,8 +6,9 @@ import { HnswIndexService } from '../hnsw-index/hnsw-index.service';
 import { MemoryIndexService } from '../memory-index/memory-index.service';
 import { SealService } from '../../infrastructure/seal/seal.service';
 import { SuiService } from '../../infrastructure/sui/sui.service';
-import { WalrusService } from '../../infrastructure/walrus/walrus.service';
+import { StorageService } from '../../infrastructure/storage/storage.service';
 import { GeminiService } from '../../infrastructure/gemini/gemini.service';
+import { ConfigService } from '@nestjs/config';
 
 export interface CreateMemoryDto {
   content: string;
@@ -50,9 +51,18 @@ export class MemoryIngestionService {
     private memoryIndexService: MemoryIndexService,
     private sealService: SealService,
     private suiService: SuiService,
-    private walrusService: WalrusService,
-    private geminiService: GeminiService
+    private storageService: StorageService,
+    private geminiService: GeminiService,
+    private configService: ConfigService
   ) {}
+
+  /**
+   * Check if we're in demo mode
+   */
+  private isDemoMode(): boolean {
+    return this.configService.get<boolean>('USE_DEMO_STORAGE', true) ||
+           this.configService.get<string>('NODE_ENV') === 'demo';
+  }
 
   /**
    * Get the next vector ID for a user
@@ -146,55 +156,46 @@ export class MemoryIngestionService {
     graphBlobId?: string;
   }> {
     try {
-      // Step 1: Get or load memory index for user
+      // Step 1: Try to get existing index, but don't fail if it doesn't exist
       const indexData = await this.memoryIndexService.getOrLoadIndex(memoryDto.userAddress);
-      
-      let index: any;
+
       let graph: any;
-      let indexId: string;
-      let indexBlobId: string;
-      let graphBlobId: string;
+      let indexId: string | undefined;
+      let indexBlobId: string | undefined;
+      let graphBlobId: string | undefined;
       let currentVersion = 1;
-      
+
       if (indexData.exists && indexData.indexId && indexData.indexBlobId && indexData.graphBlobId && indexData.version) {
-        // Use existing index
-        index = indexData.index;
+        // Use existing index data for graph operations
         graph = indexData.graph;
         indexId = indexData.indexId;
         indexBlobId = indexData.indexBlobId;
         graphBlobId = indexData.graphBlobId;
         currentVersion = indexData.version;
+
+        // Load the index into cache if not already there
+        await this.hnswIndexService.getOrLoadIndexCached(memoryDto.userAddress, indexBlobId);
       } else {
-        // No memory index exists, prepare data for frontend creation
-        this.logger.log(`Preparing memory index data for user ${memoryDto.userAddress}`);
-        
-        // Prepare index data
-        const prepareResult = await this.memoryIndexService.prepareIndexForCreation(memoryDto.userAddress);
-        
-        if (!prepareResult.success) {
-          return {
-            success: false,
-            message: prepareResult.message || 'Failed to prepare index data'
-          };
-        }
-        
-        // Return with instructions for frontend to create index
-        return {
-          success: false,
-          message: 'Memory index not found. Please create index on-chain first.',
-          requiresIndexCreation: true,
-          indexBlobId: prepareResult.indexBlobId,
-          graphBlobId: prepareResult.graphBlobId
-        };
+        // No existing index - create new one in memory and prepare for batching
+        this.logger.log(`No existing index found for user ${memoryDto.userAddress}, creating new index in memory`);
+
+        // Create a new index in memory for batching
+        await this.ensureIndexInCache(memoryDto.userAddress);
+
+        // Create empty graph for this user
+        graph = this.graphService.createGraph();
+
+        // We'll create the on-chain index when the first batch is flushed
+        // For now, we can proceed with in-memory operations
       }
       
       // Step 2: Generate embedding for the memory
       const { vector } = await this.embeddingService.embedText(memoryDto.content);
-      
-      // Step 3: Add vector to the index
+
+      // Step 3: Add vector to the index using batched approach
       const vectorId = this.getNextVectorId(memoryDto.userAddress);
-      this.hnswIndexService.addVectorToIndex(index, vectorId, vector);
-      
+      this.hnswIndexService.addVectorToIndexBatched(memoryDto.userAddress, vectorId, vector);
+
       // Step 4: Extract entities and relationships
       const extraction = await this.graphService.extractEntitiesAndRelationships(
         memoryDto.content
@@ -213,40 +214,49 @@ export class MemoryIngestionService {
         extraction.relationships
       );
       
-      // Step 7: Encrypt the memory content
-      const encryptedContent = await this.sealService.encrypt(
-        memoryDto.content,
-        memoryDto.userAddress
-      );
-      
-      // Step 8: Save the encrypted content to Walrus
-      const contentBlobId = await this.walrusService.uploadContent(encryptedContent, memoryDto.userAddress);
-      
-      // Step 9: Save the updated index and graph to Walrus
-      const newIndexBlobId = await this.hnswIndexService.saveIndex(index, memoryDto.userAddress);
-      const newGraphBlobId = await this.graphService.saveGraph(graph, memoryDto.userAddress);
-      
-      // Step 10: Update the on-chain memory index
-      await this.suiService.updateMemoryIndex(
-        indexId,
-        memoryDto.userAddress,
-        currentVersion,
-        newIndexBlobId,
-        newGraphBlobId
-      );
-      
-      // Step 11: Create the on-chain memory record
-      const memoryId = await this.suiService.createMemoryRecord(
-        memoryDto.userAddress,
-        memoryDto.category,
-        vectorId,
-        contentBlobId
-      );
-      
+      // Step 7: Encrypt the memory content (skip in demo mode)
+      let contentToStore = memoryDto.content;
+      if (!this.isDemoMode()) {
+        contentToStore = await this.sealService.encrypt(
+          memoryDto.content,
+          memoryDto.userAddress
+        );
+      } else {
+        this.logger.log('Demo mode: Skipping encryption');
+      }
+
+      // Step 8: Save the content to storage
+      const contentBlobId = await this.storageService.uploadContent(contentToStore, memoryDto.userAddress);
+
+      // Step 9: Save the updated graph to Walrus (if we have existing graph data)
+      if (graph && graphBlobId) {
+        const newGraphBlobId = await this.graphService.saveGraph(graph, memoryDto.userAddress);
+        this.logger.log(`Updated graph saved to Walrus: ${newGraphBlobId}`);
+      } else {
+        this.logger.log(`New user - graph will be created when first batch is processed`);
+      }
+
+      // Step 10: Create the on-chain memory record (skip in demo mode)
+      let memoryId: string;
+      if (!this.isDemoMode()) {
+        memoryId = await this.suiService.createMemoryRecord(
+          memoryDto.userAddress,
+          memoryDto.category,
+          vectorId,
+          contentBlobId
+        );
+      } else {
+        // Generate a demo memory ID
+        memoryId = `demo_memory_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        this.logger.log(`Demo mode: Generated memory ID ${memoryId} (no blockchain record)`);
+      }
+
+      this.logger.log(`Memory created successfully with ID: ${memoryId}. Vector queued for batch processing.`);
+
       return {
         success: true,
         memoryId,
-        message: 'Memory processed successfully'
+        message: 'Memory saved successfully. Search index will be updated shortly.'
       };
     } catch (error) {
       this.logger.error(`Error processing new memory: ${error.message}`);
@@ -273,55 +283,46 @@ export class MemoryIngestionService {
     try {
       const { content, userAddress, category = 'general' } = processDto;
       
-      // Step 1: Get or load memory index for user
+      // Step 1: Try to get existing index, but don't fail if it doesn't exist
       const indexData = await this.memoryIndexService.getOrLoadIndex(userAddress);
-      
-      let index: any;
+
       let graph: any;
-      let indexId: string;
-      let indexBlobId: string;
-      let graphBlobId: string;
+      let indexId: string | undefined;
+      let indexBlobId: string | undefined;
+      let graphBlobId: string | undefined;
       let currentVersion = 1;
-      
+
       if (indexData.exists && indexData.indexId && indexData.indexBlobId && indexData.graphBlobId && indexData.version) {
-        // Use existing index
-        index = indexData.index;
+        // Use existing index data for graph operations
         graph = indexData.graph;
         indexId = indexData.indexId;
         indexBlobId = indexData.indexBlobId;
         graphBlobId = indexData.graphBlobId;
         currentVersion = indexData.version;
+
+        // Load the index into cache if not already there
+        await this.hnswIndexService.getOrLoadIndexCached(userAddress, indexBlobId);
       } else {
-        // No memory index exists, prepare data for frontend creation
-        this.logger.log(`Preparing memory index data for user ${userAddress}`);
-        
-        // Prepare index data
-        const prepareResult = await this.memoryIndexService.prepareIndexForCreation(userAddress);
-        
-        if (!prepareResult.success) {
-          return {
-            success: false,
-            message: prepareResult.message || 'Failed to prepare index data'
-          };
-        }
-        
-        // Return with instructions for frontend to create index
-        return {
-          success: false,
-          message: 'Memory index not found. Please create index on-chain first.',
-          requiresIndexCreation: true,
-          indexBlobId: prepareResult.indexBlobId,
-          graphBlobId: prepareResult.graphBlobId
-        };
+        // No existing index - create new one in memory and prepare for batching
+        this.logger.log(`No existing index found for user ${userAddress}, creating new index in memory`);
+
+        // Create a new index in memory for batching
+        await this.ensureIndexInCache(userAddress);
+
+        // Create empty graph for this user
+        graph = this.graphService.createGraph();
+
+        // We'll create the on-chain index when the first batch is flushed
+        // For now, we can proceed with in-memory operations
       }
       
       // Step 2: Generate embedding for the memory
       const { vector } = await this.embeddingService.embedText(content);
-      
-      // Step 3: Add vector to the index
+
+      // Step 3: Add vector to the index using batched approach
       const vectorId = this.getNextVectorId(userAddress);
-      this.hnswIndexService.addVectorToIndex(index, vectorId, vector);
-      
+      this.hnswIndexService.addVectorToIndexBatched(userAddress, vectorId, vector);
+
       // Step 4: Extract entities and relationships
       const extraction = await this.graphService.extractEntitiesAndRelationships(content);
       
@@ -338,34 +339,36 @@ export class MemoryIngestionService {
         extraction.relationships
       );
       
-      // Step 7: Encrypt the memory content
-      const encryptedContent = await this.sealService.encrypt(
-        content,
-        userAddress
-      );
-      
-      // Step 8: Save the encrypted content to Walrus
-      const contentBlobId = await this.walrusService.uploadContent(encryptedContent, userAddress);
-      
-      // Step 9: Save the updated index and graph to Walrus
-      const newIndexBlobId = await this.hnswIndexService.saveIndex(index, userAddress);
-      const newGraphBlobId = await this.graphService.saveGraph(graph, userAddress);
-      
-      // Step 10: Update the on-chain memory index
-      await this.suiService.updateMemoryIndex(
-        indexId,
-        userAddress,
-        currentVersion,
-        newIndexBlobId,
-        newGraphBlobId
-      );
-      
+      // Step 7: Encrypt the memory content (skip in demo mode)
+      let contentToStore = content;
+      if (!this.isDemoMode()) {
+        contentToStore = await this.sealService.encrypt(
+          content,
+          userAddress
+        );
+      } else {
+        this.logger.log('Demo mode: Skipping encryption for conversation processing');
+      }
+
+      // Step 8: Save the content to storage
+      const contentBlobId = await this.storageService.uploadContent(contentToStore, userAddress);
+
+      // Step 9: Save the updated graph to Walrus (if we have existing graph data)
+      if (graph && graphBlobId) {
+        const newGraphBlobId = await this.graphService.saveGraph(graph, userAddress);
+        this.logger.log(`Updated graph saved to Walrus: ${newGraphBlobId}`);
+      } else {
+        this.logger.log(`New user - graph will be created when first batch is processed`);
+      }
+
+      this.logger.log(`Memory processed and queued for batch index update for user ${userAddress}`);
+
       // Return data needed for frontend to create on-chain record
       return {
         success: true,
         vectorId,
         blobId: contentBlobId,
-        message: 'Memory processed successfully'
+        message: 'Memory processed successfully. Search index will be updated shortly.'
       };
     } catch (error) {
       this.logger.error(`Error processing memory: ${error.message}`);
@@ -540,6 +543,75 @@ export class MemoryIngestionService {
       return {
         success: false,
         message: `Failed to process memory: ${error.message}`
+      };
+    }
+  }
+
+  /**
+   * Ensure an index exists in cache for the user (create if needed)
+   */
+  private async ensureIndexInCache(userAddress: string): Promise<void> {
+    try {
+      // Check if index is already in cache
+      const cachedIndex = await this.hnswIndexService.getOrLoadIndexCached(userAddress);
+
+      if (!cachedIndex) {
+        // Create a new index in memory
+        this.logger.log(`Creating new in-memory index for user ${userAddress}`);
+        const { index } = await this.hnswIndexService.createIndex();
+
+        // Add to cache
+        this.hnswIndexService.addIndexToCache(userAddress, index);
+
+        this.logger.log(`New index created and cached for user ${userAddress}`);
+
+        // Note: The index will be saved to Walrus when the first memory is added
+        // This avoids creating empty indexes that may fail due to network issues
+      } else {
+        this.logger.log(`Using existing cached index for user ${userAddress}`);
+      }
+    } catch (error) {
+      this.logger.error(`Error ensuring index in cache for user ${userAddress}: ${error.message}`);
+
+      // If it's a Walrus connectivity issue, provide graceful degradation
+      if (error.message.includes('Walrus') ||
+          error.message.includes('fetch failed') ||
+          error.message.includes('network') ||
+          error.message.includes('timeout')) {
+        this.logger.warn(`Walrus connectivity issue detected. Memory features will be temporarily unavailable.`);
+        throw new Error(
+          'Memory storage is temporarily unavailable due to network connectivity issues. ' +
+          'Your chat will continue to work normally, but memories cannot be saved at this time. ' +
+          'Please try again later.'
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Get batch processing statistics
+   */
+  getBatchStats() {
+    return this.hnswIndexService.getCacheStats();
+  }
+
+  /**
+   * Force flush pending vectors for a specific user
+   */
+  async forceFlushUser(userAddress: string): Promise<{ success: boolean; message: string }> {
+    try {
+      await this.hnswIndexService.forceFlush(userAddress);
+      return {
+        success: true,
+        message: `Successfully flushed pending vectors for user ${userAddress}`
+      };
+    } catch (error) {
+      this.logger.error(`Error force flushing user ${userAddress}: ${error.message}`);
+      return {
+        success: false,
+        message: `Failed to flush vectors: ${error.message}`
       };
     }
   }

@@ -7,9 +7,18 @@ export declare class WalrusService {
     private logger;
     private adminAddress;
     private readonly DEFAULT_STORAGE_EPOCHS;
+    private readonly LOCAL_STORAGE_DIR;
+    private walrusAvailable;
+    private lastWalrusCheck;
+    private readonly WALRUS_CHECK_INTERVAL;
     constructor(configService: ConfigService);
     private initializeWalrusClient;
     private initializeAdminKeypair;
+    private initializeLocalStorage;
+    private isWalrusAvailable;
+    private generateLocalBlobId;
+    private storeFileLocally;
+    private retrieveFileLocally;
     getAdminAddress(): string;
     uploadContent(content: string, ownerAddress: string, epochs?: number, additionalTags?: Record<string, string>): Promise<string>;
     retrieveContent(blobId: string): Promise<string>;

@@ -17,9 +17,9 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
         entities: [__dirname + '/../**/*.entity{.ts,.js}'],
         synchronize: configService.get('DB_SYNC', false),
         logging: configService.get('DB_LOGGING', false),
-        ssl: configService.get('DB_SSL', false) ? {
+        ssl: configService.get('DB_SSL') === 'true' ? {
           rejectUnauthorized: false
-        } : undefined,
+        } : false,
       }),
     }),
   ],

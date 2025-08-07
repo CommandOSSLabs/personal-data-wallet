@@ -18,6 +18,7 @@ const hnsw_index_service_1 = require("../hnsw-index/hnsw-index.service");
 const seal_service_1 = require("../../infrastructure/seal/seal.service");
 const sui_service_1 = require("../../infrastructure/sui/sui.service");
 const walrus_service_1 = require("../../infrastructure/walrus/walrus.service");
+const cached_walrus_service_1 = require("../../infrastructure/walrus/cached-walrus.service");
 const memory_ingestion_service_1 = require("../memory-ingestion/memory-ingestion.service");
 const gemini_service_1 = require("../../infrastructure/gemini/gemini.service");
 let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
@@ -27,16 +28,18 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
     sealService;
     suiService;
     walrusService;
+    cachedWalrusService;
     memoryIngestionService;
     geminiService;
     logger = new common_1.Logger(MemoryQueryService_1.name);
-    constructor(embeddingService, graphService, hnswIndexService, sealService, suiService, walrusService, memoryIngestionService, geminiService) {
+    constructor(embeddingService, graphService, hnswIndexService, sealService, suiService, walrusService, cachedWalrusService, memoryIngestionService, geminiService) {
         this.embeddingService = embeddingService;
         this.graphService = graphService;
         this.hnswIndexService = hnswIndexService;
         this.sealService = sealService;
         this.suiService = suiService;
         this.walrusService = walrusService;
+        this.cachedWalrusService = cachedWalrusService;
         this.memoryIngestionService = memoryIngestionService;
         this.geminiService = geminiService;
     }
@@ -46,7 +49,7 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
             const memories = [];
             for (const record of memoryRecords) {
                 try {
-                    const content = await this.walrusService.retrieveContent(record.blobId);
+                    const content = await this.cachedWalrusService.retrieveContent(record.blobId);
                     memories.push({
                         id: record.id,
                         content: content,
@@ -101,7 +104,7 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
                         if (seenBlobIds.has(memory.blobId))
                             continue;
                         seenBlobIds.add(memory.blobId);
-                        const content = await this.walrusService.retrieveContent(memory.blobId);
+                        const content = await this.cachedWalrusService.retrieveContent(memory.blobId);
                         memories.push(content);
                         if (memories.length >= limit)
                             break;
@@ -140,7 +143,7 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
                     for (const memoryObj of memoryObjects) {
                         if (category && memoryObj.category !== category)
                             continue;
-                        const content = await this.walrusService.retrieveContent(memoryObj.blobId);
+                        const content = await this.cachedWalrusService.retrieveContent(memoryObj.blobId);
                         results.push({
                             id: memoryObj.id,
                             content: content,
@@ -246,7 +249,7 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
     }
     async getMemoryContentByHash(hash) {
         try {
-            const content = await this.walrusService.retrieveContent(hash);
+            const content = await this.cachedWalrusService.retrieveContent(hash);
             return {
                 content: content,
                 success: true
@@ -303,6 +306,7 @@ exports.MemoryQueryService = MemoryQueryService = MemoryQueryService_1 = __decor
         seal_service_1.SealService,
         sui_service_1.SuiService,
         walrus_service_1.WalrusService,
+        cached_walrus_service_1.CachedWalrusService,
         memory_ingestion_service_1.MemoryIngestionService,
         gemini_service_1.GeminiService])
 ], MemoryQueryService);

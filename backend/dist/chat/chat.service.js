@@ -35,6 +35,7 @@ let ChatService = ChatService_1 = class ChatService {
     chatSessionRepository;
     chatMessageRepository;
     logger = new common_1.Logger(ChatService_1.name);
+    activeRequests = new Map();
     constructor(geminiService, suiService, memoryQueryService, memoryIngestionService, summarizationService, chatSessionRepository, chatMessageRepository) {
         this.geminiService = geminiService;
         this.suiService = suiService;
@@ -59,7 +60,6 @@ let ChatService = ChatService_1 = class ChatService {
                     created_at: session.createdAt.toISOString(),
                     updated_at: session.updatedAt.toISOString(),
                     message_count: 0,
-                    sui_object_id: session.suiObjectId
                 }));
                 return {
                     success: true,
@@ -137,7 +137,7 @@ let ChatService = ChatService_1 = class ChatService {
                 messages: rawSession.messages.map((msg, idx) => ({
                     id: `${sessionId}-${idx}`,
                     content: msg.content,
-                    type: msg.role,
+                    type: msg.type,
                     timestamp: new Date().toISOString()
                 })),
                 created_at: new Date().toISOString(),
@@ -157,7 +157,7 @@ let ChatService = ChatService_1 = class ChatService {
                 await Promise.all(rawSession.messages.map(async (msg, idx) => {
                     await this.chatMessageRepository.save({
                         id: `${sessionId}-${idx}`,
-                        role: msg.role,
+                        role: msg.type,
                         content: msg.content,
                         sessionId: newDbSession.id,
                         session: newDbSession
@@ -330,7 +330,7 @@ let ChatService = ChatService_1 = class ChatService {
                     await Promise.all(rawSession.messages.map(async (msg, idx) => {
                         await this.chatMessageRepository.save({
                             id: `${sessionId}-${idx}`,
-                            role: msg.role,
+                            role: msg.type,
                             content: msg.content,
                             sessionId: dbSession.id,
                             session: dbSession
@@ -374,18 +374,26 @@ let ChatService = ChatService_1 = class ChatService {
         let fullResponse = '';
         let memoryStored = false;
         let memoryId = undefined;
+        const sessionId = messageDto.sessionId || messageDto.session_id;
+        const userId = messageDto.userId || messageDto.user_id || messageDto.userAddress;
+        const content = messageDto.text || messageDto.content;
+        const modelName = messageDto.model || messageDto.modelName || 'gemini-2.0-flash';
+        const requestKey = `${userId}_${sessionId}_${content}_${Date.now()}`;
         (async () => {
             try {
+                if (this.activeRequests.has(requestKey)) {
+                    this.logger.warn(`Duplicate request detected, ignoring: ${requestKey}`);
+                    subject.error(new Error('Duplicate request'));
+                    return;
+                }
+                this.activeRequests.set(requestKey, true);
+                this.logger.log(`Starting streaming chat - SessionID: ${sessionId}, UserID: ${userId}, Content: "${content}", RequestKey: ${requestKey}`);
                 subject.next({
                     data: JSON.stringify({
                         type: 'start',
                         intent: 'CHAT'
                     })
                 });
-                const sessionId = messageDto.sessionId || messageDto.session_id;
-                const userId = messageDto.userId || messageDto.user_id || messageDto.userAddress;
-                const content = messageDto.text || messageDto.content;
-                const modelName = messageDto.model || messageDto.modelName || 'gemini-2.0-flash';
                 if (!sessionId) {
                     throw new Error('Session ID is required for streaming chat');
                 }
@@ -409,7 +417,7 @@ let ChatService = ChatService_1 = class ChatService {
                 }
                 else {
                     const chatSession = await this.suiService.getChatSession(sessionId);
-                    chatHistory = [...chatSession.messages, { role: 'user', content }];
+                    chatHistory = [...chatSession.messages.map(msg => ({ role: msg.type, content: msg.content })), { role: 'user', content }];
                 }
                 let relevantMemories = [];
                 if (messageDto.memoryContext) {
@@ -419,6 +427,7 @@ let ChatService = ChatService_1 = class ChatService {
                     relevantMemories = await this.memoryQueryService.findRelevantMemories(content, userId);
                 }
                 const systemPrompt = this.constructPrompt(dbSession?.summary || '', relevantMemories, messageDto.memoryContext || '');
+                this.logger.log(`Generating AI response for: "${content}" with model: ${modelName}`);
                 const responseStream = this.geminiService.generateContentStream(modelName, chatHistory, systemPrompt);
                 responseStream.subscribe({
                     next: (chunk) => {
@@ -432,12 +441,34 @@ let ChatService = ChatService_1 = class ChatService {
                     },
                     error: (err) => {
                         this.logger.error(`Stream error: ${err.message}`);
+                        this.activeRequests.delete(requestKey);
                         subject.error(err);
                     },
                     complete: async () => {
                         try {
                             const userMessage = messageDto.originalUserMessage || content;
                             if (dbSession) {
+                                const existingUserMessage = await this.chatMessageRepository.findOne({
+                                    where: {
+                                        sessionId: dbSession.id,
+                                        role: 'user',
+                                        content: userMessage
+                                    },
+                                    order: { createdAt: 'DESC' }
+                                });
+                                if (!existingUserMessage) {
+                                    this.logger.log(`Saving user message: "${userMessage}"`);
+                                    await this.chatMessageRepository.save({
+                                        role: 'user',
+                                        content: userMessage,
+                                        sessionId: dbSession.id,
+                                        session: dbSession
+                                    });
+                                }
+                                else {
+                                    this.logger.log(`User message already exists, skipping save: "${userMessage}"`);
+                                }
+                                this.logger.log(`Saving assistant message: "${fullResponse.substring(0, 100)}..."`);
                                 await this.chatMessageRepository.save({
                                     role: 'assistant',
                                     content: fullResponse,
@@ -446,6 +477,7 @@ let ChatService = ChatService_1 = class ChatService {
                                 });
                                 await this.chatSessionRepository.update({ id: sessionId }, { updatedAt: new Date() });
                             }
+                            this.activeRequests.delete(requestKey);
                             let memoryExtraction = null;
                             try {
                                 memoryExtraction = await this.checkForMemoryContent(userMessage, userId);
@@ -477,6 +509,7 @@ let ChatService = ChatService_1 = class ChatService {
             }
             catch (error) {
                 this.logger.error(`Error in chat stream: ${error.message}`);
+                this.activeRequests.delete(requestKey);
                 subject.error(new Error(`Chat stream failed: ${error.message}`));
             }
         })();
@@ -498,8 +531,7 @@ let ChatService = ChatService_1 = class ChatService {
                 throw new Error('Message content is required for chat');
             }
             let chatHistory = [];
-            let dbSession = null;
-            dbSession = await this.chatSessionRepository.findOne({
+            const dbSession = await this.chatSessionRepository.findOne({
                 where: { id: sessionId },
                 relations: ['messages']
             });
@@ -512,7 +544,7 @@ let ChatService = ChatService_1 = class ChatService {
             }
             else {
                 const chatSession = await this.suiService.getChatSession(sessionId);
-                chatHistory = [...chatSession.messages, { role: 'user', content }];
+                chatHistory = [...chatSession.messages.map(msg => ({ role: msg.type, content: msg.content })), { role: 'user', content }];
             }
             let relevantMemories = [];
             if (messageDto.memoryContext) {

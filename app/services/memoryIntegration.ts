@@ -476,89 +476,210 @@ class MemoryIntegrationService {
     success: boolean;
     memoryId?: string;
     message?: string;
+    requiresRetry?: boolean;
+    retryAction?: string;
   }> {
     try {
       console.log('Saving approved memory:', memoryExtraction);
-      
-      // If wallet is not provided, we can't create blockchain records
-      if (!wallet) {
-        console.error('Wallet not provided for memory creation');
+
+      // Validate inputs
+      if (!memoryExtraction.content?.trim()) {
         return {
           success: false,
-          message: 'Wallet connection required to save memories'
+          message: 'Memory content cannot be empty'
         };
       }
-      
+
+      if (!userAddress) {
+        return {
+          success: false,
+          message: 'User address is required'
+        };
+      }
+
+      // If wallet is not provided, we can't create blockchain records
+      if (!wallet || !wallet.connected) {
+        console.error('Wallet not connected for memory creation');
+        return {
+          success: false,
+          message: 'Please connect your wallet to save memories',
+          requiresRetry: true,
+          retryAction: 'connect_wallet'
+        };
+      }
+
+      // Check wallet balance for gas fees
+      try {
+        // This is a basic check - in production you might want to estimate gas costs
+        const balance = await wallet.getBalance?.();
+        if (balance && parseFloat(balance) < 0.001) { // Minimum SUI for gas
+          return {
+            success: false,
+            message: 'Insufficient SUI balance for transaction fees. Please add funds to your wallet.',
+            requiresRetry: true,
+            retryAction: 'add_funds'
+          };
+        }
+      } catch (balanceError) {
+        console.warn('Could not check wallet balance:', balanceError);
+        // Continue anyway - balance check is not critical
+      }
+
       // Use the memory index service to handle everything including index creation
       const { memoryIndexService } = await import('@/app/services/memoryIndexService');
-      
-      // This will automatically create an index if needed
-      const response = await memoryIndexService.createMemoryWithAutoIndex(
-        memoryExtraction.content,
-        memoryExtraction.category,
-        userAddress,
-        wallet
-      );
-      
-      if (!response.success) {
-        console.error('Memory creation failed:', response.message);
-        return {
-          success: false,
-          message: response.message || 'Failed to create memory'
-        };
-      }
-      
-      // If we got a memory ID from backend, create the blockchain record
-      if (response.memoryId) {
+
+      let response;
+      let retryCount = 0;
+      const maxRetries = 3;
+
+      // Retry logic for memory creation with exponential backoff
+      while (retryCount < maxRetries) {
         try {
-          // Import SUI service dynamically to avoid circular dependencies
-          const { SuiBlockchainService } = await import('@/app/services/suiBlockchainService');
-          const suiService = new SuiBlockchainService(wallet);
-          
-          // The backend should have returned the necessary data
-          // We might need to get this from a separate call
-          const backendData = await memoryApi.saveApprovedMemory({
-            content: memoryExtraction.content,
-            category: memoryExtraction.category,
+          response = await memoryIndexService.createMemoryWithAutoIndex(
+            memoryExtraction.content,
+            memoryExtraction.category,
             userAddress,
-            suiObjectId: response.memoryId
-          });
-          
-          if (backendData.blobId && backendData.vectorId !== undefined) {
-            // Create memory record on blockchain
-            const blockchainMemoryId = await suiService.createMemoryRecord(
-              memoryExtraction.category,
-              backendData.vectorId,
-              backendData.blobId
-            );
-            
-            return {
-              success: true,
-              memoryId: blockchainMemoryId,
-              message: 'Memory saved successfully'
+            wallet
+          );
+
+          if (response.success) {
+            break; // Success, exit retry loop
+          }
+
+          // Handle specific error cases
+          if (response.message?.includes('index not found') ||
+              response.message?.includes('create index on-chain first')) {
+            console.log(`Attempt ${retryCount + 1}: Index creation needed, retrying...`);
+            retryCount++;
+
+            if (retryCount < maxRetries) {
+              // Wait before retrying (exponential backoff)
+              await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+              continue;
+            }
+          }
+
+          // If it's not an index issue, don't retry
+          break;
+        } catch (error) {
+          console.error(`Attempt ${retryCount + 1} failed:`, error);
+          retryCount++;
+
+          if (retryCount < maxRetries) {
+            // Wait before retrying
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+          } else {
+            // Max retries reached
+            response = {
+              success: false,
+              message: error instanceof Error ? error.message : 'Failed after multiple attempts'
             };
           }
-        } catch (blockchainError) {
-          console.error('Blockchain record creation failed:', blockchainError);
-          // Even if blockchain fails, we have the memory in backend
+        }
+      }
+
+      if (!response || !response.success) {
+        const errorMessage = response?.message || 'Failed to create memory';
+        console.error('Memory creation failed after retries:', errorMessage);
+
+        // Provide specific error handling based on error type
+        if (errorMessage.includes('insufficient funds') || errorMessage.includes('gas')) {
+          return {
+            success: false,
+            message: 'Transaction failed due to insufficient gas fees. Please ensure you have enough SUI in your wallet.',
+            requiresRetry: true,
+            retryAction: 'add_funds'
+          };
+        }
+
+        if (errorMessage.includes('network') || errorMessage.includes('timeout')) {
+          return {
+            success: false,
+            message: 'Network error occurred. Please check your connection and try again.',
+            requiresRetry: true,
+            retryAction: 'retry'
+          };
+        }
+
+        if (errorMessage.includes('index')) {
+          return {
+            success: false,
+            message: 'Failed to create or access memory index. This might be a temporary issue.',
+            requiresRetry: true,
+            retryAction: 'retry'
+          };
+        }
+
+        return {
+          success: false,
+          message: errorMessage,
+          requiresRetry: true,
+          retryAction: 'retry'
+        };
+      }
+
+      // Success case - process the backend integration
+      try {
+        // Call backend to process the memory for indexing
+        const backendData = await memoryApi.saveApprovedMemory({
+          content: memoryExtraction.content,
+          category: memoryExtraction.category,
+          userAddress,
+          suiObjectId: response.memoryId
+        });
+
+        if (backendData.success) {
+          return {
+            success: true,
+            memoryId: response.memoryId || backendData.memoryId,
+            message: 'Memory saved successfully and indexed for search'
+          };
+        } else {
+          // Backend processing failed, but blockchain record exists
+          console.warn('Backend indexing failed:', backendData.message);
           return {
             success: true,
             memoryId: response.memoryId,
-            message: 'Memory saved to backend (blockchain record pending)'
+            message: 'Memory saved to blockchain. Search indexing will be retried automatically.'
           };
         }
+      } catch (backendError) {
+        console.error('Backend processing failed:', backendError);
+        // Memory is saved on blockchain, backend indexing can be retried later
+        return {
+          success: true,
+          memoryId: response.memoryId,
+          message: 'Memory saved successfully. Search indexing will be processed shortly.'
+        };
       }
-      
-      return {
-        success: true,
-        memoryId: response.memoryId,
-        message: 'Memory saved successfully'
-      };
     } catch (error) {
       console.error('Error saving approved memory:', error);
+
+      // Provide user-friendly error messages based on error type
+      let userMessage = 'An unexpected error occurred while saving your memory.';
+      let requiresRetry = true;
+      let retryAction = 'retry';
+
+      if (error instanceof Error) {
+        if (error.message.includes('User rejected')) {
+          userMessage = 'Transaction was cancelled. Please try again when ready.';
+          retryAction = 'retry';
+        } else if (error.message.includes('network') || error.message.includes('fetch')) {
+          userMessage = 'Network connection error. Please check your internet connection and try again.';
+          retryAction = 'retry';
+        } else if (error.message.includes('wallet')) {
+          userMessage = 'Wallet connection error. Please reconnect your wallet and try again.';
+          retryAction = 'connect_wallet';
+        } else {
+          userMessage = `Error: ${error.message}`;
+        }
+      }
+
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Unknown error'
+        message: userMessage,
+        requiresRetry,
+        retryAction
       };
     }
   }

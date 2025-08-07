@@ -130,16 +130,21 @@ export class GeminiService {
    */
   async embedText(
     text: string,
-    modelName: string = 'embedding-001'
+    modelName: string = 'embedding-001',
+    outputDimensionality: number = 768
   ): Promise<{ vector: number[] }> {
     try {
       const embeddingModel = this.generativeAI.getGenerativeModel({
         model: modelName,
       });
-      
+
+      // For the legacy embedding-001 model, outputDimensionality is not supported
+      // It always returns 768 dimensions by default
       const result = await embeddingModel.embedContent(text);
       const embedding = result.embedding.values;
-      
+
+      this.logger.debug(`Generated embedding with ${embedding.length} dimensions using model ${modelName}`);
+
       return { vector: embedding };
     } catch (error) {
       this.logger.error(`Error embedding text: ${error.message}`);
