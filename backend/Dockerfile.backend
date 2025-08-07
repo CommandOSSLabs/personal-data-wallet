@@ -2,8 +2,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install minimal build dependencies for hnswlib-node native compilation
-RUN apk add --no-cache python3 make g++
+# Install build dependencies
+RUN apk add --no-cache python3 make g++ gcc
 
 # Copy package files
 COPY package*.json ./
@@ -11,6 +11,8 @@ COPY tsconfig*.json ./
 
 # Install dependencies
 RUN npm ci --only=production && npm ci --only=development
+# Rebuild native modules for the current platform
+RUN npm rebuild
 
 # Copy source code
 COPY . .
