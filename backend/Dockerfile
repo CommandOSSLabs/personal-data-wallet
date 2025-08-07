@@ -5,9 +5,12 @@ WORKDIR /app
 # Install build dependencies
 RUN apk add --no-cache python3 make g++ gcc
 
-# Copy package.json and install dependencies
+# Copy package files
 COPY package*.json ./
-RUN npm install
+COPY tsconfig*.json ./
+
+# Install dependencies
+RUN npm ci --only=production && npm ci --only=development
 
 # Copy source code
 COPY . .
@@ -15,8 +18,11 @@ COPY . .
 # Build the app
 RUN npm run build
 
+# Remove dev dependencies after build
+RUN npm prune --production
+
 # Expose port
-EXPOSE 3000
+EXPOSE 8000
 
 # Start the server
-CMD ["npm", "run", "start:prod"]
+CMD ["node", "dist/main"]
