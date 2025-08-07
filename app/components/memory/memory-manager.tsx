@@ -35,6 +35,7 @@ import { useDisclosure } from '@mantine/hooks'
 import { useWallet } from '@suiet/wallet-kit'
 import { memoryIntegrationService } from '@/app/services/memoryIntegration'
 import { MemoryGraph } from './memory-graph'
+import { emitMemoriesUpdated, emitMemoryAdded } from '@/app/services/memoryEventEmitter'
 // Removed MemoryDecryptionModal import - content loads automatically now
 
 interface Memory {
@@ -176,7 +177,13 @@ export function MemoryManager({ userAddress, onMemoryAdded, onMemoryDeleted }: M
       
       // Refresh the memories list
       await loadMemories()
-      
+
+      // Emit events to notify other components
+      if (result.memoryId) {
+        emitMemoryAdded(result.memoryId);
+        emitMemoriesUpdated({ memoryIds: [result.memoryId], userAddress });
+      }
+
       setNewMemoryContent('')
       setNewMemoryCategory('general')
       closeAddModal()

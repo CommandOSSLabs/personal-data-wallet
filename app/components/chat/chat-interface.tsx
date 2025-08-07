@@ -18,6 +18,7 @@ import { MemoryPanel } from '@/app/components/memory/memory-panel'
 import { MemorySelectionModal } from '@/app/components/memory/memory-selection-modal'
 import { MemoryBatchStatus } from '@/app/components/memory/memory-batch-status'
 import { MemoryExtraction } from '@/app/services/memoryIntegration'
+import { emitMemoriesUpdated, emitMemoryAdded } from '@/app/services/memoryEventEmitter'
 import {
   AppShell,
   Group,
@@ -739,6 +740,10 @@ export function ChatInterface() {
         onMemoriesSaved={(memoryIds) => {
           console.log('Memories saved with IDs:', memoryIds);
           memoryIndicator.setStored(memoryIds.length);
+
+          // Emit events to notify other components
+          emitMemoriesUpdated({ memoryIds, userAddress });
+          memoryIds.forEach(memoryId => emitMemoryAdded(memoryId));
 
           // Refresh memories list after save
           if (userAddress) {

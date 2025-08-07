@@ -26,9 +26,23 @@ let ClassifierService = ClassifierService_1 = class ClassifierService {
         /my birthday is ([a-zA-Z0-9\s,]+)/i,
         /my phone (?:number|#) is ([0-9+\-\s()]+)/i,
         /my address is ([a-zA-Z0-9\s,]+)/i,
+        /i love ([^.!?]+)/i,
+        /i like ([^.!?]+)/i,
+        /i enjoy ([^.!?]+)/i,
+        /i prefer ([^.!?]+)/i,
+        /i hate ([^.!?]+)/i,
+        /i dislike ([^.!?]+)/i,
+        /i don't like ([^.!?]+)/i,
+        /my favorite ([^.!?]+) is ([^.!?]+)/i,
+        /my favourite ([^.!?]+) is ([^.!?]+)/i,
         /remember that ([^.!?]+)/i,
         /don't forget that ([^.!?]+)/i,
         /please remember ([^.!?]+)/i,
+        /i am ([^.!?]+)/i,
+        /i have ([^.!?]+)/i,
+        /i own ([^.!?]+)/i,
+        /i studied ([^.!?]+)/i,
+        /i graduated from ([^.!?]+)/i,
     ];
     categoryMap = {
         '/my name is/i': 'personal_info',
@@ -40,9 +54,23 @@ let ClassifierService = ClassifierService_1 = class ClassifierService {
         '/my birthday/i': 'personal_info',
         '/my phone/i': 'contact',
         '/my address/i': 'contact',
+        '/i love/i': 'preference',
+        '/i like/i': 'preference',
+        '/i enjoy/i': 'preference',
+        '/i prefer/i': 'preference',
+        '/i hate/i': 'preference',
+        '/i dislike/i': 'preference',
+        '/i don\'t like/i': 'preference',
+        '/my favorite/i': 'preference',
+        '/my favourite/i': 'preference',
         '/remember that/i': 'custom',
         '/don\'t forget/i': 'custom',
         '/please remember/i': 'custom',
+        '/i am/i': 'personal_info',
+        '/i have/i': 'personal_info',
+        '/i own/i': 'personal_info',
+        '/i studied/i': 'education',
+        '/i graduated/i': 'education',
     };
     constructor(geminiService) {
         this.geminiService = geminiService;
@@ -85,11 +113,25 @@ Answer as JSON with the following format:
 {
   "shouldSave": true/false,
   "confidence": [0.0-1.0],
-  "category": "personal_info|location|career|contact|preference|background|health|custom",
+  "category": "personal_info|location|career|contact|preference|background|health|education|custom",
   "reasoning": "Brief explanation"
 }
 
-Only say "true" if the message CLEARLY contains a personal fact, preference or information that would be useful to remember later.
+Save as "true" if the message contains:
+- Personal preferences (likes, dislikes, favorites)
+- Personal information (name, location, job, etc.)
+- Facts about the person
+- Things they want to remember
+
+Examples that should be saved:
+- "I love pizza" → preference
+- "I like cocacola" → preference
+- "My name is John" → personal_info
+- "I work at Google" → career
+- "I hate broccoli" → preference
+- "I enjoy hiking" → preference
+
+Be generous with preferences - even simple statements like "I love X" should be saved.
 `;
             const responseText = await this.geminiService.generateContent('gemini-1.5-flash', [{ role: 'user', content: prompt }]);
             try {

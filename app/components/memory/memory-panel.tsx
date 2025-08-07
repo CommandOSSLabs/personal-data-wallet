@@ -24,11 +24,13 @@ import {
   IconExternalLink,
   IconCategory,
   IconLock,
-  IconLockOpen
+  IconLockOpen,
+  IconRefresh
 } from '@tabler/icons-react'
 import { memoryIntegrationService } from '@/app/services/memoryIntegration'
 import { MemoryDecryptionModal } from './memory-decryption-modal'
 import { memoryDecryptionCache } from '@/app/services/memoryDecryptionCache'
+import { memoryEventEmitter } from '@/app/services/memoryEventEmitter'
 
 interface Memory {
   id: string
@@ -61,6 +63,47 @@ export function MemoryPanel({ userAddress, sessionId, currentMessage }: MemoryPa
   useEffect(() => {
     if (userAddress) {
       loadMemories();
+    }
+  }, [userAddress])
+
+  // Add periodic refresh to catch new memories
+  useEffect(() => {
+    if (!userAddress) return;
+
+    const refreshInterval = setInterval(() => {
+      loadMemories();
+    }, 10000); // Refresh every 10 seconds
+
+    return () => clearInterval(refreshInterval);
+  }, [userAddress])
+
+  // Add manual refresh function
+  const refreshMemories = () => {
+    if (userAddress) {
+      loadMemories();
+    }
+  }
+
+  // Listen for memory update events
+  useEffect(() => {
+    const handleMemoriesUpdated = () => {
+      console.log('Memory panel: Received memories updated event');
+      refreshMemories();
+    }
+
+    const handleMemoryAdded = (data: any) => {
+      console.log('Memory panel: Received memory added event', data);
+      refreshMemories();
+    }
+
+    // Subscribe to events
+    memoryEventEmitter.on('memoriesUpdated', handleMemoriesUpdated);
+    memoryEventEmitter.on('memoryAdded', handleMemoryAdded);
+
+    // Cleanup on unmount
+    return () => {
+      memoryEventEmitter.off('memoriesUpdated', handleMemoriesUpdated);
+      memoryEventEmitter.off('memoryAdded', handleMemoryAdded);
     }
   }, [userAddress])
   
@@ -332,9 +375,22 @@ export function MemoryPanel({ userAddress, sessionId, currentMessage }: MemoryPa
       }}
     >
       <Box p="md" style={{ borderBottom: '1px solid var(--mantine-color-gray-3)' }}>
-        <Group>
-          <IconBrain size={18} />
-          <Text fw={600}>Memory Panel</Text>
+        <Group justify="space-between">
+          <Group>
+            <IconBrain size={18} />
+            <Text fw={600}>Memory Panel</Text>
+            <Badge size="xs" variant="light">
+              {memories.length}
+            </Badge>
+          </Group>
+          <ActionIcon
+            variant="light"
+            size="sm"
+            onClick={refreshMemories}
+            title="Refresh memories"
+          >
+            <IconRefresh size={14} />
+          </ActionIcon>
         </Group>
       </Box>
       
