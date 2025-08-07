@@ -5,6 +5,8 @@ import { MemoryModule } from './memory/memory.module';
 import { ChatModule } from './chat/chat.module';
 import { DatabaseModule } from './database/database.module';
 import { StorageModule } from './storage/storage.module';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
 
 @Module({
   imports: [
@@ -16,6 +18,8 @@ import { StorageModule } from './storage/storage.module';
     MemoryModule,
     ChatModule,
     StorageModule
-  ]
+  ],
+  controllers: [AppController],
+  providers: [AppService],
 })
 export class AppModule {}
