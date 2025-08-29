@@ -13,7 +13,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SealOpenModeService = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
-const seal_sdk_1 = require("@mysten/seal-sdk");
+const seal_1 = require("@mysten/seal");
 const client_1 = require("@mysten/sui/client");
 const transactions_1 = require("@mysten/sui/transactions");
 const utils_1 = require("@mysten/sui/utils");
@@ -40,8 +40,8 @@ let SealOpenModeService = SealOpenModeService_1 = class SealOpenModeService {
         const keyServerIds = this.configService.get('SEAL_KEY_SERVER_IDS', []);
         const serverConfigs = keyServerIds.length > 0
             ? keyServerIds.map(id => ({ objectId: id, weight: 1 }))
-            : (0, seal_sdk_1.getAllowlistedKeyServers)(this.network).map(id => ({ objectId: id, weight: 1 }));
-        this.sealClient = new seal_sdk_1.SealClient({
+            : (0, seal_1.getAllowlistedKeyServers)(this.network).map(id => ({ objectId: id, weight: 1 }));
+        this.sealClient = new seal_1.SealClient({
             suiClient: this.suiClient,
             serverConfigs,
             verifyKeyServers: false,
@@ -127,7 +127,7 @@ let SealOpenModeService = SealOpenModeService_1 = class SealOpenModeService {
         if (sessionData && !sessionData.signature) {
             return Buffer.from(sessionData.personalMessage, 'hex');
         }
-        const sessionKey = new seal_sdk_1.SessionKey({
+        const sessionKey = new seal_1.SessionKey({
             address: userAddress,
             packageId: packageId,
             ttlMin: this.sessionTtlMin,
@@ -164,7 +164,7 @@ let SealOpenModeService = SealOpenModeService_1 = class SealOpenModeService {
             }
             return cached;
         }
-        const sessionKey = new seal_sdk_1.SessionKey({
+        const sessionKey = new seal_1.SessionKey({
             address: userAddress,
             packageId: packageId,
             ttlMin: this.sessionTtlMin,

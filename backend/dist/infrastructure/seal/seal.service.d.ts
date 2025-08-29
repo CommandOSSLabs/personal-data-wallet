@@ -9,23 +9,29 @@ export declare class SealService {
     protected sealClient: SealClient;
     protected suiClient: SuiClient;
     protected logger: Logger;
-    protected packageId: string;
+    packageId: string;
     protected sealCorePackageId: string;
-    protected moduleName: string;
-    protected threshold: number;
-    protected network: 'mainnet' | 'testnet' | 'devnet';
+    moduleName: string;
+    threshold: number;
+    network: 'mainnet' | 'testnet' | 'devnet';
     protected sessionKeys: Map<string, SessionKey>;
     protected isOpenMode: boolean;
     constructor(configService: ConfigService, sessionStore: SessionStore);
-    encrypt(content: string, userAddress: string, customPackageId?: string): Promise<{
+    encrypt(content: string, userAddress: string): Promise<{
         encrypted: string;
         backupKey: string;
     }>;
-    decrypt(encryptedContent: string, userAddress: string, signature?: string, customPackageId?: string, customModuleName?: string): Promise<string>;
+    decrypt(encryptedContent: string, userAddress: string, signature?: string): Promise<string>;
     decryptWithBackupKey(encryptedContent: string, backupKey: string): Promise<string>;
     protected getOrCreateSessionKey(userAddress: string, signature?: string, packageId?: string): Promise<SessionKey>;
-    getSessionKeyMessage(userAddress: string, packageId?: string): Promise<Uint8Array>;
+    getSessionKeyMessage(userAddress: string): Promise<Uint8Array>;
     protected isSessionKeyExpired(sessionKey: SessionKey): boolean;
     isInOpenMode(): boolean;
-    fetchMultipleKeys(ids: string[], userAddress: string, signature?: string, packageId?: string, moduleName?: string): Promise<Map<string, Uint8Array>>;
+    fetchMultipleKeys(ids: string[], userAddress: string, signature?: string): Promise<Map<string, Uint8Array>>;
+    createAllowlist(name: string, userAddress: string): Promise<string>;
+    encryptForAllowlist(content: string, allowlistId: string, userAddress: string): Promise<{
+        encrypted: string;
+        backupKey: string;
+    }>;
+    decryptFromAllowlist(encryptedContent: string, allowlistId: string, userAddress: string, signature?: string): Promise<string>;
 }

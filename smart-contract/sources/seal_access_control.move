@@ -1,11 +1,12 @@
 module pdw::seal_access_control {
-    use sui::object::{Self, UID};
+    use sui::object::{Self, UID, ID};
     use sui::tx_context::{Self, TxContext};
     use sui::transfer;
     use sui::clock::{Self, Clock};
     use std::vector;
     use sui::event;
-    use sui::bcs;
+    use std::string::String;
+    use pdw::utils::is_prefix;
 
     // ===== Error codes =====
     const ENoAccess: u64 = 1;
@@ -13,8 +14,28 @@ module pdw::seal_access_control {
     const EInvalidApp: u64 = 3;
     const EPermissionNotFound: u64 = 4;
     const EUnauthorized: u64 = 5;
+    const EInvalidCap: u64 = 6;
+    const EDuplicate: u64 = 7;
+    const ENotOwner: u64 = 8;
+    const ENotAllowedPackage: u64 = 9;
 
-    // ===== Structs =====
+    // ===== Allowlist Structs (Based on Example) =====
+    
+    /// Simple allowlist for address-based access control
+    struct Allowlist has key {
+        id: UID,
+        name: String,
+        list: vector<address>,
+        owner: address,
+    }
+
+    /// Admin capability for allowlist management
+    struct AllowlistCap has key {
+        id: UID,
+        allowlist_id: ID,
+    }
+
+    // ===== App Permission Structs (Existing) =====
     
     /// App permission record
     struct AppPermission has key, store {
@@ -25,6 +46,29 @@ module pdw::seal_access_control {
         granted_at: u64,         // Timestamp when granted
         expires_at: u64,         // Timestamp when expires (0 = never)
         revoked: bool,           // Whether permission is revoked
+    }
+
+    // ===== Events =====
+    
+    /// Allowlist created event
+    struct AllowlistCreatedEvent has copy, drop {
+        allowlist_id: ID,
+        name: String,
+        owner: address,
+    }
+
+    /// Address added to allowlist event
+    struct AddressAddedEvent has copy, drop {
+        allowlist_id: ID,
+        address: address,
+        added_by: address,
+    }
+
+    /// Address removed from allowlist event
+    struct AddressRemovedEvent has copy, drop {
+        allowlist_id: ID,
+        address: address,
+        removed_by: address,
     }
 
     /// Permission granted event
@@ -42,20 +86,149 @@ module pdw::seal_access_control {
         app: address,
     }
 
-    // ===== SEAL Approve Functions =====
+    // ===== Allowlist Functions (Based on Example) =====
+
+    /// Create an allowlist with admin capability
+    public fun create_allowlist(
+        name: String,
+        ctx: &mut TxContext
+    ): AllowlistCap {
+        let owner = tx_context::sender(ctx);
+        let allowlist = Allowlist {
+            id: object::new(ctx),
+            name: name,
+            list: vector::empty(),
+            owner: owner,
+        };
+        
+        let allowlist_id = object::id(&allowlist);
+        let cap = AllowlistCap {
+            id: object::new(ctx),
+            allowlist_id: allowlist_id,
+        };
+
+        // Emit event
+        event::emit(AllowlistCreatedEvent {
+            allowlist_id: allowlist_id,
+            name: name,
+            owner: owner,
+        });
+
+        transfer::share_object(allowlist);
+        cap
+    }
+
+    /// Entry function to create allowlist (for frontend)
+    public entry fun create_allowlist_entry(
+        name: String,
+        ctx: &mut TxContext
+    ) {
+        let cap = create_allowlist(name, ctx);
+        let sender = tx_context::sender(ctx);
+        transfer::transfer(cap, sender);
+    }
+
+    /// Add address to allowlist (admin only)
+    public fun add_to_allowlist(
+        allowlist: &mut Allowlist, 
+        cap: &AllowlistCap, 
+        account: address,
+        ctx: &TxContext
+    ) {
+        assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
+        assert!(!vector::contains(&allowlist.list, &account), EDuplicate);
+        
+        vector::push_back(&mut allowlist.list, account);
+
+        // Emit event
+        event::emit(AddressAddedEvent {
+            allowlist_id: object::id(allowlist),
+            address: account,
+            added_by: tx_context::sender(ctx),
+        });
+    }
+
+    /// Entry function to add address to allowlist
+    public entry fun add(
+        allowlist: &mut Allowlist,
+        cap: &AllowlistCap,
+        account: address,
+        ctx: &TxContext
+    ) {
+        add_to_allowlist(allowlist, cap, account, ctx);
+    }
+
+    /// Remove address from allowlist (admin only)
+    public fun remove_from_allowlist(
+        allowlist: &mut Allowlist,
+        cap: &AllowlistCap,
+        account: address,
+        ctx: &TxContext
+    ) {
+        assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
+        
+        let (found, index) = vector::index_of(&allowlist.list, &account);
+        assert!(found, EPermissionNotFound);
+        
+        vector::remove(&mut allowlist.list, index);
+
+        // Emit event
+        event::emit(AddressRemovedEvent {
+            allowlist_id: object::id(allowlist),
+            address: account,
+            removed_by: tx_context::sender(ctx),
+        });
+    }
+
+    /// Entry function to remove address from allowlist
+    public entry fun remove(
+        allowlist: &mut Allowlist,
+        cap: &AllowlistCap,
+        account: address,
+        ctx: &TxContext
+    ) {
+        remove_from_allowlist(allowlist, cap, account, ctx);
+    }
+
+    // ===== SEAL Integration Functions =====
+
+    /// Get allowlist namespace for identity prefixing
+    public fun namespace(allowlist: &Allowlist): vector<u8> {
+        object::uid_to_bytes(&allowlist.id)
+    }
+
+    /// Internal approval check using namespace prefixing (from example)
+    fun approve_internal(caller: address, id: vector<u8>, allowlist: &Allowlist): bool {
+        let namespace = namespace(allowlist);
+        if (!is_prefix(namespace, id)) {
+            return false
+        };
+        vector::contains(&allowlist.list, &caller)
+    }
+
+    /// SEAL approve function for allowlist access (Based on Example)
+    public entry fun seal_approve(
+        id: vector<u8>, 
+        allowlist: &Allowlist, 
+        ctx: &TxContext
+    ) {
+        assert!(approve_internal(tx_context::sender(ctx), id, allowlist), ENoAccess);
+    }
+
+    // ===== Standard SEAL Functions =====
     
     /// Standard seal_approve for self-encryption
     /// Identity format: [package_id][self:user_address]
-    entry fun seal_approve(id: vector<u8>, ctx: &TxContext) {
+    public entry fun seal_approve_self(id: vector<u8>, _ctx: &TxContext) {
         // Extract user address from identity
-        let sender = tx_context::sender(ctx);
+        let _sender = tx_context::sender(_ctx);
         // In real implementation, parse identity and verify sender matches
         assert!(vector::length(&id) > 0, ENoAccess);
     }
 
     /// Approve function for app access
     /// Identity format: [package_id][app:user_address:app_address]
-    entry fun seal_approve_app(
+    public entry fun seal_approve_app(
         id: vector<u8>, 
         app_address: address,
         ctx: &TxContext
@@ -75,10 +248,10 @@ module pdw::seal_access_control {
 
     /// Approve function for time-locked access
     /// Identity format: [package_id][time:user_address:timestamp]
-    entry fun seal_approve_timelock(
+    public entry fun seal_approve_timelock(
         id: vector<u8>,
         clock: &Clock,
-        ctx: &TxContext
+_ctx: &TxContext
     ) {
         // Extract timestamp from identity (last 8 bytes)
         let id_len = vector::length(&id);
@@ -92,23 +265,7 @@ module pdw::seal_access_control {
         assert!(current_time > 0, ENoAccess);
     }
 
-    /// Approve function for role-based access
-    /// Identity format: [package_id][role:user_address:role_name]
-    entry fun seal_approve_role(
-        id: vector<u8>,
-        role: vector<u8>,
-        ctx: &TxContext
-    ) {
-        let requester = tx_context::sender(ctx);
-        
-        // In production:
-        // 1. Parse identity to extract expected role
-        // 2. Verify requester has the specified role
-        // 3. Check role permissions
-        assert!(vector::length(&id) > 0 && vector::length(&role) > 0, ENoAccess);
-    }
-
-    // ===== Permission Management Functions =====
+    // ===== Permission Management Functions (Existing) =====
 
     /// Grant permission to an app
     public entry fun grant_app_permission(
@@ -166,6 +323,23 @@ module pdw::seal_access_control {
         });
     }
 
+    // ===== View Functions =====
+
+    /// Get allowlist details
+    public fun get_allowlist_info(allowlist: &Allowlist): (String, vector<address>, address) {
+        (allowlist.name, allowlist.list, allowlist.owner)
+    }
+
+    /// Check if address is in allowlist
+    public fun is_in_allowlist(allowlist: &Allowlist, addr: address): bool {
+        vector::contains(&allowlist.list, &addr)
+    }
+
+    /// Get allowlist member count
+    public fun get_member_count(allowlist: &Allowlist): u64 {
+        vector::length(&allowlist.list)
+    }
+
     /// Check if permission is valid (not expired or revoked)
     public fun is_permission_valid(
         permission: &AppPermission,
@@ -203,8 +377,7 @@ module pdw::seal_access_control {
         false
     }
 
-    // ===== View Functions =====
-
+    /// Get permission details
     public fun get_permission_details(permission: &AppPermission): (
         address, // user
         address, // app
@@ -221,7 +394,16 @@ module pdw::seal_access_control {
         )
     }
 
+    /// Get permission data IDs
     public fun get_permission_data_ids(permission: &AppPermission): &vector<vector<u8>> {
         &permission.data_ids
+    }
+
+    // ===== Test Functions =====
+
+    #[test_only]
+    public fun test_allowlist_functionality() {
+        // Simple test helper function for integration tests
+        // Tests should be run via backend test files
     }
 }

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SealClient, SessionKey, getAllowlistedKeyServers } from '@mysten/seal-sdk';
+import { SealClient, SessionKey, getAllowlistedKeyServers } from '@mysten/seal';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
 import { toHEX, fromHEX } from '@mysten/sui/utils';
