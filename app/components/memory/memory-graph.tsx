@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Card, Text, Group, ActionIcon, Badge, Stack, Box } from '@mantine/core'
-import { IconRefresh, IconZoomIn, IconZoomOut } from '@tabler/icons-react'
+import { Card, Text, Group, ActionIcon, Badge, Stack, Box, Select } from '@mantine/core'
+import { IconRefresh, IconZoomIn, IconZoomOut, IconCube, IconCircle } from '@tabler/icons-react'
 
 interface MemoryNode {
   id: string
@@ -35,14 +35,18 @@ interface MemoryGraphProps {
 
 export function MemoryGraph({ memories, userAddress }: MemoryGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const animationRef = useRef<number>()
   const [nodes, setNodes] = useState<MemoryNode[]>([])
   const [edges, setEdges] = useState<MemoryEdge[]>([])
   const [zoom, setZoom] = useState(1)
+  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d')
+  const [selectedNode, setSelectedNode] = useState<string | null>(null)
+  const [animationFrame, setAnimationFrame] = useState(0)
 
   useEffect(() => {
     if (memories.length === 0) return
 
-    // Convert memories to graph nodes
+    // Convert memories to graph nodes with physics properties
     const graphNodes: MemoryNode[] = memories.map((memory, index) => ({
       id: memory.id,
       label: memory.content.slice(0, 30) + (memory.content.length > 30 ? '...' : ''),
@@ -161,7 +165,28 @@ export function MemoryGraph({ memories, userAddress }: MemoryGraphProps) {
   
   useEffect(() => {
     drawGraph()
-  }, [nodes, edges, zoom])
+  }, [nodes, edges, zoom, selectedNode, animationFrame])
+
+  // Animation loop for selected node pulsing
+  useEffect(() => {
+    if (selectedNode) {
+      const animate = () => {
+        setAnimationFrame(prev => prev + 1)
+        animationRef.current = requestAnimationFrame(animate)
+      }
+      animationRef.current = requestAnimationFrame(animate)
+    } else {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
+      }
+    }
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
+      }
+    }
+  }, [selectedNode])
 
   const drawGraph = () => {
     const canvas = canvasRef.current
@@ -173,47 +198,15 @@ export function MemoryGraph({ memories, userAddress }: MemoryGraphProps) {
     const width = canvas.width
     const height = canvas.height
 
-    // Clear canvas
-    ctx.clearRect(0, 0, width, height)
+    // Clear canvas with gradient background
+    const gradient = ctx.createLinearGradient(0, 0, width, height)
+    gradient.addColorStop(0, '#f8fafc')
+    gradient.addColorStop(1, '#e2e8f0')
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, width, height)
 
-    // Calculate node positions using force-directed layout (improved)
-    const nodePositions: { [key: string]: { x: number; y: number } } = {}
-    const centerX = width / 2
-    const centerY = height / 2
-    
-    // Group nodes by category for better visualization
-    const nodesByCategory: { [key: string]: MemoryNode[] } = {}
-    nodes.forEach(node => {
-      if (!nodesByCategory[node.category]) {
-        nodesByCategory[node.category] = []
-      }
-      nodesByCategory[node.category].push(node)
-    })
-    
-    // Position nodes in category clusters
-    let categoryIndex = 0
-    const categoryCount = Object.keys(nodesByCategory).length
-    
-    Object.entries(nodesByCategory).forEach(([category, categoryNodes]) => {
-      const categoryAngle = (categoryIndex / categoryCount) * 2 * Math.PI
-      const categoryRadius = Math.min(width, height) * 0.3 * zoom
-      const categoryX = centerX + Math.cos(categoryAngle) * (categoryRadius / 2)
-      const categoryY = centerY + Math.sin(categoryAngle) * (categoryRadius / 2)
-      
-      // Position nodes around their category center
-      categoryNodes.forEach((node, nodeIndex) => {
-        const nodeCount = categoryNodes.length
-        const nodeAngle = (nodeIndex / Math.max(1, nodeCount)) * 2 * Math.PI
-        const nodeRadius = Math.min(50, 120 / Math.max(1, Math.sqrt(nodeCount))) * zoom
-        
-        nodePositions[node.id] = {
-          x: categoryX + Math.cos(nodeAngle) * nodeRadius,
-          y: categoryY + Math.sin(nodeAngle) * nodeRadius
-        }
-      })
-      
-      categoryIndex++
-    })
+    // Calculate node positions using the helper function
+    const nodePositions = calculateNodePositions(width, height)
 
     // Draw edges with better styling
     edges.forEach(edge => {
@@ -242,79 +235,250 @@ export function MemoryGraph({ memories, userAddress }: MemoryGraphProps) {
           target.y
         )
         
-        // Style based on edge weight
-        ctx.strokeStyle = `rgba(120, 120, 250, ${edge.weight})`
-        ctx.lineWidth = edge.weight * 2 + 0.5
+        // Enhanced edge styling with glow
+        ctx.shadowColor = 'rgba(59, 130, 246, 0.5)'
+        ctx.shadowBlur = 5
+        ctx.strokeStyle = `rgba(59, 130, 246, ${edge.weight * 0.8})`
+        ctx.lineWidth = Math.max(2, edge.weight * 3)
         ctx.stroke()
+
+        // Reset shadow
+        ctx.shadowBlur = 0
       }
     })
 
-    // Draw nodes
+    // Draw nodes with enhanced 3D-like styling
     nodes.forEach(node => {
       const pos = nodePositions[node.id]
       if (!pos) return
 
-      // Node glow effect
-      const nodeSize = Math.min(30, 15 + node.connections * 3)
-      const glowSize = nodeSize + 10
-      
-      // Glow effect
-      const gradient = ctx.createRadialGradient(
-        pos.x, pos.y, nodeSize * 0.5,
-        pos.x, pos.y, glowSize
-      )
-      gradient.addColorStop(0, getCategoryColor(node.category))
-      gradient.addColorStop(1, 'rgba(255,255,255,0)')
-      
-      ctx.globalAlpha = 0.3
-      ctx.fillStyle = gradient
+      const baseNodeSize = Math.min(35, 20 + node.connections * 4)
+      const isSelected = selectedNode === node.id
+      const baseColor = getCategoryColor(node.category)
+
+      // Add pulsing effect for selected node
+      const pulseScale = isSelected ? 1 + Math.sin(animationFrame * 0.1) * 0.1 : 1
+      const nodeSize = baseNodeSize * pulseScale
+
+      // Parse color to get RGB values for gradient
+      const colorMatch = baseColor.match(/^#([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i)
+      let r = 107, g = 114, b = 128 // default gray
+      if (colorMatch) {
+        r = parseInt(colorMatch[1], 16)
+        g = parseInt(colorMatch[2], 16)
+        b = parseInt(colorMatch[3], 16)
+      }
+
+      // Drop shadow for depth
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.3)'
+      ctx.shadowBlur = isSelected ? 15 : 8
+      ctx.shadowOffsetX = 3
+      ctx.shadowOffsetY = 3
+
+      // Outer glow effect
+      const outerGlow = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, nodeSize + 15)
+      outerGlow.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.4)`)
+      outerGlow.addColorStop(1, 'rgba(255, 255, 255, 0)')
+
+      ctx.globalAlpha = isSelected ? 0.6 : 0.3
+      ctx.fillStyle = outerGlow
       ctx.beginPath()
-      ctx.arc(pos.x, pos.y, glowSize, 0, 2 * Math.PI)
+      ctx.arc(pos.x, pos.y, nodeSize + 15, 0, 2 * Math.PI)
       ctx.fill()
-      
-      // Node circle
-      ctx.globalAlpha = 0.9
-      ctx.fillStyle = getCategoryColor(node.category)
+
+      // Main node with radial gradient for 3D effect
+      const nodeGradient = ctx.createRadialGradient(
+        pos.x - nodeSize * 0.3, pos.y - nodeSize * 0.3, 0,
+        pos.x, pos.y, nodeSize
+      )
+      nodeGradient.addColorStop(0, `rgba(${Math.min(255, r + 40)}, ${Math.min(255, g + 40)}, ${Math.min(255, b + 40)}, 1)`)
+      nodeGradient.addColorStop(0.7, baseColor)
+      nodeGradient.addColorStop(1, `rgba(${Math.max(0, r - 30)}, ${Math.max(0, g - 30)}, ${Math.max(0, b - 30)}, 1)`)
+
+      ctx.globalAlpha = 1
+      ctx.fillStyle = nodeGradient
       ctx.beginPath()
       ctx.arc(pos.x, pos.y, nodeSize, 0, 2 * Math.PI)
       ctx.fill()
-      
-      // Node border
-      ctx.strokeStyle = '#ffffff'
-      ctx.lineWidth = 2
+
+      // Enhanced border
+      ctx.shadowBlur = 0
+      ctx.shadowOffsetX = 0
+      ctx.shadowOffsetY = 0
+      ctx.strokeStyle = isSelected ? '#fbbf24' : '#ffffff'
+      ctx.lineWidth = isSelected ? 4 : 2
       ctx.stroke()
       
-      // Node label with improved visibility
+      // Enhanced text rendering
       ctx.globalAlpha = 1
-      
-      // Text background for better readability
-      const textWidth = node.label.length * 6
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)'
-      ctx.fillRect(pos.x - textWidth/2, pos.y + nodeSize + 5, textWidth, 16)
-      
-      // Text
-      ctx.fillStyle = '#333'
-      ctx.font = 'bold 12px Inter, sans-serif'
+
+      // Text with shadow for better visibility
+      ctx.font = 'bold 11px Inter, sans-serif'
       ctx.textAlign = 'center'
-      ctx.fillText(node.label, pos.x, pos.y + nodeSize + 18)
+      ctx.textBaseline = 'middle'
+
+      // Text shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'
+      ctx.fillText(node.label, pos.x + 1, pos.y + 1)
+
+      // Main text
+      ctx.fillStyle = '#ffffff'
+      ctx.fillText(node.label, pos.x, pos.y)
+
+      // Category label for selected nodes
+      if (isSelected) {
+        ctx.font = '10px Inter, sans-serif'
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)'
+        ctx.fillText(node.category, pos.x, pos.y + nodeSize + 20)
+      }
     })
+  }
+
+  // Helper function to calculate node positions (shared between drawing and click detection)
+  const calculateNodePositions = (canvasWidth: number, canvasHeight: number): { [key: string]: { x: number; y: number } } => {
+    const nodePositions: { [key: string]: { x: number; y: number } } = {}
+    const centerX = canvasWidth / 2
+    const centerY = canvasHeight / 2
+    const minDistance = 80
+
+    // Group nodes by category
+    const nodesByCategory: { [key: string]: MemoryNode[] } = {}
+    nodes.forEach(node => {
+      if (!nodesByCategory[node.category]) {
+        nodesByCategory[node.category] = []
+      }
+      nodesByCategory[node.category].push(node)
+    })
+
+    let categoryIndex = 0
+    const categoryCount = Object.keys(nodesByCategory).length
+
+    if (categoryCount === 1) {
+      // Single category - arrange in a circle
+      const category = Object.keys(nodesByCategory)[0]
+      const categoryNodes = nodesByCategory[category]
+      const nodeCount = categoryNodes.length
+
+      if (nodeCount === 1) {
+        nodePositions[categoryNodes[0].id] = { x: centerX, y: centerY }
+      } else {
+        let currentRadius = 80
+        let nodesPlaced = 0
+
+        while (nodesPlaced < nodeCount) {
+          const nodesInThisCircle = Math.min(
+            Math.floor(2 * Math.PI * currentRadius / minDistance),
+            nodeCount - nodesPlaced
+          )
+
+          for (let i = 0; i < nodesInThisCircle && nodesPlaced < nodeCount; i++) {
+            const angle = (i / nodesInThisCircle) * 2 * Math.PI
+            nodePositions[categoryNodes[nodesPlaced].id] = {
+              x: centerX + Math.cos(angle) * currentRadius,
+              y: centerY + Math.sin(angle) * currentRadius
+            }
+            nodesPlaced++
+          }
+          currentRadius += minDistance
+        }
+      }
+    } else {
+      // Multiple categories
+      Object.entries(nodesByCategory).forEach(([category, categoryNodes]) => {
+        const categoryAngle = (categoryIndex / categoryCount) * 2 * Math.PI
+        const categoryRadius = Math.min(canvasWidth, canvasHeight) * 0.25
+        const categoryX = centerX + Math.cos(categoryAngle) * categoryRadius
+        const categoryY = centerY + Math.sin(categoryAngle) * categoryRadius
+
+        const nodeCount = categoryNodes.length
+
+        if (nodeCount === 1) {
+          nodePositions[categoryNodes[0].id] = { x: categoryX, y: categoryY }
+        } else {
+          const nodeRadius = Math.max(60, minDistance * nodeCount / (2 * Math.PI))
+
+          categoryNodes.forEach((node, nodeIndex) => {
+            const nodeAngle = (nodeIndex / nodeCount) * 2 * Math.PI
+            nodePositions[node.id] = {
+              x: categoryX + Math.cos(nodeAngle) * nodeRadius,
+              y: categoryY + Math.sin(nodeAngle) * nodeRadius
+            }
+          })
+        }
+
+        categoryIndex++
+      })
+    }
+
+    return nodePositions
   }
 
   const getCategoryColor = (category: string) => {
     const colors: { [key: string]: string } = {
-      'auto-detected': '#4dabf7',
+      // Match the actual categories from the backend
+      'personal_info': '#3b82f6',
+      'location': '#10b981',
+      'career': '#f59e0b',
+      'preference': '#ef4444',
+      'custom': '#8b5cf6',
+      'education': '#06b6d4',
+      'contact': '#84cc16',
+      'background': '#f97316',
+      'health': '#ec4899',
+
+      // Legacy categories
       'personal': '#69db7c',
       'work': '#ffd43b',
       'preferences': '#ff8cc8',
       'skills': '#9775fa',
-      'default': '#ced4da'
+      'auto-detected': '#4dabf7',
+
+      'default': '#6b7280'
     }
     return colors[category] || colors.default
   }
 
   const handleZoomIn = () => setZoom(prev => Math.min(prev * 1.2, 3))
   const handleZoomOut = () => setZoom(prev => Math.max(prev / 1.2, 0.5))
-  const handleReset = () => setZoom(1)
+  const handleReset = () => {
+    setZoom(1)
+    setSelectedNode(null)
+  }
+
+  const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const y = event.clientY - rect.top
+
+    // Convert to canvas coordinates
+    const canvasX = (x / rect.width) * canvas.width
+    const canvasY = (y / rect.height) * canvas.height
+
+    // Use the same positioning logic as drawGraph
+    const nodePositions = calculateNodePositions(canvas.width, canvas.height)
+
+    // Find clicked node
+    let closestNode = null
+    let minDistance = Infinity
+
+    for (const node of nodes) {
+      const pos = nodePositions[node.id]
+      if (pos) {
+        const nodeSize = Math.min(35, 20 + node.connections * 4)
+        const distance = Math.sqrt(Math.pow(canvasX - pos.x, 2) + Math.pow(canvasY - pos.y, 2))
+
+        if (distance <= nodeSize && distance < minDistance) {
+          minDistance = distance
+          closestNode = node.id
+        }
+      }
+    }
+
+    setSelectedNode(closestNode)
+  }
 
   if (memories.length === 0) {
     return (
@@ -339,13 +503,23 @@ export function MemoryGraph({ memories, userAddress }: MemoryGraphProps) {
           </Badge>
         </Group>
         <Group gap="xs">
-          <ActionIcon variant="light" onClick={handleZoomOut}>
+          <Select
+            value={viewMode}
+            onChange={(value) => setViewMode(value as '2d' | '3d')}
+            data={[
+              { value: '2d', label: '2D View' },
+              { value: '3d', label: '3D View' }
+            ]}
+            size="xs"
+            w={100}
+          />
+          <ActionIcon variant="light" onClick={handleZoomOut} title="Zoom Out">
             <IconZoomOut size={16} />
           </ActionIcon>
-          <ActionIcon variant="light" onClick={handleReset}>
+          <ActionIcon variant="light" onClick={handleReset} title="Reset View">
             <IconRefresh size={16} />
           </ActionIcon>
-          <ActionIcon variant="light" onClick={handleZoomIn}>
+          <ActionIcon variant="light" onClick={handleZoomIn} title="Zoom In">
             <IconZoomIn size={16} />
           </ActionIcon>
         </Group>
@@ -356,23 +530,59 @@ export function MemoryGraph({ memories, userAddress }: MemoryGraphProps) {
           ref={canvasRef}
           width={800}
           height={400}
+          onClick={handleCanvasClick}
           style={{
             width: '100%',
             height: 400,
             border: '1px solid #e0e0e0',
             borderRadius: 8,
-            cursor: 'grab'
+            cursor: 'pointer'
           }}
         />
       </Box>
 
+      {/* Selected Node Info */}
+      {selectedNode && (
+        <Box mt="sm" p="sm" bg="gray.0" style={{ borderRadius: 8 }}>
+          {(() => {
+            const node = nodes.find(n => n.id === selectedNode)
+            if (!node) return null
+
+            return (
+              <Stack gap="xs">
+                <Group justify="space-between">
+                  <Text fw={600} size="sm">Selected Memory</Text>
+                  <Badge size="xs" color={getCategoryColor(node.category)}>
+                    {node.category}
+                  </Badge>
+                </Group>
+                <Text size="sm">
+                  {node.fullContent || node.label}
+                </Text>
+                <Group gap="xs">
+                  <Text size="xs" c="dimmed">
+                    Connections: {node.connections}
+                  </Text>
+                  {node.isEncrypted && (
+                    <Badge size="xs" color="red" variant="light">
+                      Encrypted
+                    </Badge>
+                  )}
+                </Group>
+              </Stack>
+            )
+          })()}
+        </Box>
+      )}
+
       <Group mt="sm" gap="md">
         {Object.entries({
-          'auto-detected': '#4dabf7',
-          'personal': '#69db7c',
-          'work': '#ffd43b',
-          'preferences': '#ff8cc8',
-          'skills': '#9775fa'
+          'personal_info': '#3b82f6',
+          'location': '#10b981',
+          'career': '#f59e0b',
+          'preference': '#ef4444',
+          'custom': '#8b5cf6',
+          'education': '#06b6d4'
         }).map(([category, color]) => (
           <Group key={category} gap={4}>
             <div
@@ -384,7 +594,7 @@ export function MemoryGraph({ memories, userAddress }: MemoryGraphProps) {
               }}
             />
             <Text size="xs" c="dimmed">
-              {category}
+              {category.replace('_', ' ')}
             </Text>
           </Group>
         ))}

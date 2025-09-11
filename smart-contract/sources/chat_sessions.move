@@ -22,6 +22,11 @@ module pdw::chat_sessions {
         session_id: ID,
         summary_preview: String
     }
+    
+    struct SessionDeleted has copy, drop {
+        id: ID,
+        owner: address
+    }
 
     // A single message in a chat
     struct Message has store, copy, drop {
@@ -95,6 +100,28 @@ module pdw::chat_sessions {
             role: message.role,
             content_preview: preview
         });
+    }
+
+    /// Delete a chat session
+    public entry fun delete_session(
+        session: ChatSession,
+        ctx: &TxContext
+    ) {
+        let ChatSession { id, owner, model_name: _, messages: _, summary: _ } = session;
+        
+        let sender = tx_context::sender(ctx);
+        assert!(sender == owner, ENonOwner);
+        
+        let object_id = object::uid_to_inner(&id);
+        
+        // Emit event before deleting
+        sui::event::emit(SessionDeleted {
+            id: object_id,
+            owner
+        });
+        
+        // Delete the object by unpacking it completely
+        object::delete(id);
     }
 
     /// Save a summary for the chat session (typically when session is complete)

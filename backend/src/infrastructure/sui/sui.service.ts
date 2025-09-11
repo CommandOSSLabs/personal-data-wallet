@@ -545,6 +545,59 @@ export class SuiService {
   }
 
   /**
+   * Get all memory indexes for a user
+   */
+  async getUserMemoryIndexes(userAddress: string): Promise<{
+    id: string;
+    owner: string;
+    version: number;
+    indexBlobId: string;
+    graphBlobId: string;
+  }[]> {
+    try {
+      // Query all MemoryIndex objects owned by the user
+      const response = await this.client.getOwnedObjects({
+        owner: userAddress,
+        filter: {
+          StructType: `${this.packageId}::memory::MemoryIndex`
+        },
+        options: {
+          showContent: true,
+        },
+      });
+
+      const indexes: Array<{
+        id: string;
+        owner: string;
+        version: number;
+        indexBlobId: string;
+        graphBlobId: string;
+      }> = [];
+
+      for (const item of response.data) {
+        if (!item.data?.content) continue;
+
+        const content = item.data.content as any;
+        indexes.push({
+          id: item.data.objectId,
+          owner: content.fields.owner,
+          version: Number(content.fields.version),
+          indexBlobId: content.fields.index_blob_id,
+          graphBlobId: content.fields.graph_blob_id,
+        });
+      }
+
+      // Sort by version descending to get the most recent first
+      indexes.sort((a, b) => b.version - a.version);
+
+      return indexes;
+    } catch (error) {
+      this.logger.error(`Error getting user memory indexes: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
    * Get a specific memory
    */
   async getMemory(memoryId: string): Promise<{

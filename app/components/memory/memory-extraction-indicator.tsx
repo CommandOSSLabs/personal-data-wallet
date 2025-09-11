@@ -61,7 +61,7 @@ export function MemoryExtractionIndicator({
           if (response.success) {
             stored.push(memory.category)
           } else {
-            errors.push(`Failed to store ${memory.category}: ${response.error || 'Unknown error'}`)
+            errors.push(`Failed to store ${memory.category}: ${response.message || 'Unknown error'}`)
           }
         } catch (error) {
           console.error('Failed to store memory:', error)

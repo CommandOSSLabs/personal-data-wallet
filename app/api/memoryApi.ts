@@ -1,102 +1,128 @@
-import { httpApi, ApiResponse } from './httpApi'
+import { httpApi } from './httpApi';
 
-// Types for memory API
-export interface Memory {
-  id: string
-  content: string
-  category: string
-  timestamp: string
-  isEncrypted: boolean
-  owner: string
-  similarity_score?: number
-  walrusHash?: string  // Added to match backend
+export interface SaveMemoryRequest {
+  content: string;
+  category: string;
+  userAddress: string;
+  suiObjectId?: string;
 }
 
-export interface CreateMemoryRequest {
-  content: string
-  category: string
-  userAddress: string
-  userSignature?: string
+export interface MemoryResponse {
+  success: boolean;
+  memoryId?: string;
+  blobId?: string;
+  vectorId?: number;
+  message?: string;
 }
 
 export interface SearchMemoryRequest {
-  query: string
-  userAddress: string
-  category?: string
-  k?: number
-  userSignature?: string
+  query: string;
+  userAddress: string;
+  category?: string;
+  k?: number;
 }
 
-export interface MemorySearchResult {
-  memories: Memory[]
-  total_found: number
-  query_time_ms: number
+export interface Memory {
+  id: string;
+  content: string;
+  category: string;
+  created_at: string;
+  updated_at: string;
+  blobId?: string;
 }
 
-export interface MemoryContextRequest {
-  query_text: string
-  user_address: string
-  user_signature: string
-  k?: number
-  // Keep snake_case for these fields to match backend DTO
-}
-
-export interface MemoryContextResponse {
-  context: string
-  relevant_memories: Memory[]
-  query_metadata: {
-    query_time_ms: number
-    memories_found: number
-    context_length: number
-  }
-}
-
-// Memory API methods
 export const memoryApi = {
-  // Get all memories for a user
-  getMemories: async (userAddress: string): Promise<{ memories: Memory[], success: boolean }> => {
-    return httpApi.get(`/api/memories?user=${userAddress}`)
+  /**
+   * Get all memories for a user
+   */
+  async getMemories(userAddress: string): Promise<{ memories: Memory[], success: boolean }> {
+    try {
+      const response = await httpApi.get(`/api/memories?user=${userAddress}`);
+      return response;
+    } catch (error) {
+      console.error('Error fetching memories:', error);
+      return { memories: [], success: false };
+    }
   },
 
-  // Create a new memory
-  createMemory: async (request: CreateMemoryRequest): Promise<{ success: boolean, embeddingId?: string, message?: string }> => {
-    return httpApi.post('/api/memories', request)
+  /**
+   * Save a user-approved memory
+   */
+  async saveApprovedMemory(saveRequest: SaveMemoryRequest): Promise<MemoryResponse> {
+    try {
+      const response = await httpApi.post('/api/memories/save-approved', saveRequest);
+      return response;
+    } catch (error) {
+      console.error('Error saving approved memory:', error);
+      return { 
+        success: false, 
+        message: error instanceof Error ? error.message : 'Unknown error' 
+      };
+    }
   },
 
-  // Search memories
-  searchMemories: async (request: SearchMemoryRequest): Promise<{ results: Memory[] }> => {
-    return httpApi.post('/api/memories/search', request)
+  /**
+   * Search memories by query
+   */
+  async searchMemories(searchRequest: SearchMemoryRequest): Promise<{ results: Memory[] }> {
+    try {
+      const response = await httpApi.post('/api/memories/search', searchRequest);
+      return response;
+    } catch (error) {
+      console.error('Error searching memories:', error);
+      return { results: [] };
+    }
   },
 
-  // Delete a memory
-  deleteMemory: async (memoryId: string, userAddress: string): Promise<ApiResponse<{ message: string }>> => {
-    return httpApi.delete(`/api/memories/${memoryId}`, {
-      data: { userAddress }
-    })
+  /**
+   * Delete a memory
+   */
+  async deleteMemory(memoryId: string, userAddress: string): Promise<{ success: boolean }> {
+    try {
+      const response = await httpApi.delete(`/api/memories/${memoryId}`, {
+        data: { userAddress }
+      });
+      return response;
+    } catch (error) {
+      console.error('Error deleting memory:', error);
+      return { success: false };
+    }
   },
-
-  // Update a memory
-  updateMemory: async (memoryId: string, content: string, userAddress: string): Promise<ApiResponse<{ memory: Memory }>> => {
-    return httpApi.put(`/api/memories/${memoryId}`, {
-      content,
-      userAddress
-    })
-  },
-
-  // Get memory context for chat
-  getMemoryContext: async (request: MemoryContextRequest): Promise<MemoryContextResponse> => {
-    return httpApi.post('/api/memories/context', request)
-  },
-
-  // Get memory statistics
-  getMemoryStats: async (userAddress: string): Promise<ApiResponse<{
-    total_memories: number
-    categories: Record<string, number>
-    storage_used_bytes: number
-    last_updated: string
-  }>> => {
-    return httpApi.get(`/api/memories/stats?userAddress=${userAddress}`)
+  
+  /**
+   * Get memory context for a chat message
+   */
+  async getMemoryContext(
+    query: string, 
+    userAddress: string, 
+    userSignature: string
+  ): Promise<{ 
+    context: string, 
+    relevant_memories: any[],
+    query_metadata: {
+      query_time_ms: number,
+      memories_found: number,
+      context_length: number
+    }
+  }> {
+    try {
+      const response = await httpApi.post('/api/memories/context', {
+        query,
+        userAddress,
+        userSignature
+      });
+      return response;
+    } catch (error) {
+      console.error('Error getting memory context:', error);
+      return { 
+        context: '',
+        relevant_memories: [],
+        query_metadata: {
+          query_time_ms: 0,
+          memories_found: 0,
+          context_length: 0
+        }
+      };
+    }
   }
-}
-
-export default memoryApi
+};

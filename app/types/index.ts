@@ -5,6 +5,7 @@ export interface Message {
   timestamp: string // ISO string for consistency with backend
   memoryDetected?: boolean
   memoryId?: string | null
+  memoryExtraction?: any // Memory extraction data from backend
 }
 
 export interface ChatSession {

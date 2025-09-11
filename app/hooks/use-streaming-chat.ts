@@ -20,6 +20,7 @@ interface StreamChunk {
   entities?: any
   memoryStored?: boolean
   memoryId?: string
+  memoryExtraction?: any
 }
 
 interface StreamingState {
@@ -40,7 +41,7 @@ export function useStreamingChat() {
   const sendStreamingMessage = useCallback(async (
     request: StreamingChatRequest,
     onChunk?: (chunk: string) => void,
-    onComplete?: (fullResponse: string, intent?: string, entities?: any, memoryStored?: boolean, memoryId?: string) => void,
+    onComplete?: (fullResponse: string, intent?: string, entities?: any, memoryStored?: boolean, memoryId?: string, memoryExtraction?: any) => void,
     onError?: (error: string) => void
   ) => {
     try {
@@ -54,7 +55,7 @@ export function useStreamingChat() {
         text: request.text,
         user_id: request.userId,
         session_id: request.sessionId,
-        model: request.model || 'gemini-1.5-pro', // Use consistent model name
+        model: request.model || 'gemini-2.0-flash', // Use consistent model name
         originalUserMessage: request.originalUserMessage,
         memoryContext: request.memoryContext
       })
@@ -108,7 +109,8 @@ export function useStreamingChat() {
                       intent, 
                       entities, 
                       data.memoryStored || false,
-                      data.memoryId || null
+                      data.memoryId || null,
+                      data.memoryExtraction || null
                     )
                   }
                 }

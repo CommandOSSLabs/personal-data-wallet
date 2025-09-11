@@ -12,47 +12,20 @@ import {
   IconBolt,
   IconCpu
 } from '@tabler/icons-react'
+import { MODEL_CONFIGS, ModelConfig } from '@/app/config/models'
 
-export type ModelType = 'gemini' | 'gpt-4' | 'claude' | 'local'
+export type ModelType = string // Now we use the model IDs from config
 
-interface ModelOption {
-  id: ModelType
-  name: string
-  description: string
-  icon: React.ReactNode
-  available: boolean
+// Map provider names to icons
+const providerIcons: Record<string, React.ReactNode> = {
+  'Google': <IconSparkles size={16} color="blue" />,
+  'OpenAI': <IconRobot size={16} color="green" />,
+  'Anthropic': <IconBolt size={16} color="orange" />,
+  'Meta': <IconCpu size={16} color="violet" />
 }
 
-const models: ModelOption[] = [
-  {
-    id: 'gemini',
-    name: 'Gemini Pro',
-    description: 'Google\'s advanced AI model',
-    icon: <IconSparkles size={16} color="blue" />,
-    available: true
-  },
-  {
-    id: 'gpt-4',
-    name: 'GPT-4',
-    description: 'OpenAI\'s powerful language model',
-    icon: <IconRobot size={16} color="green" />,
-    available: false
-  },
-  {
-    id: 'claude',
-    name: 'Claude',
-    description: 'Anthropic\'s helpful AI assistant',
-    icon: <IconBolt size={16} color="orange" />,
-    available: false
-  },
-  {
-    id: 'local',
-    name: 'Local Model',
-    description: 'Run locally for privacy',
-    icon: <IconCpu size={16} color="violet" />,
-    available: false
-  }
-]
+// Convert MODEL_CONFIGS to array for easier use
+const models = Object.values(MODEL_CONFIGS)
 
 interface ModelSelectorProps {
   selectedModel: ModelType
@@ -60,7 +33,7 @@ interface ModelSelectorProps {
 }
 
 export function ModelSelector({ selectedModel, onModelChange }: ModelSelectorProps) {
-  const selectedModelData = models.find(m => m.id === selectedModel) || models[0]
+  const selectedModelData = MODEL_CONFIGS[selectedModel] || Object.values(MODEL_CONFIGS)[0]
 
   const selectData = models.map(model => ({
     value: model.id,
@@ -76,12 +49,12 @@ export function ModelSelector({ selectedModel, onModelChange }: ModelSelectorPro
       size="sm"
       w={150}
       renderOption={({ option, checked }) => {
-        const model = models.find(m => m.id === option.value)
+        const model = MODEL_CONFIGS[option.value]
         if (!model) return null
 
         return (
           <Group gap="sm" wrap="nowrap">
-            {model.icon}
+            {providerIcons[model.provider] || <IconRobot size={16} />}
             <div style={{ flex: 1 }}>
               <Group gap="xs">
                 <Text size="sm" fw={500}>

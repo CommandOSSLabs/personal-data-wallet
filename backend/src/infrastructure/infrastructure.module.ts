@@ -2,6 +2,7 @@ import { Module, Global } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { SuiService } from './sui/sui.service';
 import { WalrusService } from './walrus/walrus.service';
+import { CachedWalrusService } from './walrus/cached-walrus.service';
 import { SealService } from './seal/seal.service';
 <<<<<<< HEAD
 import { SessionKeyService } from './seal/session-key.service';
@@ -39,6 +40,7 @@ import { SessionStore } from './seal/session-store';
   providers: [
     SuiService,
     WalrusService,
+    CachedWalrusService,
     SealService,
 <<<<<<< HEAD
     SessionKeyService,
@@ -48,10 +50,14 @@ import { SessionStore } from './seal/session-store';
     // SealOpenModeService, // Disabled - using standard SEAL Client only
 >>>>>>> 175a8dbc02e99cdf82f694d8be93c895b23ba1e0
     GeminiService,
+    LocalStorageService,
+    StorageService,
+    DemoStorageService,
   ],
   exports: [
     SuiService,
     WalrusService,
+    CachedWalrusService,
     SealService,
 <<<<<<< HEAD
     SessionKeyService,
@@ -61,6 +67,9 @@ import { SessionStore } from './seal/session-store';
     // SealOpenModeService, // Disabled - using standard SEAL Client only
 >>>>>>> 175a8dbc02e99cdf82f694d8be93c895b23ba1e0
     GeminiService,
+    LocalStorageService,
+    StorageService,
+    DemoStorageService,
   ]
 })
 export class InfrastructureModule {}

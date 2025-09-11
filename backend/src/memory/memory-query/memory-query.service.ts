@@ -5,6 +5,7 @@ import { HnswIndexService } from '../hnsw-index/hnsw-index.service';
 import { SealService } from '../../infrastructure/seal/seal.service';
 import { SuiService } from '../../infrastructure/sui/sui.service';
 import { WalrusService } from '../../infrastructure/walrus/walrus.service';
+import { CachedWalrusService } from '../../infrastructure/walrus/cached-walrus.service';
 import { MemoryIngestionService } from '../memory-ingestion/memory-ingestion.service';
 import { GeminiService } from '../../infrastructure/gemini/gemini.service';
 import { Memory } from '../../types/memory.types';
@@ -20,6 +21,7 @@ export class MemoryQueryService {
     private sealService: SealService,
     private suiService: SuiService,
     private walrusService: WalrusService,
+    private cachedWalrusService: CachedWalrusService,
     private memoryIngestionService: MemoryIngestionService,
     private geminiService: GeminiService
   ) {}
@@ -36,16 +38,15 @@ export class MemoryQueryService {
       // Populate memories with data
       for (const record of memoryRecords) {
         try {
-          // Get encrypted content
-          const encryptedContent = await this.walrusService.retrieveContent(record.blobId);
+          // Get content from Walrus with caching
+          const content = await this.cachedWalrusService.retrieveContent(record.blobId);
           
-          // We return encrypted content to frontend and only decrypt when needed
           memories.push({
             id: record.id,
-            content: encryptedContent, // Keep content encrypted
+            content: content, // Unencrypted content
             category: record.category,
             timestamp: new Date().toISOString(), // Use creation time from record if available
-            isEncrypted: true,
+            isEncrypted: false,
             owner: userAddress,
             walrusHash: record.blobId
           });
@@ -93,11 +94,11 @@ export class MemoryQueryService {
       const { vector } = await this.embeddingService.embedText(query);
       
       // Step 3: Load index and perform vector search
-      const { index } = await this.hnswIndexService.loadIndex(indexBlobId);
+      const { index } = await this.hnswIndexService.loadIndex(indexBlobId, userAddress);
       const searchResults = this.hnswIndexService.searchIndex(index, vector, limit * 2); // Get more results than needed
       
       // Step 4: Load graph and find related entities
-      const graph = await this.graphService.loadGraph(graphBlobId);
+      const graph = await this.graphService.loadGraph(graphBlobId, userAddress);
       const entityToVectorMap = this.memoryIngestionService.getEntityToVectorMap(userAddress);
       
       // Step 5: Expand search using graph traversal
@@ -125,16 +126,10 @@ export class MemoryQueryService {
             if (seenBlobIds.has(memory.blobId)) continue;
             seenBlobIds.add(memory.blobId);
             
-            // Get encrypted content
-            const encryptedContent = await this.walrusService.retrieveContent(memory.blobId);
-
-            // Decrypt content using SEAL with self access transaction
-            const encryptedBytes = new Uint8Array(Buffer.from(encryptedContent, 'base64'));
-            const moveCallConstructor = this.sealService.createSelfAccessTransaction(userAddress);
-            const decryptedBytes = await this.sealService.decrypt(encryptedBytes, moveCallConstructor);
-            const decryptedContent = new TextDecoder().decode(decryptedBytes);
+            // Get content from Walrus with caching
+            const content = await this.cachedWalrusService.retrieveContent(memory.blobId);
             
-            memories.push(decryptedContent);
+            memories.push(content);
             
             if (memories.length >= limit) break;
           }
@@ -176,7 +171,7 @@ export class MemoryQueryService {
       }
       
       // Step 3: Load index and perform vector search
-      const { index } = await this.hnswIndexService.loadIndex(indexBlobId);
+      const { index } = await this.hnswIndexService.loadIndex(indexBlobId, userAddress);
       const searchResults = this.hnswIndexService.searchIndex(index, vector, k * 2);
       
       // Step 4: Get memory content and filter by category if needed
@@ -190,16 +185,16 @@ export class MemoryQueryService {
             // Skip if category filter is applied and doesn't match
             if (category && memoryObj.category !== category) continue;
             
-            // Get encrypted content
-            const encryptedContent = await this.walrusService.retrieveContent(memoryObj.blobId);
+            // Get content from Walrus with caching
+            const content = await this.cachedWalrusService.retrieveContent(memoryObj.blobId);
             
-            // Add to results - we keep it encrypted and let frontend decrypt when needed
+            // Add to results
             results.push({
               id: memoryObj.id,
-              content: encryptedContent,
+              content: content,
               category: memoryObj.category,
               timestamp: new Date().toISOString(),
-              isEncrypted: true,
+              isEncrypted: false,
               owner: userAddress,
               similarity_score: searchResults.distances[searchResults.ids.indexOf(vectorId)],
               walrusHash: memoryObj.blobId
@@ -238,7 +233,7 @@ export class MemoryQueryService {
       
       // 3. Delete content blob from Walrus (optional, based on policy)
       try {
-        await this.walrusService.deleteContent(memory.blobId);
+        await this.walrusService.deleteContent(memory.blobId, userAddress);
       } catch (walrusError) {
         // Log but don't fail if Walrus deletion fails - chain is source of truth
         this.logger.warn(`Failed to delete from Walrus: ${walrusError.message}`);
@@ -449,12 +444,12 @@ export class MemoryQueryService {
    */
   async getMemoryContentByHash(hash: string): Promise<{ content: string, success: boolean }> {
     try {
-      // Retrieve encrypted content from Walrus
-      const encryptedContent = await this.walrusService.retrieveContent(hash);
+      // Retrieve content from Walrus with caching
+      const content = await this.cachedWalrusService.retrieveContent(hash);
       
-      // Return the content (can be encrypted)
+      // Return the content
       return {
-        content: encryptedContent,
+        content: content,
         success: true
       };
     } catch (error) {

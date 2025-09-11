@@ -1,7 +1,7 @@
 // Export all API modules
 export { httpApi, httpClient, type ApiResponse } from './httpApi'
 export { chatApi, type ChatSession, type ChatMessage, type CreateSessionRequest, type AddMessageRequest, type StreamChatRequest, type StreamChatResponse } from './chatApi'
-export { memoryApi, type Memory, type CreateMemoryRequest, type SearchMemoryRequest, type MemorySearchResult, type MemoryContextRequest, type MemoryContextResponse } from './memoryApi'
+export { memoryApi, type Memory, type SaveMemoryRequest, type SearchMemoryRequest, type MemoryResponse } from './memoryApi'
 
 // Import for default export
 import { chatApi } from './chatApi'

@@ -75,7 +75,7 @@ export function ChatWindow({ messages, isLoading, streamingMessageId, streamingC
                   id: 'loading',
                   content: '',
                   type: 'assistant',
-                  timestamp: new Date()
+                  timestamp: new Date().toISOString()
                 }}
                 isTyping={true}
               />

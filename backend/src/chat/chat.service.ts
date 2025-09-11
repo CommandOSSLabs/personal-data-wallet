@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Observable, Subject } from 'rxjs';
 import { GeminiService } from '../infrastructure/gemini/gemini.service';
 import { SuiService } from '../infrastructure/sui/sui.service';
@@ -9,7 +9,21 @@ import { SummarizationService } from './summarization/summarization.service';
 import { MemoryQueryService } from '../memory/memory-query/memory-query.service';
 import { MemoryIngestionService } from '../memory/memory-ingestion/memory-ingestion.service';
 import { AddMessageDto } from './dto/add-message.dto';
-import { ChatMessage, ChatSession } from '../types/chat.types';
+import { ChatMessage, ChatSession as ChatSessionType } from '../types/chat.types';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ChatSession } from './entities/chat-session.entity';
+import { ChatMessage as ChatMessageEntity } from './entities/chat-message.entity';
+import { v4 as uuidv4 } from 'uuid';
+
+// Interface for memory extraction results
+export interface MemoryExtraction {
+  shouldSave: boolean;
+  category: string;
+  content: string;
+  extractedFacts: string[];
+  confidence: number;
+}
 
 interface MessageEvent {
   data: string;
@@ -19,23 +33,75 @@ interface MessageEvent {
 export class ChatService {
   private logger = new Logger(ChatService.name);
 
+  // Request deduplication to prevent duplicate processing
+  private activeRequests = new Map<string, boolean>();
+
   constructor(
     private geminiService: GeminiService,
     private suiService: SuiService,
     private memoryQueryService: MemoryQueryService,
     private memoryIngestionService: MemoryIngestionService,
     private summarizationService: SummarizationService,
+    @InjectRepository(ChatSession)
+    private chatSessionRepository: Repository<ChatSession>,
+    @InjectRepository(ChatMessageEntity)
+    private chatMessageRepository: Repository<ChatMessageEntity>,
   ) {}
 
   /**
    * Get all chat sessions for a user
    */
-  async getSessions(userAddress: string): Promise<{ success: boolean, sessions: ChatSession[], message?: string }> {
+  async getSessions(userAddress: string): Promise<{ success: boolean, sessions: ChatSessionType[], message?: string }> {
     try {
-      const sessions = await this.suiService.getChatSessions(userAddress);
+      // First try to get sessions from PostgreSQL
+      const dbSessions = await this.chatSessionRepository.find({
+        where: { userAddress },
+        order: { updatedAt: 'DESC' }
+      });
+
+      if (dbSessions.length > 0) {
+        // Convert DB sessions to expected format
+        const sessions = dbSessions.map(session => ({
+          id: session.id,
+          owner: session.userAddress,
+          title: session.title,
+          summary: session.summary,
+          created_at: session.createdAt.toISOString(),
+          updated_at: session.updatedAt.toISOString(),
+          message_count: 0, // Will be populated when needed
+        } as ChatSessionType));
+
+        return {
+          success: true,
+          sessions
+        };
+      }
+
+      // Fallback to blockchain if no sessions in DB
+      const blockchainSessions = await this.suiService.getChatSessions(userAddress);
+      
+      // Store blockchain sessions in PostgreSQL for future use
+      if (blockchainSessions.length > 0) {
+        await Promise.all(blockchainSessions.map(async (session) => {
+          try {
+            await this.chatSessionRepository.save({
+              id: session.id,
+              title: session.title,
+              summary: session.summary,
+              userAddress,
+              suiObjectId: session.id,
+              isArchived: false,
+              metadata: { source: 'blockchain' }
+            });
+          } catch (err) {
+            this.logger.error(`Error saving blockchain session to DB: ${err.message}`);
+          }
+        }));
+      }
+
       return {
         success: true,
-        sessions
+        sessions: blockchainSessions
       };
     } catch (error) {
       this.logger.error(`Error getting sessions: ${error.message}`);
@@ -52,6 +118,37 @@ export class ChatService {
    */
   async getSession(sessionId: string, userAddress: string) {
     try {
+      // First try to get session from PostgreSQL
+      const dbSession = await this.chatSessionRepository.findOne({
+        where: { id: sessionId, userAddress },
+        relations: ['messages']
+      });
+
+      if (dbSession) {
+        // Format the response to match frontend expectations
+        const session = {
+          id: dbSession.id,
+          owner: dbSession.userAddress,
+          title: dbSession.title,
+          summary: dbSession.summary,
+          messages: dbSession.messages.map(msg => ({
+            id: msg.id,
+            content: msg.content,
+            type: msg.role,
+            timestamp: msg.createdAt.toISOString(),
+          })),
+          created_at: dbSession.createdAt.toISOString(),
+          updated_at: dbSession.updatedAt.toISOString(),
+          message_count: dbSession.messages.length,
+        };
+        
+        return {
+          success: true,
+          session
+        };
+      }
+
+      // Fallback to blockchain if not in DB
       const rawSession = await this.suiService.getChatSession(sessionId);
       
       // Verify ownership
@@ -60,14 +157,14 @@ export class ChatService {
       }
       
       // Format the response to match frontend expectations
-      const session = {
+              const session = {
         id: sessionId,
         owner: rawSession.owner,
         title: rawSession.modelName, // Use model name as title
         messages: rawSession.messages.map((msg, idx) => ({
           id: `${sessionId}-${idx}`,
           content: msg.content,
-          type: msg.role,
+          type: msg.type,
           timestamp: new Date().toISOString() // In a real system, we'd store this
         })),
         created_at: new Date().toISOString(), // Mock timestamp
@@ -75,6 +172,31 @@ export class ChatService {
         message_count: rawSession.messages.length,
         sui_object_id: sessionId
       };
+      
+      // Store in PostgreSQL for future use
+      try {
+        const newDbSession = await this.chatSessionRepository.save({
+          id: sessionId,
+          title: rawSession.modelName,
+          userAddress,
+          suiObjectId: sessionId,
+          isArchived: false,
+          metadata: { source: 'blockchain' }
+        });
+
+        // Store messages
+        await Promise.all(rawSession.messages.map(async (msg, idx) => {
+          await this.chatMessageRepository.save({
+            id: `${sessionId}-${idx}`,
+            role: msg.type,
+            content: msg.content,
+            sessionId: newDbSession.id,
+            session: newDbSession
+          });
+        }));
+      } catch (err) {
+        this.logger.error(`Error saving blockchain session to DB: ${err.message}`);
+      }
       
       return {
         success: true,
@@ -94,39 +216,38 @@ export class ChatService {
    */
   async createSession(createSessionDto: CreateSessionDto): Promise<{ success: boolean, session?: any, sessionId?: string }> {
     try {
-      let sessionId: string;
-      
-      // If suiObjectId is provided, the session was created directly on the blockchain by the frontend
-      if (createSessionDto.suiObjectId) {
-        sessionId = createSessionDto.suiObjectId;
-        this.logger.log(`Using existing blockchain session ID: ${sessionId}`);
-      } else {
-        // Create a new session on the blockchain via backend
-        sessionId = await this.suiService.createChatSession(
-          createSessionDto.userAddress, 
-          createSessionDto.modelName
-        );
+      if (!createSessionDto.userAddress) {
+        throw new BadRequestException('User address is required');
       }
+
+      // Generate a new UUID for the session if not provided
+      const sessionId = createSessionDto.suiObjectId || uuidv4();
       
-      // Get the session data
-      let rawSession: any;
-      try {
-        rawSession = await this.suiService.getChatSession(sessionId);
-      } catch (error) {
-        this.logger.error(`Failed to fetch session data: ${error.message}`);
-        // Continue with default values if session fetch fails
-      }
+      // Create session in PostgreSQL
+      const newSession = {
+        id: sessionId,
+        title: createSessionDto.title || createSessionDto.modelName || 'New Chat',
+        userAddress: createSessionDto.userAddress,
+        suiObjectId: createSessionDto.suiObjectId || undefined, // Use undefined instead of null
+        isArchived: false,
+        metadata: { 
+          modelName: createSessionDto.modelName || 'gemini-2.0-flash',
+          source: createSessionDto.suiObjectId ? 'blockchain' : 'database'
+        }
+      };
+      
+      const dbSession = await this.chatSessionRepository.save(newSession);
       
       // Format the session for the frontend
       const session = {
         id: sessionId,
-        owner: rawSession?.owner || createSessionDto.userAddress,
-        title: createSessionDto.title || rawSession?.modelName || createSessionDto.modelName,
-        messages: rawSession?.messages || [], 
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        message_count: rawSession?.messages?.length || 0,
-        sui_object_id: sessionId
+        owner: createSessionDto.userAddress,
+        title: createSessionDto.title || createSessionDto.modelName || 'New Chat',
+        messages: [],
+        created_at: dbSession.createdAt.toISOString(),
+        updated_at: dbSession.updatedAt.toISOString(),
+        message_count: 0,
+        sui_object_id: createSessionDto.suiObjectId
       };
       
       return { success: true, session, sessionId };
@@ -137,33 +258,70 @@ export class ChatService {
   }
 
   /**
-   * Add a message to a session
+   * Process a message for memory extraction and other backend tasks
    */
-  async addMessage(sessionId: string, messageDto: AddMessageDto): Promise<{ success: boolean, message?: string }> {
+  async addMessage(sessionId: string, messageDto: AddMessageDto): Promise<{ success: boolean, message?: string, memoryExtracted?: MemoryExtraction | null }> {
     try {
-      await this.suiService.addMessageToSession(
-        sessionId,
-        messageDto.userAddress,
-        messageDto.type,
-        messageDto.content
-      );
+      this.logger.log(`Message processing request received for session ${sessionId}`);
+      
+      let memoryExtracted: MemoryExtraction | null = null;
       
       // If it's a user message, check if there are memories to extract
       if (messageDto.type === 'user') {
-        // Asynchronously check for memories - don't wait for completion
-        this.memoryIngestionService.processConversation(
-          messageDto.content,
-          '', // No assistant response yet
-          messageDto.userAddress
-        ).catch(err => this.logger.error(`Memory extraction error: ${err.message}`));
+        try {
+          // Check for factual content that could be stored as memory
+          memoryExtracted = await this.checkForMemoryContent(
+            messageDto.content,
+            messageDto.userAddress
+          );
+          
+          this.logger.log('Memory extraction completed', { 
+            hasExtraction: !!memoryExtracted,
+            factsCount: memoryExtracted?.extractedFacts?.length || 0,
+            category: memoryExtracted?.category
+          });
+        } catch (err) {
+          this.logger.error(`Memory extraction error: ${err.message}`);
+          memoryExtracted = null;
+        }
+      }
+      
+      // Store message in PostgreSQL
+      try {
+        const dbSession = await this.chatSessionRepository.findOne({
+          where: { id: sessionId }
+        });
+        
+        if (dbSession) {
+          await this.chatMessageRepository.save({
+            role: messageDto.type,
+            content: messageDto.content,
+            sessionId: dbSession.id,
+            session: dbSession,
+            memoryId: messageDto.memoryId,
+            walrusHash: messageDto.walrusHash,
+            metadata: {
+              memoryExtracted: memoryExtracted ? true : false
+            }
+          });
+          
+          // Update session updatedAt timestamp
+          await this.chatSessionRepository.update(
+            { id: sessionId },
+            { updatedAt: new Date() }
+          );
+        }
+      } catch (err) {
+        this.logger.error(`Error saving message to DB: ${err.message}`);
       }
       
       return { 
         success: true,
-        message: 'Message added successfully'
+        message: 'Message processed successfully',
+        memoryExtracted
       };
     } catch (error) {
-      this.logger.error(`Error adding message: ${error.message}`);
+      this.logger.error(`Error processing message: ${error.message}`);
       return { 
         success: false,
         message: `Error: ${error.message}`
@@ -176,13 +334,20 @@ export class ChatService {
    */
   async deleteSession(sessionId: string, userAddress: string): Promise<{ success: boolean, message: string }> {
     try {
-      await this.suiService.deleteSession(sessionId, userAddress);
+      // Delete from PostgreSQL
+      await this.chatSessionRepository.delete({
+        id: sessionId,
+        userAddress
+      });
+      
+      // Backend doesn't delete from blockchain - frontend handles this
+      this.logger.log(`Delete request received for session ${sessionId}`);
       return {
         success: true,
-        message: 'Session deleted successfully'
+        message: 'Session deleted from database. Blockchain deletion handled by frontend.'
       };
     } catch (error) {
-      this.logger.error(`Error deleting session: ${error.message}`);
+      this.logger.error(`Error processing deletion: ${error.message}`);
       return {
         success: false,
         message: `Error: ${error.message}`
@@ -195,13 +360,20 @@ export class ChatService {
    */
   async updateSessionTitle(sessionId: string, userAddress: string, newTitle: string): Promise<{ success: boolean, message: string }> {
     try {
-      await this.suiService.updateSessionTitle(sessionId, userAddress, newTitle);
+      // Update in PostgreSQL
+      await this.chatSessionRepository.update(
+        { id: sessionId, userAddress },
+        { title: newTitle }
+      );
+      
+      // Backend doesn't update blockchain - frontend handles this
+      this.logger.log(`Title update request received for session ${sessionId}`);
       return {
         success: true,
-        message: 'Session title updated successfully'
+        message: 'Session title updated in database. Blockchain update handled by frontend.'
       };
     } catch (error) {
-      this.logger.error(`Error updating session title: ${error.message}`);
+      this.logger.error(`Error processing title update: ${error.message}`);
       return {
         success: false,
         message: `Error: ${error.message}`
@@ -225,6 +397,31 @@ export class ChatService {
             message: 'Session does not belong to the specified user'
           };
         }
+        
+        // Store in PostgreSQL
+        const newSession = {
+          id: sessionId,
+          title: title || rawSession.modelName,
+          userAddress,
+          suiObjectId: sessionId,
+          isArchived: false,
+          metadata: { source: 'blockchain' }
+        };
+        
+        const dbSession = await this.chatSessionRepository.save(newSession);
+        
+        // Store messages
+        if (rawSession.messages && Array.isArray(rawSession.messages)) {
+          await Promise.all(rawSession.messages.map(async (msg, idx) => {
+            await this.chatMessageRepository.save({
+              id: `${sessionId}-${idx}`,
+              role: msg.type,
+              content: msg.content,
+              sessionId: dbSession.id,
+              session: dbSession
+            });
+          }));
+        }
       } catch (error) {
         this.logger.error(`Error verifying session: ${error.message}`);
         return { 
@@ -233,8 +430,6 @@ export class ChatService {
         };
       }
       
-      // No need to create the session on-chain since it already exists
-      // Just return success
       return {
         success: true,
         message: `Session ${sessionId} indexed successfully`
@@ -253,15 +448,18 @@ export class ChatService {
    */
   async saveSummary(saveSummaryDto: SaveSummaryDto): Promise<{ success: boolean }> {
     try {
-      const success = await this.suiService.saveSessionSummary(
-        saveSummaryDto.sessionId,
-        saveSummaryDto.userAddress,
-        saveSummaryDto.summary
+      // Save to PostgreSQL
+      await this.chatSessionRepository.update(
+        { id: saveSummaryDto.sessionId },
+        { summary: saveSummaryDto.summary }
       );
       
-      return { success };
+      // Backend doesn't save to blockchain - frontend handles this
+      this.logger.log(`Summary save request received for session ${saveSummaryDto.sessionId}`);
+      
+      return { success: true };
     } catch (error) {
-      this.logger.error(`Error saving summary: ${error.message}`);
+      this.logger.error(`Error processing summary: ${error.message}`);
       return { success: false };
     }
   }
@@ -274,22 +472,38 @@ export class ChatService {
     let fullResponse = '';
     let memoryStored = false;
     let memoryId: string | undefined = undefined;
-    
+
+    // Get normalized values from DTO with fallbacks
+    const sessionId = messageDto.sessionId || messageDto.session_id;
+    const userId = messageDto.userId || messageDto.user_id || messageDto.userAddress;
+    const content = messageDto.text || messageDto.content;
+    const modelName = messageDto.model || messageDto.modelName || 'gemini-2.0-flash';
+
+    // Create a unique request key for deduplication
+    const requestKey = `${userId}_${sessionId}_${content}_${Date.now()}`;
+
     (async () => {
       try {
+
+        // Check if this request is already being processed
+        if (this.activeRequests.has(requestKey)) {
+          this.logger.warn(`Duplicate request detected, ignoring: ${requestKey}`);
+          subject.error(new Error('Duplicate request'));
+          return;
+        }
+
+        // Mark request as active
+        this.activeRequests.set(requestKey, true);
+
+        this.logger.log(`Starting streaming chat - SessionID: ${sessionId}, UserID: ${userId}, Content: "${content}", RequestKey: ${requestKey}`);
+
         // Send initial start message
-        subject.next({ 
+        subject.next({
           data: JSON.stringify({
             type: 'start',
             intent: 'CHAT'
           })
         });
-        
-        // Get normalized values from DTO with fallbacks
-        const sessionId = messageDto.sessionId || messageDto.session_id;
-        const userId = messageDto.userId || messageDto.user_id || messageDto.userAddress;
-        const content = messageDto.text || messageDto.content;
-        const modelName = messageDto.model || messageDto.modelName || 'gemini-1.5-pro';
         
         // Step 1: Fetch the chat history
         if (!sessionId) {
@@ -304,8 +518,25 @@ export class ChatService {
           throw new Error('Message content is required for streaming chat');
         }
         
-        const chatSession = await this.suiService.getChatSession(sessionId);
-        const chatHistory = [...chatSession.messages, { role: 'user', content }];
+        // Try to get chat history from PostgreSQL first
+        let chatHistory: { role: string, content: string }[] = [];
+        
+        const dbSession = await this.chatSessionRepository.findOne({
+          where: { id: sessionId },
+          relations: ['messages']
+        });
+        
+        if (dbSession && dbSession.messages) {
+          chatHistory = dbSession.messages.map(msg => ({
+            role: msg.role,
+            content: msg.content
+          }));
+          chatHistory.push({ role: 'user', content });
+        } else {
+          // Fallback to blockchain
+          const chatSession = await this.suiService.getChatSession(sessionId);
+          chatHistory = [...chatSession.messages.map(msg => ({ role: msg.type, content: msg.content })), { role: 'user', content }];
+        }
         
         // Step 2: Use provided context or fetch relevant memories
         let relevantMemories: string[] = [];
@@ -324,18 +555,19 @@ export class ChatService {
         
         // Step 3: Construct the system prompt with context
         const systemPrompt = this.constructPrompt(
-          chatSession.summary,
+          dbSession?.summary || '',
           relevantMemories,
           messageDto.memoryContext || ''
         );
         
         // Step 4: Stream response from Gemini
+        this.logger.log(`Generating AI response for: "${content}" with model: ${modelName}`);
         const responseStream = this.geminiService.generateContentStream(
           modelName,
           chatHistory,
           systemPrompt
         );
-        
+
         responseStream.subscribe({
           next: (chunk) => {
             fullResponse += chunk;
@@ -349,47 +581,82 @@ export class ChatService {
           },
           error: (err) => {
             this.logger.error(`Stream error: ${err.message}`);
+            // Clean up active request on error
+            this.activeRequests.delete(requestKey);
             subject.error(err);
           },
           complete: async () => {
             try {
               // If originalUserMessage is provided, use that instead
               const userMessage = messageDto.originalUserMessage || content;
+
+              // Step 5: Save BOTH user and assistant messages to PostgreSQL
+              if (dbSession) {
+                // First, check if user message already exists to avoid duplicates
+                const existingUserMessage = await this.chatMessageRepository.findOne({
+                  where: {
+                    sessionId: dbSession.id,
+                    role: 'user',
+                    content: userMessage
+                  },
+                  order: { createdAt: 'DESC' }
+                });
+
+                // Save user message if it doesn't exist
+                if (!existingUserMessage) {
+                  this.logger.log(`Saving user message: "${userMessage}"`);
+                  await this.chatMessageRepository.save({
+                    role: 'user',
+                    content: userMessage,
+                    sessionId: dbSession.id,
+                    session: dbSession
+                  });
+                } else {
+                  this.logger.log(`User message already exists, skipping save: "${userMessage}"`);
+                }
+
+                // Save assistant message
+                this.logger.log(`Saving assistant message: "${fullResponse.substring(0, 100)}..."`);
+                await this.chatMessageRepository.save({
+                  role: 'assistant',
+                  content: fullResponse,
+                  sessionId: dbSession.id,
+                  session: dbSession
+                });
+
+                // Update session updatedAt timestamp
+                await this.chatSessionRepository.update(
+                  { id: sessionId },
+                  { updatedAt: new Date() }
+                );
+              }
+
+              // Clean up active request
+              this.activeRequests.delete(requestKey);
               
-              // Step 5: Save the completed message
-              await this.suiService.addMessageToSession(
-                sessionId,
-                userId,
-                'user',
-                userMessage
-              );
+              // Step 6: Process for memory extraction (but don't store yet)
+              let memoryExtraction: MemoryExtraction | null = null;
+              try {
+                memoryExtraction = await this.checkForMemoryContent(userMessage, userId);
+              } catch (err) {
+                this.logger.error(`Memory extraction error: ${err.message}`);
+              }
               
-              await this.suiService.addMessageToSession(
-                sessionId,
-                userId,
-                'assistant',
-                fullResponse
-              );
+              // Process for summarization
+              this.summarizationService.summarizeSessionIfNeeded(sessionId, userId);
               
-              // Step 6: Asynchronously process for summarization and memory ingestion
-              const memoryResult = await this.processCompletedMessage(
-                sessionId,
-                userId,
-                userMessage,
-                fullResponse
-              );
+              memoryStored = false; // No longer auto-storing
+              memoryId = undefined;
               
-              memoryStored = memoryResult.memoryStored;
-              memoryId = memoryResult.memoryId;
-              
-              // Send the final event with completion data
+              // Send the final event with completion data including memory extraction
               subject.next({ 
                 data: JSON.stringify({
                   type: 'end',
                   content: fullResponse,
                   intent: 'CHAT',
                   memoryStored,
-                  memoryId
+                  memoryId,
+                  memoryExtraction: memoryExtraction // Include extracted memory for frontend approval
                 })
               });
               
@@ -402,6 +669,8 @@ export class ChatService {
         });
       } catch (error) {
         this.logger.error(`Error in chat stream: ${error.message}`);
+        // Clean up active request on error
+        this.activeRequests.delete(requestKey);
         subject.error(new Error(`Chat stream failed: ${error.message}`));
       }
     })();
@@ -419,6 +688,7 @@ export class ChatService {
     entities?: any;
     memoryStored?: boolean;
     memoryId?: string;
+    memoryExtraction?: any;
   }> {
     try {
       // Get normalized values from DTO with fallbacks
@@ -440,9 +710,25 @@ export class ChatService {
         throw new Error('Message content is required for chat');
       }
       
-      // Step 1: Fetch the chat history
-      const chatSession = await this.suiService.getChatSession(sessionId);
-      const chatHistory = [...chatSession.messages, { role: 'user', content }];
+      // Try to get chat history from PostgreSQL first
+      let chatHistory: { role: string, content: string }[] = [];
+      
+      const dbSession = await this.chatSessionRepository.findOne({
+        where: { id: sessionId },
+        relations: ['messages']
+      });
+      
+      if (dbSession && dbSession.messages) {
+        chatHistory = dbSession.messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }));
+        chatHistory.push({ role: 'user', content });
+      } else {
+        // Fallback to blockchain
+        const chatSession = await this.suiService.getChatSession(sessionId);
+        chatHistory = [...chatSession.messages.map(msg => ({ role: msg.type, content: msg.content })), { role: 'user', content }];
+      }
       
       // Step 2: Use provided context or fetch relevant memories
       let relevantMemories: string[] = [];
@@ -461,7 +747,7 @@ export class ChatService {
       
       // Step 3: Construct the system prompt with context
       const systemPrompt = this.constructPrompt(
-        chatSession.summary,
+        dbSession?.summary || '',
         relevantMemories,
         messageDto.memoryContext || ''
       );
@@ -473,38 +759,52 @@ export class ChatService {
         systemPrompt
       );
       
+      // Step 5: Save user and assistant messages to PostgreSQL
+      if (dbSession) {
+        // Save user message
+        await this.chatMessageRepository.save({
+          role: 'user',
+          content: content,
+          sessionId: dbSession.id,
+          session: dbSession
+        });
+        
+        // Save assistant message
+        await this.chatMessageRepository.save({
+          role: 'assistant',
+          content: response,
+          sessionId: dbSession.id,
+          session: dbSession
+        });
+        
+        // Update session updatedAt timestamp
+        await this.chatSessionRepository.update(
+          { id: sessionId },
+          { updatedAt: new Date() }
+        );
+      }
+      
       // If originalUserMessage is provided, use that instead
       const userMessage = messageDto.originalUserMessage || content;
       
-      // Step 5: Save messages
-      await this.suiService.addMessageToSession(
-        sessionId,
-        userId,
-        'user',
-        userMessage
-      );
+      // Step 6: Process for memory extraction (but don't store yet)
+      let memoryExtraction: MemoryExtraction | null = null;
+      try {
+        memoryExtraction = await this.checkForMemoryContent(userMessage, userId);
+      } catch (err) {
+        this.logger.error(`Memory extraction error: ${err.message}`);
+      }
       
-      await this.suiService.addMessageToSession(
-        sessionId,
-        userId,
-        'assistant',
-        response
-      );
-      
-      // Step 6: Process for memories
-      const memoryResult = await this.processCompletedMessage(
-        sessionId,
-        userId,
-        userMessage,
-        response
-      );
+      // Process for summarization
+      this.summarizationService.summarizeSessionIfNeeded(sessionId, userId);
       
       return {
         response,
         success: true,
         intent: 'CHAT',
-        memoryStored: memoryResult.memoryStored,
-        memoryId: memoryResult.memoryId
+        memoryStored: false, // No longer auto-storing
+        memoryId: undefined,
+        memoryExtraction: memoryExtraction // Include extracted memory for frontend approval
       };
     } catch (error) {
       this.logger.error(`Error sending message: ${error.message}`);
@@ -584,6 +884,13 @@ export class ChatService {
         /i live/i,
         /i work/i,
         /i have/i,
+        /i love/i,
+        /i like/i,
+        /i enjoy/i,
+        /i prefer/i,
+        /i hate/i,
+        /i dislike/i,
+        /my favorite/i,
         /remember/i
       ];
       
@@ -597,6 +904,34 @@ export class ChatService {
     } catch (error) {
       this.logger.error(`Error checking factual content: ${error.message}`);
       return false;
+    }
+  }
+
+  /**
+   * Check if message contains factual content that could be stored as memory
+   * Returns the extracted facts for frontend approval
+   */
+  private async checkForMemoryContent(message: string, userAddress: string): Promise<MemoryExtraction | null> {
+    try {
+      // Use the memory ingestion service's classifier to check if this should be saved
+      const classification = await this.memoryIngestionService['classifierService'].shouldSaveMemory(message);
+      
+      if (!classification.shouldSave) {
+        return null;
+      }
+      
+      // If it should be saved, return the extracted information for frontend approval
+      // Since ClassificationResult doesn't have extractedFacts, we'll use the message as the fact
+      return {
+        shouldSave: true,
+        category: classification.category,
+        content: message,
+        extractedFacts: [message], // Default to the full message as the extracted fact
+        confidence: classification.confidence || 0.8
+      };
+    } catch (error) {
+      this.logger.error(`Error checking memory content: ${error.message}`);
+      return null;
     }
   }
 }

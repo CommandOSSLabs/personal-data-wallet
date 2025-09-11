@@ -28,7 +28,9 @@ export class SummarizationService {
       }
 
       // Generate the summary
-      const summary = await this.generateSummary(session.messages);
+      const summary = await this.generateSummary(
+        session.messages.map(msg => ({ role: msg.type, content: msg.content }))
+      );
       
       // Save the summary back to the session
       await this.suiService.saveSessionSummary(

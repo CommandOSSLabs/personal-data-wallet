@@ -32,6 +32,8 @@ export interface AddMessageRequest {
   userAddress: string
   content: string
   type: 'user' | 'assistant'
+  memoryId?: string
+  walrusHash?: string
 }
 
 export interface StreamChatRequest {
@@ -82,7 +84,7 @@ export const chatApi = {
     // Ensure modelName is set (use default if not provided)
     const requestWithModel = {
       ...request,
-      modelName: request.modelName || 'gemini-1.5-pro'
+      modelName: request.modelName || 'gemini-2.0-flash'
     };
     return httpApi.post('/api/chat/sessions', requestWithModel)
   },
@@ -114,7 +116,7 @@ export const chatApi = {
       text: request.text,
       userId: request.user_id,
       sessionId: request.session_id,
-      model: request.model || 'gemini-1.5-pro',
+      model: request.model || 'gemini-2.0-flash',
       originalUserMessage: request.originalUserMessage,
       memoryContext: request.memoryContext
     };
@@ -128,7 +130,7 @@ export const chatApi = {
       text: request.text,
       userId: request.user_id,
       sessionId: request.session_id,
-      model: request.model || 'gemini-1.5-pro',
+      model: request.model || 'gemini-2.0-flash',
       originalUserMessage: request.originalUserMessage,
       memoryContext: request.memoryContext
     };

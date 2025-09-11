@@ -23,6 +23,14 @@ export interface MemoryCandidate {
   extractedInfo?: { key: string; value: string }[]
 }
 
+export interface MemoryExtraction {
+  shouldSave: boolean
+  category: string
+  content: string
+  extractedFacts: string[]
+  confidence: number
+}
+
 class MemoryIntegrationService {
   /**
    * Process a user message for memory detection and storage
@@ -63,20 +71,29 @@ class MemoryIntegrationService {
     maxMemories: number = 5
   ): Promise<MemoryContext> {
     try {
-      // Use the regular search endpoint (secure endpoints don't exist yet)
-      const response = await memoryApi.searchMemories({
-        query: query,
-        userAddress: userAddress,
-        k: maxMemories,
-        userSignature
-      })
-
-      const relevantMemories = response.results?.map(m => m.content) || []
+      // Use direct blockchain calls instead of backend API
+      // Get user memories from local storage or cache if available
+      const memories = await this.fetchUserMemories(userAddress);
+      const allMemories = memories.memories || [];
+      
+      // Simple local search to find relevant memories
+      // A more sophisticated approach would involve vector embeddings
+      const relevantMemories = allMemories
+        .filter(memory => {
+          // Simple text matching for now
+          const content = memory.content?.toLowerCase() || '';
+          const searchTerms = query.toLowerCase().split(' ')
+            .filter(term => term.length > 3); // Filter out short words
+            
+          return searchTerms.some(term => content.includes(term));
+        })
+        .slice(0, maxMemories)
+        .map(m => m.content);
 
       return {
         relevantMemories,
         contextSummary: relevantMemories.join('\n'),
-        totalMemories: response.results?.length || 0
+        totalMemories: relevantMemories.length
       }
     } catch (error) {
       console.error('Failed to get memory context:', error)
@@ -98,14 +115,14 @@ class MemoryIntegrationService {
     userSignature?: string
   ): Promise<any[]> {
     try {
-      const response = await memoryApi.searchMemories({
-        query: `category:${category}`,
-        userAddress,
-        category,
-        userSignature
-      })
-
-      return response.results || []
+      // Use direct blockchain access instead of backend API
+      const memories = await this.fetchUserMemories(userAddress);
+      const allMemories = memories.memories || [];
+      
+      // Filter by category
+      return allMemories.filter(memory => 
+        memory.category === category || memory.category?.toLowerCase() === category.toLowerCase()
+      );
     } catch (error) {
       console.error('Failed to search memories by category:', error)
       return []
@@ -122,13 +139,25 @@ class MemoryIntegrationService {
     lastUpdated: string
   }> {
     try {
-      const response = await memoryApi.getMemoryStats(userAddress)
+      // Use direct blockchain access instead of backend API
+      const memories = await this.fetchUserMemories(userAddress);
+      const allMemories = memories.memories || [];
+      
+      // Calculate category counts
+      const categoryCounts: Record<string, number> = {};
+      allMemories.forEach(memory => {
+        const category = memory.category || 'unknown';
+        categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+      });
+      
+      // Calculate rough storage estimation (1KB per memory as a very rough estimate)
+      const storageUsed = allMemories.length * 1024;
       
       return {
-        totalMemories: response.total_memories || 0,
-        categoryCounts: response.categories || {},
-        storageUsed: response.storage_used_bytes || 0,
-        lastUpdated: response.last_updated || ''
+        totalMemories: allMemories.length,
+        categoryCounts: categoryCounts,
+        storageUsed: storageUsed,
+        lastUpdated: new Date().toISOString()
       }
     } catch (error) {
       console.error('Failed to get memory stats:', error)
@@ -217,35 +246,152 @@ class MemoryIntegrationService {
   }
 
   /**
-   * Fetch all memories for a user and auto-decrypt them
+   * Fetch all memories for a user directly from the blockchain
    */
   async fetchUserMemories(userAddress: string): Promise<{
     memories: any[]
     total: number
   }> {
     try {
-      // Use the search endpoint with empty query to get all memories
-      const response = await memoryApi.searchMemories({
-        query: '',
-        userAddress,
-        k: 100 // Get a reasonable number of memories
-      })
+      console.log('Fetching memories directly from Sui blockchain for user:', userAddress);
+
+      // Get memories directly from blockchain (no cache)
+      const { SuiBlockchainService } = await import('@/app/services/suiBlockchainService');
+
+      // Create a service instance with a mock wallet for read-only operations
+      const mockWallet = {
+        connected: false,
+        account: null,
+        signAndExecuteTransactionBlock: async () => {
+          throw new Error('Read-only operation - no signing required');
+        }
+      };
+
+      const suiService = new SuiBlockchainService(mockWallet);
       
-      const memories = response.results || [];
-      
-      // Auto-decrypt memories in background
-      this.autoDecryptMemories(memories);
-      
+      // Get user memories directly from blockchain
+      const blockchainResult = await suiService.getUserMemories(userAddress);
+
+      if (blockchainResult.memories.length === 0) {
+        console.log('No memories found on blockchain for user:', userAddress);
+        return {
+          memories: [],
+          total: 0
+        };
+      }
+
+      // Transform blockchain data to frontend format
+      const memories = blockchainResult.memories.map(memory => ({
+        id: memory.id,
+        content: memory.content || 'Loading content...', // Will be fetched by cache service
+        category: memory.category,
+        created_at: new Date().toISOString(), // TODO: Get actual timestamp from blockchain
+        updated_at: new Date().toISOString(),
+        isEncrypted: memory.isEncrypted !== false, // Default to encrypted
+        owner: memory.owner,
+        walrusHash: memory.blobId,
+        vectorId: memory.vectorId,
+        suiObjectId: memory.id
+      }));
+
+      console.log(`Fetched ${memories.length} memories from blockchain for user ${userAddress}`);
+
+      // Auto-load content for all memories in background
+      await this.autoLoadMemoryContent(memories);
+
+      // Cache the memories for performance (after content is loaded)
+      this.saveMemoriesToCache(userAddress, memories);
+
       return {
-        memories: memories,
-        total: memories.length || 0
+        memories,
+        total: memories.length
       }
     } catch (error) {
-      console.error('Failed to fetch user memories:', error)
+      console.error('Failed to fetch user memories:', error);
       return {
         memories: [],
         total: 0
       }
+    }
+  }
+
+  /**
+   * Auto-load content for memories in background
+   */
+  private async autoLoadMemoryContent(memories: any[]): Promise<void> {
+    try {
+      console.log(`Auto-loading content for ${memories.length} memories`);
+
+      // Import the cache service
+      const { memoryDecryptionCache } = await import('./memoryDecryptionCache');
+
+      // Load content for all memories in parallel (with concurrency limit)
+      const batchSize = 3; // Process 3 at a time to avoid overwhelming the API
+      for (let i = 0; i < memories.length; i += batchSize) {
+        const batch = memories.slice(i, i + batchSize);
+
+        await Promise.all(
+          batch.map(async (memory) => {
+            if (memory.walrusHash && memory.walrusHash !== 'temp_blob_id') {
+              try {
+                console.log(`Loading content for memory ${memory.id} from ${memory.walrusHash}`);
+                const content = await memoryDecryptionCache.getDecryptedContent(memory.walrusHash);
+
+                if (content) {
+                  // Update the memory object with real content
+                  memory.content = content;
+                  memory.isEncrypted = false;
+                  console.log(`Content loaded for memory ${memory.id}: ${content.substring(0, 50)}...`);
+                } else {
+                  memory.content = 'Content not available';
+                  memory.isEncrypted = false;
+                }
+              } catch (error) {
+                console.error(`Failed to load content for memory ${memory.id}:`, error);
+                memory.content = 'Failed to load content';
+                memory.isEncrypted = true;
+              }
+            } else {
+              memory.content = 'Invalid storage reference';
+              memory.isEncrypted = false;
+            }
+          })
+        );
+
+        // Small delay between batches to be nice to the API
+        if (i + batchSize < memories.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+
+      console.log(`Content loading completed for ${memories.length} memories`);
+    } catch (error) {
+      console.error('Error auto-loading memory content:', error);
+    }
+  }
+
+  // Helper methods for local caching
+  private getMemoriesFromCache(userAddress: string): any[] {
+    try {
+      const key = `memories_${userAddress}`;
+      const cached = localStorage.getItem(key);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+      return [];
+    } catch (error) {
+      console.error('Error getting memories from cache:', error);
+      return [];
+    }
+  }
+  
+  private saveMemoriesToCache(userAddress: string, memories: any[]): void {
+    try {
+      const key = `memories_${userAddress}`;
+      localStorage.setItem(key, JSON.stringify(memories));
+      localStorage.setItem(`${key}_timestamp`, Date.now().toString());
+    } catch (error) {
+      console.error('Error saving memories to cache:', error);
     }
   }
   
@@ -308,11 +454,289 @@ class MemoryIntegrationService {
       const { memoryDecryptionCache } = await import('@/app/services/memoryDecryptionCache');
       memoryDecryptionCache.clearCache();
       
+      // Clear the local memory cache
+      const key = `memories_${userAddress}`;
+      localStorage.removeItem(key);
+      localStorage.removeItem(`${key}_timestamp`);
+      
       // For now, just return success
       return true;
     } catch (error) {
       console.error('Failed to clear user memories:', error);
       return false;
+    }
+  }
+  
+  /**
+   * Find memories that are relevant to a given text
+   * This is a client-side replacement for the backend search API
+   */
+  getMemoriesRelevantToText(memories: any[], text: string, limit: number = 3): any[] {
+    if (!memories || !memories.length || !text) return [];
+    
+    // Simple relevance algorithm:
+    // 1. Split the query into keywords
+    // 2. For each memory, count how many keywords match
+    // 3. Sort memories by match count
+    // 4. Return top N memories
+    
+    // Prepare keywords from text (remove common words and short words)
+    const stopWords = ['the', 'and', 'is', 'in', 'to', 'a', 'with', 'for', 'of', 'on', 'at', 'by'];
+    const keywords = text.toLowerCase()
+      .split(/\s+/)
+      .filter(word => word.length > 3)
+      .filter(word => !stopWords.includes(word));
+    
+    // Score each memory based on keyword matches
+    const scoredMemories = memories.map(memory => {
+      // Skip if no content
+      if (!memory.content) return { ...memory, similarity: 0 };
+      
+      const content = memory.content.toLowerCase();
+      
+      // Count how many keywords appear in the memory content
+      let matchCount = 0;
+      for (const keyword of keywords) {
+        if (content.includes(keyword)) {
+          matchCount++;
+        }
+      }
+      
+      // Calculate similarity score (0-1)
+      const similarity = keywords.length > 0 ? matchCount / keywords.length : 0;
+      
+      return {
+        ...memory,
+        similarity
+      };
+    });
+    
+    // Sort by similarity score (highest first)
+    const sortedMemories = scoredMemories
+      .filter(memory => memory.similarity > 0)
+      .sort((a, b) => b.similarity - a.similarity);
+    
+    // Return top N results
+    return sortedMemories.slice(0, limit);
+  }
+
+  /**
+   * Save a memory after user approval
+   * This handles index creation if needed, then saves the memory
+   */
+  async saveApprovedMemory(
+    memoryExtraction: MemoryExtraction,
+    userAddress: string,
+    wallet?: any
+  ): Promise<{
+    success: boolean;
+    memoryId?: string;
+    message?: string;
+    requiresRetry?: boolean;
+    retryAction?: string;
+  }> {
+    try {
+      console.log('Saving approved memory:', memoryExtraction);
+
+      // Validate inputs
+      if (!memoryExtraction.content?.trim()) {
+        return {
+          success: false,
+          message: 'Memory content cannot be empty'
+        };
+      }
+
+      if (!userAddress) {
+        return {
+          success: false,
+          message: 'User address is required'
+        };
+      }
+
+      // If wallet is not provided, we can't create blockchain records
+      if (!wallet || !wallet.connected) {
+        console.error('Wallet not connected for memory creation');
+        return {
+          success: false,
+          message: 'Please connect your wallet to save memories',
+          requiresRetry: true,
+          retryAction: 'connect_wallet'
+        };
+      }
+
+      // Check wallet balance for gas fees
+      try {
+        // This is a basic check - in production you might want to estimate gas costs
+        const balance = await wallet.getBalance?.();
+        if (balance && parseFloat(balance) < 0.001) { // Minimum SUI for gas
+          return {
+            success: false,
+            message: 'Insufficient SUI balance for transaction fees. Please add funds to your wallet.',
+            requiresRetry: true,
+            retryAction: 'add_funds'
+          };
+        }
+      } catch (balanceError) {
+        console.warn('Could not check wallet balance:', balanceError);
+        // Continue anyway - balance check is not critical
+      }
+
+      // Use the memory index service to handle everything including index creation
+      const { memoryIndexService } = await import('@/app/services/memoryIndexService');
+
+      let response;
+      let retryCount = 0;
+      const maxRetries = 3;
+
+      // Retry logic for memory creation with exponential backoff
+      while (retryCount < maxRetries) {
+        try {
+          response = await memoryIndexService.createMemoryWithAutoIndex(
+            memoryExtraction.content,
+            memoryExtraction.category,
+            userAddress,
+            wallet
+          );
+
+          if (response.success) {
+            break; // Success, exit retry loop
+          }
+
+          // Handle specific error cases
+          if (response.message?.includes('index not found') ||
+              response.message?.includes('create index on-chain first')) {
+            console.log(`Attempt ${retryCount + 1}: Index creation needed, retrying...`);
+            retryCount++;
+
+            if (retryCount < maxRetries) {
+              // Wait before retrying (exponential backoff)
+              await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+              continue;
+            }
+          }
+
+          // If it's not an index issue, don't retry
+          break;
+        } catch (error) {
+          console.error(`Attempt ${retryCount + 1} failed:`, error);
+          retryCount++;
+
+          if (retryCount < maxRetries) {
+            // Wait before retrying
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+          } else {
+            // Max retries reached
+            response = {
+              success: false,
+              message: error instanceof Error ? error.message : 'Failed after multiple attempts'
+            };
+          }
+        }
+      }
+
+      if (!response || !response.success) {
+        const errorMessage = response?.message || 'Failed to create memory';
+        console.error('Memory creation failed after retries:', errorMessage);
+
+        // Provide specific error handling based on error type
+        if (errorMessage.includes('insufficient funds') || errorMessage.includes('gas')) {
+          return {
+            success: false,
+            message: 'Transaction failed due to insufficient gas fees. Please ensure you have enough SUI in your wallet.',
+            requiresRetry: true,
+            retryAction: 'add_funds'
+          };
+        }
+
+        if (errorMessage.includes('network') || errorMessage.includes('timeout')) {
+          return {
+            success: false,
+            message: 'Network error occurred. Please check your connection and try again.',
+            requiresRetry: true,
+            retryAction: 'retry'
+          };
+        }
+
+        if (errorMessage.includes('index')) {
+          return {
+            success: false,
+            message: 'Failed to create or access memory index. This might be a temporary issue.',
+            requiresRetry: true,
+            retryAction: 'retry'
+          };
+        }
+
+        return {
+          success: false,
+          message: errorMessage,
+          requiresRetry: true,
+          retryAction: 'retry'
+        };
+      }
+
+      // Success case - process the backend integration
+      try {
+        // Call backend to process the memory for indexing
+        const backendData = await memoryApi.saveApprovedMemory({
+          content: memoryExtraction.content,
+          category: memoryExtraction.category,
+          userAddress,
+          suiObjectId: response.memoryId
+        });
+
+        if (backendData.success) {
+          return {
+            success: true,
+            memoryId: response.memoryId || backendData.memoryId,
+            message: 'Memory saved successfully and indexed for search'
+          };
+        } else {
+          // Backend processing failed, but blockchain record exists
+          console.warn('Backend indexing failed:', backendData.message);
+          return {
+            success: true,
+            memoryId: response.memoryId,
+            message: 'Memory saved to blockchain. Search indexing will be retried automatically.'
+          };
+        }
+      } catch (backendError) {
+        console.error('Backend processing failed:', backendError);
+        // Memory is saved on blockchain, backend indexing can be retried later
+        return {
+          success: true,
+          memoryId: response.memoryId,
+          message: 'Memory saved successfully. Search indexing will be processed shortly.'
+        };
+      }
+    } catch (error) {
+      console.error('Error saving approved memory:', error);
+
+      // Provide user-friendly error messages based on error type
+      let userMessage = 'An unexpected error occurred while saving your memory.';
+      let requiresRetry = true;
+      let retryAction = 'retry';
+
+      if (error instanceof Error) {
+        if (error.message.includes('User rejected')) {
+          userMessage = 'Transaction was cancelled. Please try again when ready.';
+          retryAction = 'retry';
+        } else if (error.message.includes('network') || error.message.includes('fetch')) {
+          userMessage = 'Network connection error. Please check your internet connection and try again.';
+          retryAction = 'retry';
+        } else if (error.message.includes('wallet')) {
+          userMessage = 'Wallet connection error. Please reconnect your wallet and try again.';
+          retryAction = 'connect_wallet';
+        } else {
+          userMessage = `Error: ${error.message}`;
+        }
+      }
+
+      return {
+        success: false,
+        message: userMessage,
+        requiresRetry,
+        retryAction
+      };
     }
   }
 }

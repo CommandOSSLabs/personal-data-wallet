@@ -1,0 +1,15 @@
+{
+  "blobId": "demo_1754540565610_75jbcbuzp",
+  "filename": "index_0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad_1754540565610.hnsw",
+  "ownerAddress": "demo_admin_address",
+  "epochs": 12,
+  "tags": {
+    "user-address": "0xd3342a30a1e09546b83fda6a4d72dd1801a379d1620e596d104ca91917b007ad",
+    "content-type": "application/hnsw-index",
+    "version": "1.0"
+  },
+  "contentType": "application/octet-stream",
+  "size": 3312,
+  "createdAt": "2025-08-07T04:22:45.611Z",
+  "storageType": "demo"
+}

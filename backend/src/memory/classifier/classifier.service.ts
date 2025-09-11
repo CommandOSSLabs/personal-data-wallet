@@ -14,6 +14,7 @@ export class ClassifierService {
   
   // Regex patterns for detecting factual statements
   private readonly factPatterns = [
+    // Personal information
     /my name is ([a-zA-Z\s]+)/i,
     /my email is ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i,
     /i live in ([a-zA-Z\s,]+)/i,
@@ -23,13 +24,34 @@ export class ClassifierService {
     /my birthday is ([a-zA-Z0-9\s,]+)/i,
     /my phone (?:number|#) is ([0-9+\-\s()]+)/i,
     /my address is ([a-zA-Z0-9\s,]+)/i,
+
+    // Preferences and likes/dislikes
+    /i love ([^.!?]+)/i,
+    /i like ([^.!?]+)/i,
+    /i enjoy ([^.!?]+)/i,
+    /i prefer ([^.!?]+)/i,
+    /i hate ([^.!?]+)/i,
+    /i dislike ([^.!?]+)/i,
+    /i don't like ([^.!?]+)/i,
+    /my favorite ([^.!?]+) is ([^.!?]+)/i,
+    /my favourite ([^.!?]+) is ([^.!?]+)/i,
+
+    // Explicit memory requests
     /remember that ([^.!?]+)/i,
     /don't forget that ([^.!?]+)/i,
     /please remember ([^.!?]+)/i,
+
+    // Personal facts
+    /i am ([^.!?]+)/i,
+    /i have ([^.!?]+)/i,
+    /i own ([^.!?]+)/i,
+    /i studied ([^.!?]+)/i,
+    /i graduated from ([^.!?]+)/i,
   ];
   
   // Map of regex patterns to categories
   private readonly categoryMap = {
+    // Personal information
     '/my name is/i': 'personal_info',
     '/my email is/i': 'contact',
     '/i live in/i': 'location',
@@ -39,9 +61,29 @@ export class ClassifierService {
     '/my birthday/i': 'personal_info',
     '/my phone/i': 'contact',
     '/my address/i': 'contact',
+
+    // Preferences
+    '/i love/i': 'preference',
+    '/i like/i': 'preference',
+    '/i enjoy/i': 'preference',
+    '/i prefer/i': 'preference',
+    '/i hate/i': 'preference',
+    '/i dislike/i': 'preference',
+    '/i don\'t like/i': 'preference',
+    '/my favorite/i': 'preference',
+    '/my favourite/i': 'preference',
+
+    // Explicit memory requests
     '/remember that/i': 'custom',
     '/don\'t forget/i': 'custom',
     '/please remember/i': 'custom',
+
+    // Personal facts
+    '/i am/i': 'personal_info',
+    '/i have/i': 'personal_info',
+    '/i own/i': 'personal_info',
+    '/i studied/i': 'education',
+    '/i graduated/i': 'education',
   };
   
   constructor(private geminiService: GeminiService) {}
@@ -99,11 +141,25 @@ Answer as JSON with the following format:
 {
   "shouldSave": true/false,
   "confidence": [0.0-1.0],
-  "category": "personal_info|location|career|contact|preference|background|health|custom",
+  "category": "personal_info|location|career|contact|preference|background|health|education|custom",
   "reasoning": "Brief explanation"
 }
 
-Only say "true" if the message CLEARLY contains a personal fact, preference or information that would be useful to remember later.
+Save as "true" if the message contains:
+- Personal preferences (likes, dislikes, favorites)
+- Personal information (name, location, job, etc.)
+- Facts about the person
+- Things they want to remember
+
+Examples that should be saved:
+- "I love pizza" → preference
+- "I like cocacola" → preference
+- "My name is John" → personal_info
+- "I work at Google" → career
+- "I hate broccoli" → preference
+- "I enjoy hiking" → preference
+
+Be generous with preferences - even simple statements like "I love X" should be saved.
 `;
 
       const responseText = await this.geminiService.generateContent(
@@ -112,7 +168,27 @@ Only say "true" if the message CLEARLY contains a personal fact, preference or i
       );
       
       try {
-        const result = JSON.parse(responseText);
+        // Clean up the response before parsing
+        // Sometimes the API returns JSON wrapped in markdown code blocks or with extra text
+        let cleanedResponse = responseText;
+        
+        // Remove markdown code blocks if present
+        if (cleanedResponse.includes('```json')) {
+          cleanedResponse = cleanedResponse.replace(/```json\n|\n```/g, '');
+        } else if (cleanedResponse.includes('```')) {
+          cleanedResponse = cleanedResponse.replace(/```\n|\n```/g, '');
+        }
+        
+        // Try to extract JSON using regex
+        const jsonMatch = cleanedResponse.match(/{[\s\S]*}/);
+        if (jsonMatch) {
+          cleanedResponse = jsonMatch[0];
+        }
+        
+        this.logger.log(`Cleaned response for parsing: ${cleanedResponse}`);
+        
+        // Parse the cleaned JSON
+        const result = JSON.parse(cleanedResponse);
         return {
           shouldSave: result.shouldSave || false,
           confidence: result.confidence || 0,
@@ -121,6 +197,7 @@ Only say "true" if the message CLEARLY contains a personal fact, preference or i
         };
       } catch (parseError) {
         this.logger.error(`Error parsing classification result: ${parseError.message}`);
+        this.logger.error(`Raw response: ${responseText}`);
         return {
           shouldSave: false,
           confidence: 0,
