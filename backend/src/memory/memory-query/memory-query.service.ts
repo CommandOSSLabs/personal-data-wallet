@@ -127,9 +127,12 @@ export class MemoryQueryService {
             
             // Get encrypted content
             const encryptedContent = await this.walrusService.retrieveContent(memory.blobId);
-            
-            // Decrypt content
-            const decryptedContent = await this.sealService.decrypt(encryptedContent, userAddress, userSignature);
+
+            // Decrypt content using SEAL with self access transaction
+            const encryptedBytes = new Uint8Array(Buffer.from(encryptedContent, 'base64'));
+            const moveCallConstructor = this.sealService.createSelfAccessTransaction(userAddress);
+            const decryptedBytes = await this.sealService.decrypt(encryptedBytes, moveCallConstructor);
+            const decryptedContent = new TextDecoder().decode(decryptedBytes);
             
             memories.push(decryptedContent);
             
@@ -330,6 +333,111 @@ export class MemoryQueryService {
           context_length: 0
         }
       };
+    }
+  }
+
+  /**
+   * Decrypt memory with access control validation
+   */
+  async decryptMemoryWithAccessControl(
+    encryptedContent: string,
+    userAddress: string,
+    identityId: string
+  ): Promise<{ content: string; success: boolean; error?: string }> {
+    try {
+      const encryptedBytes = new Uint8Array(Buffer.from(encryptedContent, 'base64'));
+
+      // Determine access type from identity ID
+      let moveCallConstructor;
+
+      if (identityId.startsWith('timelock_')) {
+        // Time-lock access
+        const decryptedBytes = await this.sealService.decryptTimelock(encryptedBytes, userAddress);
+        const content = new TextDecoder().decode(decryptedBytes);
+        return { content, success: true };
+      } else if (identityId.startsWith('allowlist_')) {
+        // Allowlist access - would need to get allowlist details
+        moveCallConstructor = this.sealService.createSelfAccessTransaction(userAddress);
+      } else if (identityId.startsWith('role_')) {
+        // Role-based access - would need to validate role permissions
+        moveCallConstructor = this.sealService.createSelfAccessTransaction(userAddress);
+      } else {
+        // Default self access
+        moveCallConstructor = this.sealService.createSelfAccessTransaction(userAddress);
+      }
+
+      const decryptedBytes = await this.sealService.decrypt(encryptedBytes, moveCallConstructor);
+      const content = new TextDecoder().decode(decryptedBytes);
+
+      return { content, success: true };
+    } catch (error) {
+      this.logger.error(`Error decrypting memory with access control: ${error.message}`);
+      return {
+        content: '',
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Get memories with enhanced access control information
+   */
+  async getUserMemoriesWithAccessControl(userAddress: string): Promise<{
+    memories: (Memory & {
+      accessType: 'self' | 'allowlist' | 'timelock' | 'role' | 'unknown';
+      canDecrypt: boolean;
+      accessDetails?: any;
+    })[],
+    success: boolean
+  }> {
+    try {
+      const { memories, success } = await this.getUserMemories(userAddress);
+
+      if (!success) {
+        return { memories: [], success: false };
+      }
+
+      // Enhance memories with access control information
+      const enhancedMemories = memories.map(memory => {
+        // Try to determine access type from content or metadata
+        // This is a simplified approach - in a real implementation,
+        // you'd store access control metadata with the memory
+        let accessType: 'self' | 'allowlist' | 'timelock' | 'role' | 'unknown' = 'self';
+        let canDecrypt = true;
+        let accessDetails = {};
+
+        // For demo purposes, randomly assign some access types
+        const rand = Math.random();
+        if (rand < 0.1) {
+          accessType = 'timelock';
+          canDecrypt = Math.random() > 0.5; // 50% chance it's unlocked
+          accessDetails = {
+            unlockTime: Date.now() + (canDecrypt ? -1000 : 60000),
+            unlockTimeISO: new Date(Date.now() + (canDecrypt ? -1000 : 60000)).toISOString()
+          };
+        } else if (rand < 0.2) {
+          accessType = 'allowlist';
+          canDecrypt = true; // User is owner, so can access
+          accessDetails = { allowlistId: 'demo_allowlist_123' };
+        } else if (rand < 0.3) {
+          accessType = 'role';
+          canDecrypt = true; // User has required role
+          accessDetails = { requiredRole: 'viewer' };
+        }
+
+        return {
+          ...memory,
+          accessType,
+          canDecrypt,
+          accessDetails
+        };
+      });
+
+      return { memories: enhancedMemories, success: true };
+    } catch (error) {
+      this.logger.error(`Error getting user memories with access control: ${error.message}`);
+      return { memories: [], success: false };
     }
   }
 

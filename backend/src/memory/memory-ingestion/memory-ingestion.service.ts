@@ -179,14 +179,15 @@ export class MemoryIngestionService {
         extraction.relationships
       );
       
-      // Step 7: Encrypt the memory content
-      const { encrypted, backupKey } = await this.sealService.encrypt(
-        memoryDto.content,
-        memoryDto.userAddress
+      // Step 7: Encrypt the memory content using SEAL with self access
+      const contentBytes = new TextEncoder().encode(memoryDto.content);
+      const { encrypted, identityId } = await this.sealService.encrypt(
+        contentBytes,
+        memoryDto.userAddress // Use user address as policy object for self access
       );
       
       // Step 8: Save the encrypted content to Walrus
-      const contentBlobId = await this.walrusService.uploadContent(encrypted);
+      const contentBlobId = await this.walrusService.uploadContent(Buffer.from(encrypted).toString('base64'));
       
       // Step 9: Save the updated index and graph to Walrus
       const newIndexBlobId = await this.hnswIndexService.saveIndex(index);
@@ -304,14 +305,15 @@ export class MemoryIngestionService {
         extraction.relationships
       );
       
-      // Step 7: Encrypt the memory content
-      const { encrypted, backupKey } = await this.sealService.encrypt(
-        content,
-        userAddress
+      // Step 7: Encrypt the memory content using SEAL with self access
+      const contentBytes = new TextEncoder().encode(content);
+      const { encrypted, identityId } = await this.sealService.encrypt(
+        contentBytes,
+        userAddress // Use user address as policy object for self access
       );
-      
+
       // Step 8: Save the encrypted content to Walrus
-      const contentBlobId = await this.walrusService.uploadContent(encrypted);
+      const contentBlobId = await this.walrusService.uploadContent(Buffer.from(encrypted).toString('base64'));
       
       // Step 9: Save the updated index and graph to Walrus
       const newIndexBlobId = await this.hnswIndexService.saveIndex(index);

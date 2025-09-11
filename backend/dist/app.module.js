@@ -11,6 +11,8 @@ const common_1 = require("@nestjs/common");
 const infrastructure_module_1 = require("./infrastructure/infrastructure.module");
 const memory_module_1 = require("./memory/memory.module");
 const chat_module_1 = require("./chat/chat.module");
+const app_controller_1 = require("./app.controller");
+const app_service_1 = require("./app.service");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -19,8 +21,10 @@ exports.AppModule = AppModule = __decorate([
         imports: [
             infrastructure_module_1.InfrastructureModule,
             memory_module_1.MemoryModule,
-            chat_module_1.ChatModule
-        ]
+            chat_module_1.ChatModule,
+        ],
+        controllers: [app_controller_1.AppController],
+        providers: [app_service_1.AppService],
     })
 ], AppModule);
 //# sourceMappingURL=app.module.js.map

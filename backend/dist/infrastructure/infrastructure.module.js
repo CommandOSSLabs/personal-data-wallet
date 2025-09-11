@@ -12,15 +12,9 @@ const config_1 = require("@nestjs/config");
 const sui_service_1 = require("./sui/sui.service");
 const walrus_service_1 = require("./walrus/walrus.service");
 const seal_service_1 = require("./seal/seal.service");
-const seal_controller_1 = require("./seal/seal.controller");
-const seal_ibe_service_1 = require("./seal/seal-ibe.service");
-const seal_ibe_controller_1 = require("./seal/seal-ibe.controller");
+const session_key_service_1 = require("./seal/session-key.service");
+const session_controller_1 = require("./seal/session.controller");
 const gemini_service_1 = require("./gemini/gemini.service");
-const session_store_1 = require("./seal/session-store");
-const seal_simple_service_1 = require("./seal/seal-simple.service");
-const seal_test_controller_1 = require("./seal/seal-test.controller");
-const seal_open_mode_service_1 = require("./seal/seal-open-mode.service");
-const seal_open_mode_controller_1 = require("./seal/seal-open-mode.controller");
 let InfrastructureModule = class InfrastructureModule {
 };
 exports.InfrastructureModule = InfrastructureModule;
@@ -32,25 +26,19 @@ exports.InfrastructureModule = InfrastructureModule = __decorate([
                 isGlobal: true,
             }),
         ],
-        controllers: [seal_controller_1.SealController, seal_ibe_controller_1.SealIBEController, seal_test_controller_1.SealTestController, seal_open_mode_controller_1.SealOpenModeController],
+        controllers: [session_controller_1.SessionController],
         providers: [
             sui_service_1.SuiService,
             walrus_service_1.WalrusService,
-            session_store_1.SessionStore,
             seal_service_1.SealService,
-            seal_ibe_service_1.SealIBEService,
-            seal_simple_service_1.SealSimpleService,
-            seal_open_mode_service_1.SealOpenModeService,
+            session_key_service_1.SessionKeyService,
             gemini_service_1.GeminiService,
         ],
         exports: [
             sui_service_1.SuiService,
             walrus_service_1.WalrusService,
-            session_store_1.SessionStore,
             seal_service_1.SealService,
-            seal_ibe_service_1.SealIBEService,
-            seal_simple_service_1.SealSimpleService,
-            seal_open_mode_service_1.SealOpenModeService,
+            session_key_service_1.SessionKeyService,
             gemini_service_1.GeminiService,
         ]
     })

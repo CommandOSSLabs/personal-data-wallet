@@ -22,9 +22,10 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
-    "@mysten/seal": "^0.4.20",
-    "@mysten/sui": "^1.37.1",
-    "@mysten/sui.js": "^0.54.1",
+    "@mysten/bcs": "^1.7.0",
+    "@mysten/seal": "^0.5.2",
+    "@mysten/sui": "^1.37.6",
+    "@mysten/walrus": "^0.6.4",no
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",

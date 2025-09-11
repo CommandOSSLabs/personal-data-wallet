@@ -29,6 +29,7 @@ import {
 import { memoryApi } from '@/app/api/memoryApi'
 import { MemoryDecryptionModal } from './memory-decryption-modal'
 import { memoryDecryptionCache } from '@/app/services/memoryDecryptionCache'
+import { sealService } from '@/app/services/sealService'
 
 interface Memory {
   id: string

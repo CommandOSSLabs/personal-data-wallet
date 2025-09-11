@@ -27,7 +27,7 @@ import {
   Modal,
   Button
 } from '@mantine/core'
-import { IconLogout, IconUser, IconBrain, IconWallet } from '@tabler/icons-react'
+import { IconLogout, IconUser, IconBrain, IconWallet, IconShield } from '@tabler/icons-react'
 import { useDisclosure } from '@mantine/hooks'
 import { MemoryManager } from '@/app/components/memory/memory-manager'
 
@@ -427,6 +427,16 @@ export function ChatInterface() {
                 style={{ color: 'white' }}
               >
                 <IconBrain size={16} />
+              </ActionIcon>
+
+              <ActionIcon
+                variant="gradient"
+                gradient={{ from: 'orange', to: 'red' }}
+                onClick={() => window.open('/permissions', '_blank')}
+                title="Access Control & Permissions"
+                style={{ color: 'white' }}
+              >
+                <IconShield size={16} />
               </ActionIcon>
 
               <Group gap="xs" style={{ 

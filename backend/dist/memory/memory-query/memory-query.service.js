@@ -102,7 +102,10 @@ let MemoryQueryService = MemoryQueryService_1 = class MemoryQueryService {
                             continue;
                         seenBlobIds.add(memory.blobId);
                         const encryptedContent = await this.walrusService.retrieveContent(memory.blobId);
-                        const decryptedContent = await this.sealService.decrypt(encryptedContent, userAddress, userSignature);
+                        const encryptedBytes = new Uint8Array(Buffer.from(encryptedContent, 'base64'));
+                        const moveCallConstructor = this.sealService.createSelfAccessTransaction(userAddress);
+                        const decryptedBytes = await this.sealService.decrypt(encryptedBytes, moveCallConstructor, userAddress);
+                        const decryptedContent = new TextDecoder().decode(decryptedBytes);
                         memories.push(decryptedContent);
                         if (memories.length >= limit)
                             break;

@@ -1,31 +1,26 @@
-import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SealClient, SessionKey } from '@mysten/seal';
+import { SealClient } from '@mysten/seal';
 import { SuiClient } from '@mysten/sui/client';
-import { SessionStore } from './session-store';
+import { Transaction } from '@mysten/sui/transactions';
+import { SessionKeyService } from './session-key.service';
 export declare class SealService {
-    private configService;
-    protected sessionStore: SessionStore;
-    protected sealClient: SealClient;
-    protected suiClient: SuiClient;
-    protected logger: Logger;
-    protected packageId: string;
-    protected sealCorePackageId: string;
-    protected moduleName: string;
-    protected threshold: number;
-    protected network: 'mainnet' | 'testnet' | 'devnet';
-    protected sessionKeys: Map<string, SessionKey>;
-    protected isOpenMode: boolean;
-    constructor(configService: ConfigService, sessionStore: SessionStore);
-    encrypt(content: string, userAddress: string, customPackageId?: string): Promise<{
-        encrypted: string;
-        backupKey: string;
+    private readonly configService;
+    private readonly sessionKeyService;
+    private readonly sealClient;
+    private readonly suiClient;
+    private readonly logger;
+    private readonly packageId;
+    private readonly threshold;
+    constructor(configService: ConfigService, sessionKeyService: SessionKeyService);
+    encrypt(data: Uint8Array, policyObjectId: string, nonce?: string): Promise<{
+        encrypted: Uint8Array;
+        identityId: string;
     }>;
-    decrypt(encryptedContent: string, userAddress: string, signature?: string, customPackageId?: string, customModuleName?: string): Promise<string>;
-    decryptWithBackupKey(encryptedContent: string, backupKey: string): Promise<string>;
-    protected getOrCreateSessionKey(userAddress: string, signature?: string, packageId?: string): Promise<SessionKey>;
-    getSessionKeyMessage(userAddress: string, packageId?: string): Promise<Uint8Array>;
-    protected isSessionKeyExpired(sessionKey: SessionKey): boolean;
-    isInOpenMode(): boolean;
-    fetchMultipleKeys(ids: string[], userAddress: string, signature?: string, packageId?: string, moduleName?: string): Promise<Map<string, Uint8Array>>;
+    decrypt(encryptedData: Uint8Array, moveCallConstructor: (tx: Transaction, id: string) => void, userAddress: string): Promise<Uint8Array>;
+    createSelfAccessTransaction(userAddress: string): (tx: Transaction, id: string) => void;
+    createAppAccessTransaction(allowlistId: string): (tx: Transaction, id: string) => void;
+    createTimelockAccessTransaction(timelockId: string): (tx: Transaction, id: string) => void;
+    createRoleAccessTransaction(roleRegistryId: string, userAddress: string, role: string): (tx: Transaction, id: string) => void;
+    getSuiClient(): SuiClient;
+    getSealClient(): SealClient;
 }

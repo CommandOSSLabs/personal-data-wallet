@@ -3,15 +3,13 @@ import { ConfigModule } from '@nestjs/config';
 import { SuiService } from './sui/sui.service';
 import { WalrusService } from './walrus/walrus.service';
 import { SealService } from './seal/seal.service';
-import { SealController } from './seal/seal.controller';
-import { SealIBEService } from './seal/seal-ibe.service';
-import { SealIBEController } from './seal/seal-ibe.controller';
+import { SessionKeyService } from './seal/session-key.service';
+import { SessionController } from './seal/session.controller';
+import { TimelockController } from './seal/timelock.controller';
+import { AllowlistController } from './seal/allowlist.controller';
+import { RoleController } from './seal/role.controller';
+import { AnalyticsController } from './seal/analytics.controller';
 import { GeminiService } from './gemini/gemini.service';
-import { SessionStore } from './seal/session-store';
-import { SealSimpleService } from './seal/seal-simple.service';
-import { SealTestController } from './seal/seal-test.controller';
-import { SealOpenModeService } from './seal/seal-open-mode.service';
-import { SealOpenModeController } from './seal/seal-open-mode.controller';
 
 @Global()
 @Module({
@@ -20,25 +18,19 @@ import { SealOpenModeController } from './seal/seal-open-mode.controller';
       isGlobal: true,
     }),
   ],
-  controllers: [SealController, SealIBEController, SealTestController, SealOpenModeController],
+  controllers: [SessionController, TimelockController, AllowlistController, RoleController, AnalyticsController],
   providers: [
     SuiService,
     WalrusService,
-    SessionStore,
     SealService,
-    SealIBEService,
-    SealSimpleService,
-    SealOpenModeService,
+    SessionKeyService,
     GeminiService,
   ],
   exports: [
     SuiService,
     WalrusService,
-    SessionStore,
     SealService,
-    SealIBEService,
-    SealSimpleService,
-    SealOpenModeService,
+    SessionKeyService,
     GeminiService,
   ]
 })

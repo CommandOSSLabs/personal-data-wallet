@@ -16,273 +16,142 @@ const config_1 = require("@nestjs/config");
 const seal_1 = require("@mysten/seal");
 const client_1 = require("@mysten/sui/client");
 const transactions_1 = require("@mysten/sui/transactions");
-const utils_1 = require("@mysten/sui/utils");
-const session_store_1 = require("./session-store");
+const session_key_service_1 = require("./session-key.service");
 let SealService = SealService_1 = class SealService {
     configService;
-    sessionStore;
+    sessionKeyService;
     sealClient;
     suiClient;
     logger = new common_1.Logger(SealService_1.name);
     packageId;
-    sealCorePackageId = '0x62c79dfeb0a2ca8c308a56bde530ccf3846535e1623949d45c90d23128afff52';
-    moduleName;
-    threshold;
-    network;
-    sessionKeys = new Map();
-    isOpenMode;
-    constructor(configService, sessionStore) {
+    threshold = 2;
+    constructor(configService, sessionKeyService) {
         this.configService = configService;
-        this.sessionStore = sessionStore;
-        this.network = this.configService.get('SEAL_NETWORK', 'testnet');
-        this.packageId = this.configService.get('SEAL_PACKAGE_ID', '');
-        this.moduleName = this.configService.get('SEAL_MODULE_NAME', 'seal_access_control');
-        this.threshold = this.configService.get('SEAL_THRESHOLD', 2);
-        this.isOpenMode = this.configService.get('SEAL_OPEN_MODE', true);
+        this.sessionKeyService = sessionKeyService;
+        const network = this.configService.get('SEAL_NETWORK', 'testnet');
+        this.packageId = this.configService.get('SEAL_PACKAGE_ID', '0xa2b73c54b9f354050462547787463e79f33b48fc6c1fea35673f12e3a535ec60');
         this.suiClient = new client_1.SuiClient({
-            url: this.configService.get('SUI_RPC_URL', (0, client_1.getFullnodeUrl)(this.network))
+            url: this.configService.get('SUI_RPC_URL', (0, client_1.getFullnodeUrl)(network))
         });
-        const keyServerIds = this.configService.get('SEAL_KEY_SERVER_IDS', []);
-        const serverConfigs = keyServerIds.length > 0
-            ? keyServerIds.map(id => ({ objectId: id, weight: 1 }))
-            : (0, seal_1.getAllowlistedKeyServers)(this.network).map(id => ({ objectId: id, weight: 1 }));
+        const keyServerIds = this.configService.get('SEAL_KEY_SERVER_IDS', [
+            '0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75',
+            '0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8'
+        ]);
+        const serverConfigs = keyServerIds.map(id => ({ objectId: id, weight: 1 }));
         this.sealClient = new seal_1.SealClient({
             suiClient: this.suiClient,
             serverConfigs,
-            verifyKeyServers: !this.isOpenMode,
+            verifyKeyServers: false,
         });
-        this.logger.log(`SEAL service initialized with ${serverConfigs.length} key servers on ${this.network}`);
-        this.logger.log(`Operating in ${this.isOpenMode ? 'OPEN' : 'PERMISSIONED'} mode`);
+        this.logger.log(`SEAL service initialized with ${serverConfigs.length} key servers on ${network}`);
+        this.logger.log(`Package ID: ${this.packageId || 'Not configured'}`);
     }
-    async encrypt(content, userAddress, customPackageId) {
+    async encrypt(data, policyObjectId, nonce = Math.random().toString(36)) {
         try {
-            const data = new TextEncoder().encode(content);
-            let packageIdToUse;
-            if (this.isOpenMode && customPackageId) {
-                packageIdToUse = customPackageId;
-                this.logger.debug(`Open mode: Using custom package ID ${packageIdToUse}`);
-            }
-            else if (this.packageId) {
-                packageIdToUse = this.packageId;
-            }
-            else {
-                packageIdToUse = this.sealCorePackageId;
-            }
-            const identityString = this.isOpenMode
-                ? `open:${userAddress}`
-                : `self:${userAddress}`;
-            const identityBytes = new TextEncoder().encode(identityString);
-            const id = (0, utils_1.toHEX)(identityBytes);
-            const { encryptedObject, key: backupKey } = await this.sealClient.encrypt({
+            const identityId = `${policyObjectId}:${nonce}`;
+            const result = await this.sealClient.encrypt({
                 threshold: this.threshold,
-                packageId: packageIdToUse,
-                id: id,
+                packageId: this.packageId,
+                id: identityId,
                 data,
             });
-            const encrypted = Buffer.from(encryptedObject).toString('base64');
-            const backupKeyHex = (0, utils_1.toHEX)(backupKey);
-            this.logger.debug(`Encrypted content for user ${userAddress} with threshold ${this.threshold}`);
-            this.logger.debug(`Mode: ${this.isOpenMode ? 'OPEN' : 'PERMISSIONED'}, Package: ${packageIdToUse}`);
             return {
-                encrypted,
-                backupKey: backupKeyHex,
+                encrypted: result.encryptedObject,
+                identityId,
             };
         }
         catch (error) {
-            this.logger.error(`Error encrypting content: ${error.message}`);
-            throw new Error(`SEAL encryption error: ${error.message}`);
+            this.logger.error('Failed to encrypt data', error);
+            throw new Error(`Encryption failed: ${error.message}`);
         }
     }
-    async decrypt(encryptedContent, userAddress, signature, customPackageId, customModuleName) {
+    async decrypt(encryptedData, moveCallConstructor, userAddress) {
         try {
-            let packageIdToUse;
-            let moduleNameToUse;
-            if (this.isOpenMode && customPackageId && customModuleName) {
-                packageIdToUse = customPackageId;
-                moduleNameToUse = customModuleName;
-                this.logger.debug(`Open mode: Using custom package ${packageIdToUse}::${moduleNameToUse}`);
+            const encryptedObject = seal_1.EncryptedObject.parse(encryptedData);
+            const identityId = encryptedObject.id;
+            this.logger.debug(`Decrypting data with identity: ${identityId} for user: ${userAddress}`);
+            let sessionKey = await this.sessionKeyService.getSessionKey(userAddress, this.packageId);
+            if (!sessionKey) {
+                throw new Error('No valid session key found. Please create a session first.');
             }
-            else if (this.packageId) {
-                packageIdToUse = this.packageId;
-                moduleNameToUse = this.moduleName;
-            }
-            else {
-                packageIdToUse = this.sealCorePackageId;
-                moduleNameToUse = '';
-            }
-            const sessionKey = await this.getOrCreateSessionKey(userAddress, signature, packageIdToUse);
-            const encryptedBytes = new Uint8Array(Buffer.from(encryptedContent, 'base64'));
-            const identityString = this.isOpenMode
-                ? `open:${userAddress}`
-                : `self:${userAddress}`;
-            const identityBytes = new TextEncoder().encode(identityString);
-            const id = (0, utils_1.toHEX)(identityBytes);
             const tx = new transactions_1.Transaction();
-            if (moduleNameToUse) {
-                tx.moveCall({
-                    target: `${packageIdToUse}::${moduleNameToUse}::seal_approve`,
-                    arguments: [
-                        tx.pure.vector("u8", (0, utils_1.fromHEX)(id)),
-                    ]
-                });
-            }
-            const txBytes = await tx.build({
-                client: this.suiClient,
-                onlyTransactionKind: true
-            });
-            this.logger.debug(`Decrypting with mode: ${this.isOpenMode ? 'OPEN' : 'PERMISSIONED'}`);
-            this.logger.debug(`Package: ${packageIdToUse}, Module: ${moduleNameToUse || 'native'}`);
-            const decryptedBytes = await this.sealClient.decrypt({
-                data: encryptedBytes,
-                sessionKey,
-                txBytes,
-            });
-            const decrypted = new TextDecoder().decode(decryptedBytes);
-            this.logger.debug(`Decrypted content for user ${userAddress}`);
-            return decrypted;
-        }
-        catch (error) {
-            this.logger.error(`Error decrypting content: ${error.message}`);
-            throw new Error(`SEAL decryption error: ${error.message}`);
-        }
-    }
-    async decryptWithBackupKey(encryptedContent, backupKey) {
-        try {
-            throw new Error('Backup key decryption not yet implemented');
-        }
-        catch (error) {
-            this.logger.error(`Error decrypting with backup key: ${error.message}`);
-            throw new Error(`Backup key decryption error: ${error.message}`);
-        }
-    }
-    async getOrCreateSessionKey(userAddress, signature, packageId) {
-        const pkgId = packageId || this.packageId || this.sealCorePackageId;
-        const cacheKey = `${userAddress}:${pkgId}`;
-        const cached = this.sessionKeys.get(cacheKey);
-        const sessionData = this.sessionStore.get(cacheKey);
-        if (cached && sessionData && sessionData.signature) {
-            this.logger.debug(`Using cached SessionKey for ${userAddress}`);
-            return cached;
-        }
-        if (cached && signature && (!sessionData || !sessionData.signature)) {
-            this.logger.debug(`Setting signature on existing SessionKey for ${userAddress}`);
-            try {
-                cached.setPersonalMessageSignature(signature);
-                this.logger.debug(`Signature set successfully on cached SessionKey`);
-                if (sessionData) {
-                    sessionData.signature = signature;
-                    this.sessionStore.set(cacheKey, sessionData);
-                }
-                return cached;
-            }
-            catch (error) {
-                this.logger.error(`Failed to set signature on cached SessionKey: ${error.message}`);
-            }
-        }
-        if (sessionData && cached) {
-            if (signature) {
-                this.logger.debug(`Setting new signature on cached SessionKey for ${userAddress}`);
-                try {
-                    cached.setPersonalMessageSignature(signature);
-                    this.logger.debug(`Signature set successfully`);
-                    sessionData.signature = signature;
-                    this.sessionStore.set(cacheKey, sessionData);
-                }
-                catch (error) {
-                    this.logger.error(`Failed to set signature: ${error.message}`);
-                    throw new Error(`Failed to set session key signature: ${error.message}`);
-                }
-            }
-            else if (sessionData.signature) {
-                try {
-                    cached.setPersonalMessageSignature(sessionData.signature);
-                    this.logger.debug(`Set stored signature on cached SessionKey`);
-                }
-                catch (error) {
-                    this.logger.warn(`Failed to set stored signature: ${error.message}`);
-                    throw new Error('User signature required for session key initialization');
-                }
-            }
-            else {
-                throw new Error('User signature required for session key initialization');
-            }
-            return cached;
-        }
-        throw new Error('No session found. Please request session message first.');
-    }
-    async getSessionKeyMessage(userAddress, packageId) {
-        const pkgId = packageId || this.packageId || this.sealCorePackageId;
-        const cacheKey = `${userAddress}:${pkgId}`;
-        const existingSession = this.sessionStore.get(cacheKey);
-        if (existingSession && !existingSession.signature) {
-            return Buffer.from(existingSession.personalMessage, 'hex');
-        }
-        const ttlMin = this.configService.get('SEAL_SESSION_TTL_MIN', 60);
-        const sessionKey = new seal_1.SessionKey({
-            address: userAddress,
-            packageId: pkgId,
-            ttlMin,
-            suiClient: this.suiClient,
-        });
-        const personalMessage = sessionKey.getPersonalMessage();
-        this.sessionStore.set(cacheKey, {
-            address: userAddress,
-            personalMessage: Buffer.from(personalMessage).toString('hex'),
-            expiresAt: Date.now() + (ttlMin * 60 * 1000),
-        });
-        this.sessionKeys.set(cacheKey, sessionKey);
-        return personalMessage;
-    }
-    isSessionKeyExpired(sessionKey) {
-        return false;
-    }
-    isInOpenMode() {
-        return this.isOpenMode;
-    }
-    async fetchMultipleKeys(ids, userAddress, signature, packageId, moduleName) {
-        try {
-            const pkgId = (this.isOpenMode && packageId) ? packageId : (this.packageId || this.sealCorePackageId);
-            const modName = (this.isOpenMode && moduleName) ? moduleName : this.moduleName;
-            const sessionKey = await this.getOrCreateSessionKey(userAddress, signature, pkgId);
-            const tx = new transactions_1.Transaction();
-            for (const id of ids) {
-                if (modName) {
-                    tx.moveCall({
-                        target: `${pkgId}::${modName}::seal_approve`,
-                        arguments: [
-                            tx.pure.vector("u8", (0, utils_1.fromHEX)(id)),
-                        ],
-                    });
-                }
-            }
-            const txBytes = await tx.build({
-                client: this.suiClient,
-                onlyTransactionKind: true
-            });
-            const keys = await this.sealClient.fetchKeys({
-                ids: ids,
+            moveCallConstructor(tx, identityId);
+            const txBytes = await tx.build({ client: this.suiClient, onlyTransactionKind: true });
+            await this.sealClient.fetchKeys({
+                ids: [identityId],
                 txBytes,
                 sessionKey,
                 threshold: this.threshold,
             });
-            const result = new Map();
-            ids.forEach((id, index) => {
-                if (keys[index]) {
-                    result.set(id, keys[index]);
-                }
+            const decrypted = await this.sealClient.decrypt({
+                data: encryptedData,
+                sessionKey,
+                txBytes,
             });
-            return result;
+            this.logger.debug(`Successfully decrypted data for user: ${userAddress}`);
+            return decrypted;
         }
         catch (error) {
-            this.logger.error(`Error fetching multiple keys: ${error.message}`);
-            throw new Error(`SEAL batch fetch error: ${error.message}`);
+            this.logger.error('Failed to decrypt data', error);
+            throw new Error(`Decryption failed: ${error.message}`);
         }
+    }
+    createSelfAccessTransaction(userAddress) {
+        return (tx, id) => {
+            tx.moveCall({
+                target: `${this.packageId}::seal_access_control::seal_approve`,
+                arguments: [
+                    tx.pure.vector('u8', Array.from(new TextEncoder().encode(id))),
+                ],
+            });
+        };
+    }
+    createAppAccessTransaction(allowlistId) {
+        return (tx, id) => {
+            tx.moveCall({
+                target: `${this.packageId}::seal_access_control::seal_approve_app`,
+                arguments: [
+                    tx.object(allowlistId),
+                    tx.pure.vector('u8', Array.from(new TextEncoder().encode(id))),
+                ],
+            });
+        };
+    }
+    createTimelockAccessTransaction(timelockId) {
+        return (tx, id) => {
+            tx.moveCall({
+                target: `${this.packageId}::seal_access_control::seal_approve_timelock`,
+                arguments: [
+                    tx.object(timelockId),
+                    tx.pure.vector('u8', Array.from(new TextEncoder().encode(id))),
+                ],
+            });
+        };
+    }
+    createRoleAccessTransaction(roleRegistryId, userAddress, role) {
+        return (tx, id) => {
+            tx.moveCall({
+                target: `${this.packageId}::seal_access_control::seal_approve_role`,
+                arguments: [
+                    tx.object(roleRegistryId),
+                    tx.pure.address(userAddress),
+                    tx.pure.string(role),
+                    tx.pure.vector('u8', Array.from(new TextEncoder().encode(id))),
+                ],
+            });
+        };
+    }
+    getSuiClient() {
+        return this.suiClient;
+    }
+    getSealClient() {
+        return this.sealClient;
     }
 };
 exports.SealService = SealService;
 exports.SealService = SealService = SealService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [config_1.ConfigService,
-        session_store_1.SessionStore])
+        session_key_service_1.SessionKeyService])
 ], SealService);
 //# sourceMappingURL=seal.service.js.map

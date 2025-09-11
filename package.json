@@ -20,11 +20,9 @@
     "@mantine/spotlight": "^8.2.1",
     "@mysten/dapp-kit": "^0.17.1",
     "@mysten/sui": "^1.37.1",
-<<<<<<< Updated upstream
-    "@mysten/sui.js": "^0.54.1",
-=======
-    "@mysten/walrus": "^0.5.3",
->>>>>>> Stashed changes
+    "@mysten/seal": "^0.5.2",
+    "@mysten/walrus": "^0.6.7",
+    "@mysten/bcs": "1.7.0",
     "@suiet/wallet-kit": "^0.5.1",
     "@tabler/icons-react": "^3.34.1",
     "@tailwindcss/typography": "^0.5.16",

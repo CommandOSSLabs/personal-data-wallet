@@ -113,8 +113,9 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
                 entityToVectorMap[entity.id] = vectorId;
             });
             graph = this.graphService.addToGraph(graph, extraction.entities, extraction.relationships);
-            const { encrypted, backupKey } = await this.sealService.encrypt(memoryDto.content, memoryDto.userAddress);
-            const contentBlobId = await this.walrusService.uploadContent(encrypted);
+            const contentBytes = new TextEncoder().encode(memoryDto.content);
+            const { encrypted, identityId } = await this.sealService.encrypt(contentBytes, memoryDto.userAddress);
+            const contentBlobId = await this.walrusService.uploadContent(Buffer.from(encrypted).toString('base64'));
             const newIndexBlobId = await this.hnswIndexService.saveIndex(index);
             const newGraphBlobId = await this.graphService.saveGraph(graph);
             await this.suiService.updateMemoryIndex(indexId, memoryDto.userAddress, currentVersion, newIndexBlobId, newGraphBlobId);
@@ -170,8 +171,9 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
                 entityToVectorMap[entity.id] = vectorId;
             });
             graph = this.graphService.addToGraph(graph, extraction.entities, extraction.relationships);
-            const { encrypted, backupKey } = await this.sealService.encrypt(content, userAddress);
-            const contentBlobId = await this.walrusService.uploadContent(encrypted);
+            const contentBytes = new TextEncoder().encode(content);
+            const { encrypted, identityId } = await this.sealService.encrypt(contentBytes, userAddress);
+            const contentBlobId = await this.walrusService.uploadContent(Buffer.from(encrypted).toString('base64'));
             const newIndexBlobId = await this.hnswIndexService.saveIndex(index);
             const newGraphBlobId = await this.graphService.saveGraph(graph);
             await this.suiService.updateMemoryIndex(indexId, userAddress, currentVersion, newIndexBlobId, newGraphBlobId);
