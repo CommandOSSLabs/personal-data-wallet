@@ -123,45 +123,218 @@ const suiClient = new SuiClient({
 ### 2. **Configure Key Servers**
 
 ```typescript
-import { SealClient, getAllowlistedKeyServers } from '@mysten/seal';
+import { SealClient } from '@mysten/seal';
 
-// Use verified key servers
-const serverObjectIds = getAllowlistedKeyServers('testnet');
+// Official Mysten Labs Testnet Key Servers (Verified)
+const TESTNET_KEY_SERVERS = [
+  {
+    objectId: "0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75",
+    url: "https://seal-key-server-testnet-1.mystenlabs.com",
+    mode: "Open"
+  },
+  {
+    objectId: "0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8", 
+    url: "https://seal-key-server-testnet-2.mystenlabs.com",
+    mode: "Open"
+  }
+];
 
-// Or specify custom servers
+// Production client setup
+const sealClient = new SealClient({
+  suiClient,
+  serverConfigs: TESTNET_KEY_SERVERS.map(server => ({
+    objectId: server.objectId,
+    weight: 1, // Equal weight for threshold
+  })),
+  verifyKeyServers: false, // Set to true for production
+  timeout: 30000, // 30 second timeout
+  debug: false, // Enable for troubleshooting
+});
+
+// Custom server configuration (for advanced use cases)
 const customServerIds = [
   '0x123...', // Server 1 object ID
   '0x456...', // Server 2 object ID  
   '0x789...', // Server 3 object ID
 ];
 
-const client = new SealClient({
+const customClient = new SealClient({
   suiClient,
-  serverConfigs: serverObjectIds.map((id) => ({
+  serverConfigs: customServerIds.map(id => ({
     objectId: id,
-    weight: 1, // Server voting weight
+    weight: 1,
   })),
-  verifyKeyServers: true, // Verify server authenticity
+  threshold: 2, // Require 2-of-3 servers
+  verifyKeyServers: false, // Skip verification for custom servers
 });
 ```
 
-### 3. **Setup Session Key** 
+### 3. **Setup Session Key Management**
 
 ```typescript
-import { SessionKey } from '@mysten/seal';
+import { SessionKey, type ExportedSessionKey } from '@mysten/seal';
+import { set, get } from 'idb-keyval';
 
-// Create session key for user authorization
-const sessionKey = new SessionKey({
-  packageId: '0xYourPackageId',
-  userId: 'user@example.com', // Optional identifier
-  mvr_name: 'your-package-name', // Move Registry name (optional)
-});
+// Session key management class
+class SessionKeyManager {
+  private static readonly TTL_MINUTES = 10;
+  private keys = new Map<string, SessionKey>();
+  
+  /// Create session key for user
+  async createSessionKey(
+    userAddress: string,
+    packageId: string,
+    mvrName?: string
+  ): Promise<SessionKey> {
+    const sessionKey = await SessionKey.create({
+      address: userAddress,
+      packageId,
+      ttlMin: SessionKeyManager.TTL_MINUTES,
+      suiClient,
+      mvrName,
+    });
+    
+    // Cache in memory
+    const keyId = `${userAddress}_${packageId}`;
+    this.keys.set(keyId, sessionKey);
+    
+    return sessionKey;
+  }
+  
+  /// Get or create session key with persistence
+  async getOrCreateSessionKey(
+    userAddress: string,
+    packageId: string,
+    mvrName?: string
+  ): Promise<SessionKey> {
+    const keyId = `${userAddress}_${packageId}`;
+    
+    // Check memory cache
+    if (this.keys.has(keyId)) {
+      const sessionKey = this.keys.get(keyId)!;
+      if (!sessionKey.isExpired()) {
+        return sessionKey;
+      }
+    }
+    
+    // Try to load from IndexedDB
+    try {
+      const stored: ExportedSessionKey = await get(`sessionKey_${keyId}`);
+      if (stored) {
+        const sessionKey = await SessionKey.import(stored, suiClient);
+        if (!sessionKey.isExpired() && sessionKey.getAddress() === userAddress) {
+          this.keys.set(keyId, sessionKey);
+          return sessionKey;
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to load stored session key:', error);
+    }
+    
+    // Create new session key
+    const sessionKey = await this.createSessionKey(userAddress, packageId, mvrName);
+    
+    // Persist to IndexedDB
+    try {
+      await set(`sessionKey_${keyId}`, sessionKey.export());
+    } catch (error) {
+      console.warn('Failed to persist session key:', error);
+    }
+    
+    return sessionKey;
+  }
+  
+  /// Setup personal message signing
+  async setupPersonalMessage(
+    sessionKey: SessionKey,
+    signPersonalMessage: (params: { message: string }) => Promise<{ signature: string }>
+  ): Promise<void> {
+    if (sessionKey.getPersonalMessageSignature()) {
+      return; // Already signed
+    }
+    
+    const { signature } = await signPersonalMessage({
+      message: sessionKey.getPersonalMessage()
+    });
+    
+    await sessionKey.setPersonalMessageSignature(signature);
+    
+    // Update persisted version
+    const keyId = `${sessionKey.getAddress()}_${sessionKey.getPackageId()}`;
+    await set(`sessionKey_${keyId}`, sessionKey.export());
+  }
+  
+  /// Clear expired session keys
+  async clearExpiredKeys(): Promise<void> {
+    for (const [keyId, sessionKey] of this.keys.entries()) {
+      if (sessionKey.isExpired()) {
+        this.keys.delete(keyId);
+        await set(`sessionKey_${keyId}`, null);
+      }
+    }
+  }
+}
 
-// Store session key
-sessionKey.save(); // Uses localStorage by default
-
-// Or use IndexedDB for cross-tab persistence
-await sessionKey.saveToIndexedDB();
+// React hook for session key management
+export function useSessionKey(packageId: string, mvrName?: string) {
+  const { currentAccount } = useCurrentAccount();
+  const { mutate: signPersonalMessage } = useSignPersonalMessage();
+  const [sessionKeyManager] = useState(() => new SessionKeyManager());
+  const [sessionKey, setSessionKey] = useState<SessionKey | null>(null);
+  const [loading, setLoading] = useState(false);
+  
+  const initializeSessionKey = useCallback(async () => {
+    if (!currentAccount?.address) return;
+    
+    setLoading(true);
+    try {
+      const key = await sessionKeyManager.getOrCreateSessionKey(
+        currentAccount.address,
+        packageId,
+        mvrName
+      );
+      
+      // Setup personal message signing if needed
+      await new Promise((resolve, reject) => {
+        if (key.getPersonalMessageSignature()) {
+          resolve(key);
+          return;
+        }
+        
+        signPersonalMessage(
+          { message: key.getPersonalMessage() },
+          {
+            onSuccess: async (result: { signature: string }) => {
+              try {
+                await key.setPersonalMessageSignature(result.signature);
+                resolve(key);
+              } catch (error) {
+                reject(error);
+              }
+            },
+            onError: reject
+          }
+        );
+      });
+      
+      setSessionKey(key);
+    } catch (error) {
+      console.error('Failed to initialize session key:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentAccount, packageId, mvrName, sessionKeyManager, signPersonalMessage]);
+  
+  useEffect(() => {
+    initializeSessionKey();
+  }, [initializeSessionKey]);
+  
+  return {
+    sessionKey,
+    loading,
+    reinitialize: initializeSessionKey,
+  };
+}
 ```
 
 ## Frontend Integration
@@ -184,7 +357,7 @@ export function SealProvider({ children }) {
         url: getFullnodeUrl('testnet') 
       });
       
-      const serverIds = getAllowlistedKeyServers('testnet');
+     
       
       const client = new SealClient({
         suiClient,
@@ -377,58 +550,302 @@ async function decryptTimeLocked(
 }
 ```
 
-### 5. **Allowlist Management**
+### 5. **Allowlist Management (Official Pattern)**
 
+#### Move Contract Implementation
+```move
+// allowlist.move - Based on official SEAL examples
+module memory_wallet::allowlist {
+    use std::string::String;
+    use sui::dynamic_field as df;
+    
+    const EInvalidCap: u64 = 0;
+    const ENoAccess: u64 = 1;
+    const EDuplicate: u64 = 2;
+    const MARKER: u64 = 3;
+    
+    public struct Allowlist has key {
+        id: UID,
+        name: String,
+        list: vector<address>,
+    }
+    
+    public struct Cap has key {
+        id: UID,
+        allowlist_id: ID,
+    }
+    
+    /// Create allowlist with admin capability
+    public fun create_allowlist(name: String, ctx: &mut TxContext): Cap {
+        let allowlist = Allowlist {
+            id: object::new(ctx),
+            list: vector::empty(),
+            name,
+        };
+        let cap = Cap {
+            id: object::new(ctx),
+            allowlist_id: object::id(&allowlist),
+        };
+        transfer::share_object(allowlist);
+        cap
+    }
+    
+    /// Entry function for easier CLI usage
+    entry fun create_allowlist_entry(name: String, ctx: &mut TxContext) {
+        transfer::transfer(create_allowlist(name, ctx), ctx.sender());
+    }
+    
+    /// Add member to allowlist (requires admin cap)
+    public fun add(allowlist: &mut Allowlist, cap: &Cap, account: address) {
+        assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
+        assert!(!allowlist.list.contains(&account), EDuplicate);
+        allowlist.list.push_back(account);
+    }
+    
+    /// Remove member from allowlist (requires admin cap)
+    public fun remove(allowlist: &mut Allowlist, cap: &Cap, account: address) {
+        assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
+        allowlist.list = allowlist.list.filter!(|x| x != account);
+    }
+    
+    /// Core SEAL approval function
+    entry fun seal_approve(id: vector<u8>, allowlist: &Allowlist, ctx: &TxContext) {
+        assert!(approve_internal(ctx.sender(), id, allowlist), ENoAccess);
+    }
+    
+    /// Internal approval logic with prefix checking
+    fun approve_internal(caller: address, id: vector<u8>, allowlist: &Allowlist): bool {
+        // Check if id has correct allowlist namespace prefix
+        let namespace = allowlist.id.to_bytes();
+        if (!is_prefix(namespace, id)) {
+            return false
+        };
+        // Verify caller is in allowlist
+        allowlist.list.contains(&caller)
+    }
+    
+    /// Attach encrypted content to allowlist
+    public fun publish(allowlist: &mut Allowlist, cap: &Cap, blob_id: String) {
+        assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
+        df::add(&mut allowlist.id, blob_id, MARKER);
+    }
+    
+    /// Get allowlist namespace for encryption
+    public fun namespace(allowlist: &Allowlist): vector<u8> {
+        allowlist.id.to_bytes()
+    }
+}
+```
+
+#### Frontend Integration
 ```typescript
-// Frontend allowlist management
+// Complete allowlist management with SEAL integration
 class AllowlistManager {
+  private sealClient: SealClient;
+  private sessionKeyManager: SessionKeyManager;
+  
   constructor(
     private packageId: string,
-    private allowlistObjectId: string,
-    private sealClient: SealClient
-  ) {}
-  
-  async addMember(memberAddress: string, wallet: any) {
-    const tx = new Transaction();
-    
-    tx.moveCall({
-      target: `${this.packageId}::allowlist::add_member`,
-      arguments: [
-        tx.object(this.allowlistObjectId),
-        tx.pure.address(memberAddress),
-      ],
-    });
-    
-    const result = await wallet.signAndExecuteTransaction({
-      transaction: tx,
-    });
-    
-    return result;
+    private suiClient: SuiClient,
+    sealClient: SealClient
+  ) {
+    this.sealClient = sealClient;
+    this.sessionKeyManager = new SessionKeyManager();
   }
   
-  async checkAccess(identity: string, userAddress: string) {
+  /// Create new allowlist
+  async createAllowlist(name: string, wallet: any): Promise<string> {
     const tx = new Transaction();
-    
     tx.moveCall({
-      target: `${this.packageId}::allowlist::seal_approve_allowlist`,
+      target: `${this.packageId}::allowlist::create_allowlist_entry`,
+      arguments: [tx.pure.string(name)],
+    });
+    tx.setGasBudget(10000000);
+    
+    const result = await wallet.signAndExecuteTransaction({ transaction: tx });
+    
+    // Extract created allowlist object ID
+    const allowlistObject = result.effects?.created?.find(
+      item => item.owner && typeof item.owner === 'object' && 'Shared' in item.owner
+    );
+    
+    return allowlistObject?.reference?.objectId || '';
+  }
+  
+  /// Add member to allowlist
+  async addMember(
+    allowlistId: string, 
+    capId: string, 
+    memberAddress: string, 
+    wallet: any
+  ): Promise<void> {
+    const tx = new Transaction();
+    tx.moveCall({
+      target: `${this.packageId}::allowlist::add`,
       arguments: [
-        tx.pure.string(identity),
-        tx.object(this.allowlistObjectId),
+        tx.object(allowlistId),
+        tx.object(capId),
+        tx.pure.address(memberAddress)
+      ],
+    });
+    tx.setGasBudget(10000000);
+    
+    await wallet.signAndExecuteTransaction({ transaction: tx });
+  }
+  
+  /// Remove member from allowlist
+  async removeMember(
+    allowlistId: string,
+    capId: string, 
+    memberAddress: string,
+    wallet: any
+  ): Promise<void> {
+    const tx = new Transaction();
+    tx.moveCall({
+      target: `${this.packageId}::allowlist::remove`,
+      arguments: [
+        tx.object(allowlistId),
+        tx.object(capId),
+        tx.pure.address(memberAddress)
+      ],
+    });
+    tx.setGasBudget(10000000);
+    
+    await wallet.signAndExecuteTransaction({ transaction: tx });
+  }
+  
+  /// Encrypt content for allowlist members
+  async encryptForAllowlist(
+    content: Uint8Array,
+    allowlistId: string,
+    nonce?: string
+  ): Promise<{ encrypted: Uint8Array; identity: string }> {
+    // Get allowlist object to derive namespace
+    const allowlist = await this.suiClient.getObject({
+      id: allowlistId,
+      options: { showContent: true }
+    });
+    
+    // Create identity: [allowlist_namespace][nonce]
+    const namespace = allowlistId; // Simplified - should be allowlist.id.to_bytes()
+    const identityNonce = nonce || Date.now().toString();
+    const identity = `${namespace}_${identityNonce}`;
+    
+    const encrypted = await this.sealClient.encrypt(content, identity);
+    return { encrypted, identity };
+  }
+  
+  /// Decrypt content with allowlist access
+  async decryptWithAllowlist(
+    encryptedData: Uint8Array,
+    identity: string,
+    allowlistId: string,
+    userAddress: string,
+    signPersonalMessage: (params: any) => Promise<{ signature: string }>
+  ): Promise<Uint8Array> {
+    // Get or create session key
+    const sessionKey = await this.sessionKeyManager.getOrCreateSessionKey(
+      userAddress,
+      this.packageId
+    );
+    
+    // Sign personal message if needed
+    if (!sessionKey.getPersonalMessageSignature()) {
+      const { signature } = await signPersonalMessage({
+        message: sessionKey.getPersonalMessage()
+      });
+      await sessionKey.setPersonalMessageSignature(signature);
+    }
+    
+    // Create access control transaction
+    const tx = new Transaction();
+    tx.moveCall({
+      target: `${this.packageId}::allowlist::seal_approve`,
+      arguments: [
+        tx.pure.vector('u8', fromHex(identity)),
+        tx.object(allowlistId)
       ],
     });
     
+    const txBytes = tx.build({ 
+      client: this.suiClient, 
+      onlyTransactionKind: true 
+    });
+    
+    // Decrypt using SEAL client
+    return await this.sealClient.decrypt({
+      data: encryptedData,
+      sessionKey,
+      txBytes,
+    });
+  }
+  
+  /// Check if user has access to allowlist
+  async checkAccess(
+    allowlistId: string,
+    userAddress: string
+  ): Promise<boolean> {
     try {
-      await this.sealClient.decrypt(
-        dummyEncrypted, // Test decryption
-        identity,
-        tx,
-        { address: userAddress }
-      );
-      return true;
+      const allowlist = await this.suiClient.getObject({
+        id: allowlistId,
+        options: { showContent: true }
+      });
+      
+      const fields = (allowlist.data?.content as { fields: any })?.fields || {};
+      const memberList = fields.list || [];
+      
+      return memberList.includes(userAddress);
     } catch (error) {
+      console.error('Error checking allowlist access:', error);
       return false;
     }
   }
+}
+```
+
+#### React Hook for Allowlist Management
+```typescript
+// Custom hook for allowlist operations
+export function useAllowlist(packageId: string, allowlistId?: string) {
+  const { currentAccount } = useCurrentAccount();
+  const { mutate: signPersonalMessage } = useSignPersonalMessage();
+  const suiClient = useSuiClient();
+  const [allowlistManager] = useState(
+    () => new AllowlistManager(packageId, suiClient, sealClient)
+  );
+  
+  const addMember = useCallback(async (memberAddress: string, capId: string) => {
+    if (!currentAccount || !allowlistId) return;
+    
+    await allowlistManager.addMember(
+      allowlistId,
+      capId,
+      memberAddress,
+      currentAccount
+    );
+  }, [allowlistManager, allowlistId, currentAccount]);
+  
+  const decryptContent = useCallback(async (
+    encryptedData: Uint8Array,
+    identity: string
+  ) => {
+    if (!currentAccount?.address || !allowlistId) return null;
+    
+    return await allowlistManager.decryptWithAllowlist(
+      encryptedData,
+      identity,
+      allowlistId,
+      currentAccount.address,
+      signPersonalMessage
+    );
+  }, [allowlistManager, allowlistId, currentAccount, signPersonalMessage]);
+  
+  return {
+    addMember,
+    decryptContent,
+    checkAccess: (userAddress: string) => 
+      allowlistManager.checkAccess(allowlistId!, userAddress),
+  };
 }
 ```
 
@@ -565,7 +982,6 @@ const testSuiClient = new SuiClient({
   url: getFullnodeUrl('devnet') // Use devnet for testing
 });
 
-const testServers = getAllowlistedKeyServers('devnet');
 
 // Mock data for testing
 const mockEncryptedData = new Uint8Array([/* test data */]);
