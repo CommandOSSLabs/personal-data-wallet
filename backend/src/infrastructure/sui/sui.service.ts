@@ -3,9 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { 
   SuiClient, 
   getFullnodeUrl
-} from '@mysten/sui.js/client';
-import { TransactionBlock } from '@mysten/sui.js/transactions';
-import { Ed25519Keypair } from '@mysten/sui.js/keypairs/ed25519';
+} from '@mysten/sui/client';
+import { Transaction } from '@mysten/sui/transactions';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { ChatMessage, ChatSession } from '../../types/chat.types';
 
 @Injectable()
@@ -140,12 +140,12 @@ export class SuiService {
    */
   async createChatSession(userAddress: string, modelName: string): Promise<string> {
     try {
-      const tx = new TransactionBlock();
+      const tx = new Transaction();
       
       tx.moveCall({
         target: `${this.packageId}::chat_sessions::create_session`,
         arguments: [
-          tx.pure(modelName),
+          tx.pure.string(modelName),
         ],
       });
 
@@ -169,15 +169,15 @@ export class SuiService {
     content: string
   ): Promise<boolean> {
     try {
-      const tx = new TransactionBlock();
+      const tx = new Transaction();
       
       // Get the chat session object
       tx.moveCall({
         target: `${this.packageId}::chat_sessions::add_message_to_session`,
         arguments: [
           tx.object(sessionId),
-          tx.pure(role),
-          tx.pure(content),
+          tx.pure.string(role),
+          tx.pure.string(content),
         ],
       });
 
@@ -198,13 +198,13 @@ export class SuiService {
     summary: string
   ): Promise<boolean> {
     try {
-      const tx = new TransactionBlock();
+      const tx = new Transaction();
       
       tx.moveCall({
         target: `${this.packageId}::chat_sessions::save_session_summary`,
         arguments: [
           tx.object(sessionId),
-          tx.pure(summary),
+          tx.pure.string(summary),
         ],
       });
 
@@ -262,13 +262,13 @@ export class SuiService {
       }
       
       // Create transaction to delete the session
-      const tx = new TransactionBlock();
+      const tx = new Transaction();
       
       // In a real implementation, you would call a delete function
       // Here we're transferring ownership to a burn address as an example
       tx.transferObjects(
         [tx.object(sessionId)],
-        tx.pure('0x000000000000000000000000000000000000000000000000000000000000dead')
+        tx.pure.address('0x000000000000000000000000000000000000000000000000000000000000dead')
       );
       
       await this.executeTransaction(tx, userAddress);
@@ -315,14 +315,14 @@ export class SuiService {
     blobId: string
   ): Promise<string> {
     try {
-      const tx = new TransactionBlock();
+      const tx = new Transaction();
       
       tx.moveCall({
         target: `${this.packageId}::memory::create_memory_record`,
         arguments: [
-          tx.pure(category),
-          tx.pure(vectorId),
-          tx.pure(blobId),
+          tx.pure.string(category),
+          tx.pure.u64(vectorId),
+          tx.pure.string(blobId),
         ],
       });
 
@@ -345,13 +345,13 @@ export class SuiService {
     graphBlobId: string
   ): Promise<string> {
     try {
-      const tx = new TransactionBlock();
+      const tx = new Transaction();
       
       tx.moveCall({
         target: `${this.packageId}::memory::create_memory_index`,
         arguments: [
-          tx.pure(indexBlobId),
-          tx.pure(graphBlobId),
+          tx.pure.string(indexBlobId),
+          tx.pure.string(graphBlobId),
         ],
       });
 
@@ -376,15 +376,15 @@ export class SuiService {
     newGraphBlobId: string
   ): Promise<boolean> {
     try {
-      const tx = new TransactionBlock();
+      const tx = new Transaction();
       
       tx.moveCall({
         target: `${this.packageId}::memory::update_memory_index`,
         arguments: [
           tx.object(indexId),
-          tx.pure(expectedVersion),
-          tx.pure(newIndexBlobId),
-          tx.pure(newGraphBlobId),
+          tx.pure.u64(expectedVersion),
+          tx.pure.string(newIndexBlobId),
+          tx.pure.string(newGraphBlobId),
         ],
       });
 
@@ -645,13 +645,13 @@ export class SuiService {
       }
       
       // Create transaction to delete the memory
-      const tx = new TransactionBlock();
+      const tx = new Transaction();
       
       // In a real implementation, you would call a delete function
       // Here we're transferring ownership to a burn address as an example
       tx.transferObjects(
         [tx.object(memoryId)],
-        tx.pure('0x000000000000000000000000000000000000000000000000000000000000dead')
+        tx.pure.address('0x000000000000000000000000000000000000000000000000000000000000dead')
       );
       
       await this.executeTransaction(tx, userAddress);
@@ -663,7 +663,7 @@ export class SuiService {
   }
 
   // Helper methods
-  private async executeTransaction(tx: TransactionBlock, sender: string) {
+  private async executeTransaction(tx: Transaction, sender: string) {
     // Set the sender to the actual user address
     tx.setSender(sender);
     
@@ -672,8 +672,8 @@ export class SuiService {
     // For demonstration purposes in development, we can use the admin keypair
     // But we use the user's address as sender
     try {
-      return await this.client.signAndExecuteTransactionBlock({
-        transactionBlock: tx,
+      return await this.client.signAndExecuteTransaction({
+        transaction: tx,
         signer: this.adminKeypair,
         options: {
           showEffects: true,

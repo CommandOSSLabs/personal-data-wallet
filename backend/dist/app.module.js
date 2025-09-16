@@ -14,6 +14,8 @@ const memory_module_1 = require("./memory/memory.module");
 const chat_module_1 = require("./chat/chat.module");
 const database_module_1 = require("./database/database.module");
 const storage_module_1 = require("./storage/storage.module");
+const app_controller_1 = require("./app.controller");
+const app_service_1 = require("./app.service");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -28,7 +30,9 @@ exports.AppModule = AppModule = __decorate([
             memory_module_1.MemoryModule,
             chat_module_1.ChatModule,
             storage_module_1.StorageModule
-        ]
+        ],
+        controllers: [app_controller_1.AppController],
+        providers: [app_service_1.AppService],
     })
 ], AppModule);
 //# sourceMappingURL=app.module.js.map

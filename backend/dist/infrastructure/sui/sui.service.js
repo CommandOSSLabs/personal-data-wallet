@@ -13,9 +13,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SuiService = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
-const client_1 = require("@mysten/sui.js/client");
-const transactions_1 = require("@mysten/sui.js/transactions");
-const ed25519_1 = require("@mysten/sui.js/keypairs/ed25519");
+const client_1 = require("@mysten/sui/client");
+const transactions_1 = require("@mysten/sui/transactions");
+const ed25519_1 = require("@mysten/sui/keypairs/ed25519");
 let SuiService = SuiService_1 = class SuiService {
     configService;
     client;
@@ -118,11 +118,11 @@ let SuiService = SuiService_1 = class SuiService {
     }
     async createChatSession(userAddress, modelName) {
         try {
-            const tx = new transactions_1.TransactionBlock();
+            const tx = new transactions_1.Transaction();
             tx.moveCall({
                 target: `${this.packageId}::chat_sessions::create_session`,
                 arguments: [
-                    tx.pure(modelName),
+                    tx.pure.string(modelName),
                 ],
             });
             const result = await this.executeTransaction(tx, userAddress);
@@ -136,13 +136,13 @@ let SuiService = SuiService_1 = class SuiService {
     }
     async addMessageToSession(sessionId, userAddress, role, content) {
         try {
-            const tx = new transactions_1.TransactionBlock();
+            const tx = new transactions_1.Transaction();
             tx.moveCall({
                 target: `${this.packageId}::chat_sessions::add_message_to_session`,
                 arguments: [
                     tx.object(sessionId),
-                    tx.pure(role),
-                    tx.pure(content),
+                    tx.pure.string(role),
+                    tx.pure.string(content),
                 ],
             });
             await this.executeTransaction(tx, userAddress);
@@ -155,12 +155,12 @@ let SuiService = SuiService_1 = class SuiService {
     }
     async saveSessionSummary(sessionId, userAddress, summary) {
         try {
-            const tx = new transactions_1.TransactionBlock();
+            const tx = new transactions_1.Transaction();
             tx.moveCall({
                 target: `${this.packageId}::chat_sessions::save_session_summary`,
                 arguments: [
                     tx.object(sessionId),
-                    tx.pure(summary),
+                    tx.pure.string(summary),
                 ],
             });
             await this.executeTransaction(tx, userAddress);
@@ -201,8 +201,8 @@ let SuiService = SuiService_1 = class SuiService {
             if (session.owner !== userAddress) {
                 throw new Error('You do not own this session');
             }
-            const tx = new transactions_1.TransactionBlock();
-            tx.transferObjects([tx.object(sessionId)], tx.pure('0x000000000000000000000000000000000000000000000000000000000000dead'));
+            const tx = new transactions_1.Transaction();
+            tx.transferObjects([tx.object(sessionId)], tx.pure.address('0x000000000000000000000000000000000000000000000000000000000000dead'));
             await this.executeTransaction(tx, userAddress);
             return true;
         }
@@ -226,13 +226,13 @@ let SuiService = SuiService_1 = class SuiService {
     }
     async createMemoryRecord(userAddress, category, vectorId, blobId) {
         try {
-            const tx = new transactions_1.TransactionBlock();
+            const tx = new transactions_1.Transaction();
             tx.moveCall({
                 target: `${this.packageId}::memory::create_memory_record`,
                 arguments: [
-                    tx.pure(category),
-                    tx.pure(vectorId),
-                    tx.pure(blobId),
+                    tx.pure.string(category),
+                    tx.pure.u64(vectorId),
+                    tx.pure.string(blobId),
                 ],
             });
             const result = await this.executeTransaction(tx, userAddress);
@@ -246,12 +246,12 @@ let SuiService = SuiService_1 = class SuiService {
     }
     async createMemoryIndex(userAddress, indexBlobId, graphBlobId) {
         try {
-            const tx = new transactions_1.TransactionBlock();
+            const tx = new transactions_1.Transaction();
             tx.moveCall({
                 target: `${this.packageId}::memory::create_memory_index`,
                 arguments: [
-                    tx.pure(indexBlobId),
-                    tx.pure(graphBlobId),
+                    tx.pure.string(indexBlobId),
+                    tx.pure.string(graphBlobId),
                 ],
             });
             const result = await this.executeTransaction(tx, userAddress);
@@ -265,14 +265,14 @@ let SuiService = SuiService_1 = class SuiService {
     }
     async updateMemoryIndex(indexId, userAddress, expectedVersion, newIndexBlobId, newGraphBlobId) {
         try {
-            const tx = new transactions_1.TransactionBlock();
+            const tx = new transactions_1.Transaction();
             tx.moveCall({
                 target: `${this.packageId}::memory::update_memory_index`,
                 arguments: [
                     tx.object(indexId),
-                    tx.pure(expectedVersion),
-                    tx.pure(newIndexBlobId),
-                    tx.pure(newGraphBlobId),
+                    tx.pure.u64(expectedVersion),
+                    tx.pure.string(newIndexBlobId),
+                    tx.pure.string(newGraphBlobId),
                 ],
             });
             await this.executeTransaction(tx, userAddress);
@@ -452,8 +452,8 @@ let SuiService = SuiService_1 = class SuiService {
             if (memory.owner !== userAddress) {
                 throw new Error('You do not own this memory');
             }
-            const tx = new transactions_1.TransactionBlock();
-            tx.transferObjects([tx.object(memoryId)], tx.pure('0x000000000000000000000000000000000000000000000000000000000000dead'));
+            const tx = new transactions_1.Transaction();
+            tx.transferObjects([tx.object(memoryId)], tx.pure.address('0x000000000000000000000000000000000000000000000000000000000000dead'));
             await this.executeTransaction(tx, userAddress);
             return true;
         }
@@ -466,8 +466,8 @@ let SuiService = SuiService_1 = class SuiService {
         tx.setSender(sender);
         this.logger.log(`Executing transaction for user ${sender}`);
         try {
-            return await this.client.signAndExecuteTransactionBlock({
-                transactionBlock: tx,
+            return await this.client.signAndExecuteTransaction({
+                transaction: tx,
                 signer: this.adminKeypair,
                 options: {
                     showEffects: true,
