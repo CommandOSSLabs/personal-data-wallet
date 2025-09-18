@@ -17,6 +17,7 @@ const gemini_service_1 = require("./gemini/gemini.service");
 const local_storage_service_1 = require("./local-storage/local-storage.service");
 const storage_service_1 = require("./storage/storage.service");
 const demo_storage_service_1 = require("./demo-storage/demo-storage.service");
+const memory_module_1 = require("../memory/memory.module");
 let InfrastructureModule = class InfrastructureModule {
 };
 exports.InfrastructureModule = InfrastructureModule;
@@ -27,6 +28,7 @@ exports.InfrastructureModule = InfrastructureModule = __decorate([
             config_1.ConfigModule.forRoot({
                 isGlobal: true,
             }),
+            (0, common_1.forwardRef)(() => memory_module_1.MemoryModule),
         ],
         providers: [
             sui_service_1.SuiService,

@@ -482,6 +482,9 @@ let SuiService = SuiService_1 = class SuiService {
             throw error;
         }
     }
+    getClient() {
+        return this.client;
+    }
     extractCreatedObjectId(result) {
         try {
             const created = result.objectChanges.filter(change => change.type === 'created')[0];

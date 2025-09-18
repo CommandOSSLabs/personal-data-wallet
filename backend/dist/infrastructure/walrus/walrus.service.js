@@ -41,6 +41,9 @@ var __importStar = (this && this.__importStar) || (function () {
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
 var WalrusService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WalrusService = void 0;
@@ -49,14 +52,19 @@ const config_1 = require("@nestjs/config");
 const client_1 = require("@mysten/sui/client");
 const walrus_1 = require("@mysten/walrus");
 const ed25519_1 = require("@mysten/sui/keypairs/ed25519");
+const embedding_service_1 = require("../../memory/embedding/embedding.service");
+const seal_service_1 = require("../seal/seal.service");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const util_1 = require("util");
+const sha3_1 = require("@noble/hashes/sha3");
 const writeFile = (0, util_1.promisify)(fs.writeFile);
 const readFile = (0, util_1.promisify)(fs.readFile);
 const mkdir = (0, util_1.promisify)(fs.mkdir);
 let WalrusService = WalrusService_1 = class WalrusService {
     configService;
+    embeddingService;
+    sealService;
     walrusClient;
     suiClient;
     adminKeypair;
@@ -67,8 +75,10 @@ let WalrusService = WalrusService_1 = class WalrusService {
     walrusAvailable = true;
     lastWalrusCheck = 0;
     WALRUS_CHECK_INTERVAL = 5 * 60 * 1000;
-    constructor(configService) {
+    constructor(configService, embeddingService, sealService) {
         this.configService = configService;
+        this.embeddingService = embeddingService;
+        this.sealService = sealService;
         const configNetwork = this.configService.get('SUI_NETWORK', 'testnet');
         const network = configNetwork || 'testnet';
         this.suiClient = new client_1.SuiClient({
@@ -126,7 +136,9 @@ let WalrusService = WalrusService_1 = class WalrusService {
                 this.adminKeypair = ed25519_1.Ed25519Keypair.fromSecretKey(cleanedKey);
             }
             else {
-                const keyWithPrefix = cleanedKey.startsWith('0x') ? cleanedKey : `0x${cleanedKey}`;
+                const keyWithPrefix = cleanedKey.startsWith('0x')
+                    ? cleanedKey
+                    : `0x${cleanedKey}`;
                 const keyBuffer = Buffer.from(keyWithPrefix.replace('0x', ''), 'hex');
                 if (keyBuffer.length !== 32) {
                     throw new Error(`Invalid hex key length: ${keyBuffer.length}, expected 32`);
@@ -156,7 +168,9 @@ let WalrusService = WalrusService_1 = class WalrusService {
             return this.walrusAvailable;
         }
         try {
-            const testPromise = this.walrusClient.getFiles({ ids: ['availability-test'] });
+            const testPromise = this.walrusClient.getFiles({
+                ids: ['availability-test'],
+            });
             const timeoutPromise = new Promise((_, reject) => {
                 setTimeout(() => reject(new Error('Availability check timeout')), 5000);
             });
@@ -194,7 +208,7 @@ let WalrusService = WalrusService_1 = class WalrusService {
                 tags,
                 size: buffer.length,
                 createdAt: new Date().toISOString(),
-                storageType: 'local_fallback'
+                storageType: 'local_fallback',
             };
             await writeFile(metaPath, JSON.stringify(metadata, null, 2));
             this.logger.log(`File stored locally: ${blobId} (${buffer.length} bytes)`);
@@ -223,14 +237,188 @@ let WalrusService = WalrusService_1 = class WalrusService {
     getAdminAddress() {
         return this.adminAddress;
     }
+    generateContentHash(content) {
+        const contentBytes = new TextEncoder().encode(content);
+        const hashBytes = (0, sha3_1.sha3_256)(contentBytes);
+        return Array.from(hashBytes)
+            .map((b) => b.toString(16).padStart(2, '0'))
+            .join('');
+    }
+    async createMetadataWithEmbedding(content, category, topic = '', importance = 5, customMetadata = {}) {
+        const contentBuffer = Buffer.from(content, 'utf-8');
+        const contentHash = this.generateContentHash(content);
+        const timestamp = Date.now();
+        const metadata = {
+            contentType: 'text/plain',
+            contentSize: contentBuffer.length,
+            contentHash,
+            category,
+            topic: topic || `Memory about ${category}`,
+            importance: Math.max(1, Math.min(10, importance)),
+            embeddingDimension: 768,
+            createdTimestamp: timestamp,
+            customMetadata,
+        };
+        if (this.embeddingService) {
+            try {
+                const embeddingText = `Category: ${category}, Topic: ${topic}, Content: ${content.substring(0, 1000)}`;
+                const { vector } = await this.embeddingService.embedText(embeddingText);
+                const embeddingData = {
+                    vector,
+                    dimension: 768,
+                    source: 'metadata',
+                    category,
+                    topic,
+                    contentHash,
+                    timestamp,
+                };
+                const embeddingJson = JSON.stringify(embeddingData);
+                const embeddingBlobId = await this.storeEmbeddingLocally(embeddingJson, contentHash);
+                metadata.embeddingBlobId = embeddingBlobId;
+                this.logger.log(`Created metadata embedding: ${embeddingBlobId.substring(0, 8)}...`);
+            }
+            catch (error) {
+                this.logger.warn(`Failed to create metadata embedding: ${error.message}`);
+            }
+        }
+        else {
+            this.logger.warn('EmbeddingService not available for metadata embeddings');
+        }
+        return metadata;
+    }
+    async storeEmbeddingLocally(embeddingJson, contentHash) {
+        const buffer = Buffer.from(embeddingJson, 'utf-8');
+        const filename = `embedding_${contentHash}_${Date.now()}.json`;
+        const tags = {
+            'content-type': 'application/json',
+            'data-type': 'metadata-embedding',
+            'content-hash': contentHash,
+            created: new Date().toISOString(),
+        };
+        return await this.storeFileLocally(buffer, filename, tags);
+    }
+    async uploadEncryptedContent(content, ownerAddress, category, topic = '', importance = 5, epochs = this.DEFAULT_STORAGE_EPOCHS, additionalTags = {}) {
+        if (!this.sealService) {
+            this.logger.warn('SealService not available, falling back to unencrypted storage');
+            const result = await this.uploadContentWithMetadata(content, ownerAddress, category, topic, importance, epochs, additionalTags);
+            return { ...result, isEncrypted: false };
+        }
+        try {
+            const { encryptedData, backupKey } = await this.sealService.encrypt(content, ownerAddress, {
+                category,
+                topic,
+                importance: importance.toString(),
+                ...additionalTags,
+            });
+            const metadata = await this.createMetadataWithEmbedding(content, category, topic, importance, { ...additionalTags, encrypted: 'true', encryptionType: 'seal' });
+            const enhancedTags = {
+                'content-type': 'application/octet-stream',
+                owner: ownerAddress,
+                category: category,
+                topic: topic,
+                importance: importance.toString(),
+                'content-hash': metadata.contentHash,
+                'embedding-blob-id': metadata.embeddingBlobId || '',
+                encrypted: 'true',
+                'encryption-type': 'seal',
+                created: new Date(metadata.createdTimestamp).toISOString(),
+                ...additionalTags,
+            };
+            const blobId = await this.uploadContent(encryptedData, ownerAddress, epochs, enhancedTags);
+            this.logger.log(`Content encrypted with SEAL and uploaded: ${blobId}`);
+            return {
+                blobId,
+                metadata,
+                embeddingBlobId: metadata.embeddingBlobId,
+                isEncrypted: true,
+                backupKey,
+            };
+        }
+        catch (error) {
+            this.logger.error(`Failed to encrypt and upload content: ${error.message}`);
+            this.logger.warn('Falling back to unencrypted storage due to encryption failure');
+            const result = await this.uploadContentWithMetadata(content, ownerAddress, category, topic, importance, epochs, additionalTags);
+            return { ...result, isEncrypted: false };
+        }
+    }
+    async retrieveEncryptedContent(blobId, userAddress, sessionKey, signedTxBytes) {
+        try {
+            const tags = await this.getFileTags(blobId);
+            const isEncrypted = tags['encrypted'] === 'true';
+            const encryptionType = tags['encryption-type'];
+            if (!isEncrypted) {
+                return await this.retrieveContent(blobId);
+            }
+            if (encryptionType !== 'seal') {
+                throw new Error(`Unsupported encryption type: ${encryptionType}`);
+            }
+            if (!this.sealService) {
+                throw new Error('SealService not available for decryption');
+            }
+            if (!sessionKey || !signedTxBytes) {
+                throw new Error('Session key and signed transaction bytes required for SEAL decryption');
+            }
+            const hasAccess = await this.verifyUserAccess(blobId, userAddress);
+            if (!hasAccess) {
+                throw new Error(`User ${userAddress} does not have access to content ${blobId}`);
+            }
+            const encryptedContent = await this.retrieveContent(blobId);
+            const decryptedContent = await this.sealService.decrypt(encryptedContent, userAddress, sessionKey, signedTxBytes);
+            this.logger.log(`Content successfully decrypted for user: ${userAddress}`);
+            return decryptedContent;
+        }
+        catch (error) {
+            this.logger.error(`Error retrieving encrypted content: ${error.message}`);
+            throw new Error(`Encrypted content retrieval error: ${error.message}`);
+        }
+    }
+    async getEncryptionInfo(blobId) {
+        try {
+            const tags = await this.getFileTags(blobId);
+            const isEncrypted = tags['encrypted'] === 'true';
+            const encryptionType = tags['encryption-type'];
+            return {
+                isEncrypted,
+                encryptionType,
+                requiresAuth: isEncrypted && encryptionType === 'seal',
+            };
+        }
+        catch (error) {
+            this.logger.error(`Error checking encryption info: ${error.message}`);
+            return {
+                isEncrypted: false,
+                requiresAuth: false,
+            };
+        }
+    }
+    async uploadContentWithMetadata(content, ownerAddress, category, topic = '', importance = 5, epochs = this.DEFAULT_STORAGE_EPOCHS, additionalTags = {}) {
+        const metadata = await this.createMetadataWithEmbedding(content, category, topic, importance, additionalTags);
+        const enhancedTags = {
+            'content-type': 'text/plain',
+            owner: ownerAddress,
+            category: category,
+            topic: topic,
+            importance: importance.toString(),
+            'content-hash': metadata.contentHash,
+            'embedding-blob-id': metadata.embeddingBlobId || '',
+            created: new Date(metadata.createdTimestamp).toISOString(),
+            ...additionalTags,
+        };
+        const blobId = await this.uploadContent(content, ownerAddress, epochs, enhancedTags);
+        return {
+            blobId,
+            metadata,
+            embeddingBlobId: metadata.embeddingBlobId,
+        };
+    }
     async uploadContent(content, ownerAddress, epochs = this.DEFAULT_STORAGE_EPOCHS, additionalTags = {}) {
         const buffer = Buffer.from(content, 'utf-8');
         const filename = `content_${Date.now()}.txt`;
         const tags = {
             'content-type': 'text/plain',
-            'owner': ownerAddress,
-            'created': new Date().toISOString(),
-            ...additionalTags
+            owner: ownerAddress,
+            created: new Date().toISOString(),
+            ...additionalTags,
         };
         const walrusAvailable = await this.isWalrusAvailable();
         if (!walrusAvailable) {
@@ -259,7 +447,7 @@ let WalrusService = WalrusService_1 = class WalrusService {
         try {
             this.logger.log(`Retrieving content from blobId: ${blobId}`);
             const [file] = await this.walrusClient.getFiles({
-                ids: [blobId]
+                ids: [blobId],
             });
             if (!file) {
                 throw new Error(`File with blob ID ${blobId} not found`);
@@ -272,10 +460,82 @@ let WalrusService = WalrusService_1 = class WalrusService {
             throw new Error(`Walrus retrieval error: ${error.message}`);
         }
     }
+    async retrieveMetadataEmbedding(embeddingBlobId) {
+        try {
+            if (embeddingBlobId.startsWith('local_')) {
+                const embeddingJson = await this.retrieveFileLocally(embeddingBlobId);
+                return JSON.parse(embeddingJson.toString());
+            }
+            const embeddingJson = await this.retrieveContent(embeddingBlobId);
+            return JSON.parse(embeddingJson);
+        }
+        catch (error) {
+            this.logger.warn(`Failed to retrieve metadata embedding ${embeddingBlobId}: ${error.message}`);
+            return null;
+        }
+    }
+    async getEnhancedMetadata(blobId) {
+        try {
+            const tags = await this.getFileTags(blobId);
+            const metadata = {
+                contentType: tags['content-type'] || 'text/plain',
+                contentSize: parseInt(tags['content-size'] || '0'),
+                contentHash: tags['content-hash'] || '',
+                category: tags['category'] || 'general',
+                topic: tags['topic'] || '',
+                importance: parseInt(tags['importance'] || '5'),
+                embeddingBlobId: tags['embedding-blob-id'] || undefined,
+                embeddingDimension: parseInt(tags['embedding-dimension'] || '768'),
+                createdTimestamp: new Date(tags['created'] || Date.now()).getTime(),
+                updatedTimestamp: tags['updated']
+                    ? new Date(tags['updated']).getTime()
+                    : undefined,
+                customMetadata: {},
+            };
+            const standardTags = new Set([
+                'content-type',
+                'content-size',
+                'content-hash',
+                'category',
+                'topic',
+                'importance',
+                'embedding-blob-id',
+                'embedding-dimension',
+                'created',
+                'updated',
+                'owner',
+            ]);
+            for (const [key, value] of Object.entries(tags)) {
+                if (!standardTags.has(key)) {
+                    metadata.customMetadata[key] = value;
+                }
+            }
+            return metadata;
+        }
+        catch (error) {
+            this.logger.warn(`Failed to get enhanced metadata for ${blobId}: ${error.message}`);
+            return null;
+        }
+    }
+    async searchByMetadataEmbedding(queryText, userAddress, threshold = 0.7, limit = 10) {
+        if (!this.embeddingService) {
+            this.logger.warn('EmbeddingService not available for similarity search');
+            return [];
+        }
+        try {
+            const { vector: queryVector } = await this.embeddingService.embedText(queryText);
+            this.logger.log(`Metadata embedding search for: "${queryText}" (user: ${userAddress})`);
+            return [];
+        }
+        catch (error) {
+            this.logger.error(`Error in metadata embedding search: ${error.message}`);
+            return [];
+        }
+    }
     async getFileTags(blobId) {
         try {
             const [file] = await this.walrusClient.getFiles({
-                ids: [blobId]
+                ids: [blobId],
             });
             if (!file) {
                 throw new Error(`File with blob ID ${blobId} not found`);
@@ -290,9 +550,9 @@ let WalrusService = WalrusService_1 = class WalrusService {
     async verifyUserAccess(blobId, userAddress) {
         try {
             const tags = await this.getFileTags(blobId);
-            return tags['owner'] === userAddress ||
+            return (tags['owner'] === userAddress ||
                 tags['user-address'] === userAddress ||
-                tags['user-address'] === userAddress.replace('0x', '');
+                tags['user-address'] === userAddress.replace('0x', ''));
         }
         catch (error) {
             this.logger.error(`Error verifying user access: ${error.message}`);
@@ -302,10 +562,10 @@ let WalrusService = WalrusService_1 = class WalrusService {
     async uploadFile(buffer, filename, ownerAddress, epochs = this.DEFAULT_STORAGE_EPOCHS, additionalTags = {}) {
         const tags = {
             'content-type': 'application/octet-stream',
-            'filename': filename,
-            'owner': ownerAddress,
-            'created': new Date().toISOString(),
-            ...additionalTags
+            filename: filename,
+            owner: ownerAddress,
+            created: new Date().toISOString(),
+            ...additionalTags,
         };
         const walrusAvailable = await this.isWalrusAvailable();
         if (!walrusAvailable) {
@@ -348,7 +608,7 @@ let WalrusService = WalrusService_1 = class WalrusService {
                 if (attempt > 1) {
                     const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 3000);
                     this.logger.log(`Waiting ${waitTime}ms before retry...`);
-                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                    await new Promise((resolve) => setTimeout(resolve, waitTime));
                 }
                 const [file] = await this.walrusClient.getFiles({ ids: [blobId] });
                 if (!file) {
@@ -438,7 +698,7 @@ let WalrusService = WalrusService_1 = class WalrusService {
                     const jitter = Math.random() * 500;
                     const waitTime = baseWait + jitter;
                     this.logger.log(`Waiting ${Math.round(waitTime)}ms before retry...`);
-                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                    await new Promise((resolve) => setTimeout(resolve, waitTime));
                 }
             }
         }
@@ -457,6 +717,10 @@ let WalrusService = WalrusService_1 = class WalrusService {
 exports.WalrusService = WalrusService;
 exports.WalrusService = WalrusService = WalrusService_1 = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [config_1.ConfigService])
+    __param(1, (0, common_1.Inject)((0, common_1.forwardRef)(() => embedding_service_1.EmbeddingService))),
+    __param(2, (0, common_1.Inject)((0, common_1.forwardRef)(() => seal_service_1.SealService))),
+    __metadata("design:paramtypes", [config_1.ConfigService,
+        embedding_service_1.EmbeddingService,
+        seal_service_1.SealService])
 ], WalrusService);
 //# sourceMappingURL=walrus.service.js.map

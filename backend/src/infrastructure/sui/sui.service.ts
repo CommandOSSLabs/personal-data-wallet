@@ -1,9 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { 
-  SuiClient, 
-  getFullnodeUrl
-} from '@mysten/sui/client';
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { ChatMessage, ChatSession } from '../../types/chat.types';
@@ -686,6 +683,14 @@ export class SuiService {
       this.logger.error(`Transaction execution failed: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Get the SuiClient instance
+   * @returns SuiClient instance
+   */
+  getClient(): SuiClient {
+    return this.client;
   }
 
   private extractCreatedObjectId(result: any): string {

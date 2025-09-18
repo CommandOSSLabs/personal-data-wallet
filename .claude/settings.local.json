@@ -18,7 +18,10 @@
       "Bash(./venv/bin/python backend/services/test_sui.py)",
       "Bash(./venv/bin/python:*)",
       "Bash(rm:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "mcp__serena__check_onboarding_performed",
+      "mcp__serena__list_dir",
+      "mcp__serena__write_memory"
     ],
     "deny": []
   }

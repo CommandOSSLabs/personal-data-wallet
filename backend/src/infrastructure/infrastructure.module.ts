@@ -1,4 +1,4 @@
-import { Module, Global } from '@nestjs/common';
+import { Module, Global, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { SuiService } from './sui/sui.service';
 import { WalrusService } from './walrus/walrus.service';
@@ -8,6 +8,7 @@ import { GeminiService } from './gemini/gemini.service';
 import { LocalStorageService } from './local-storage/local-storage.service';
 import { StorageService } from './storage/storage.service';
 import { DemoStorageService } from './demo-storage/demo-storage.service';
+import { MemoryModule } from '../memory/memory.module';
 
 @Global()
 @Module({
@@ -15,6 +16,7 @@ import { DemoStorageService } from './demo-storage/demo-storage.service';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    forwardRef(() => MemoryModule),
   ],
   providers: [
     SuiService,

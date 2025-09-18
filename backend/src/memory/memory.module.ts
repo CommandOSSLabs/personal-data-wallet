@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MemoryController } from './memory.controller';
 import { MemoryIngestionService } from './memory-ingestion/memory-ingestion.service';
 import { MemoryQueryService } from './memory-query/memory-query.service';
@@ -9,6 +9,7 @@ import { GraphService } from './graph/graph.service';
 import { HnswIndexService } from './hnsw-index/hnsw-index.service';
 import { InfrastructureModule } from '../infrastructure/infrastructure.module';
 @Module({
+  imports: [forwardRef(() => InfrastructureModule)],
   controllers: [MemoryController],
   providers: [
     MemoryIngestionService,

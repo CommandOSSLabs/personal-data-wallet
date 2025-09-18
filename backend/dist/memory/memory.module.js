@@ -16,11 +16,13 @@ const classifier_service_1 = require("./classifier/classifier.service");
 const embedding_service_1 = require("./embedding/embedding.service");
 const graph_service_1 = require("./graph/graph.service");
 const hnsw_index_service_1 = require("./hnsw-index/hnsw-index.service");
+const infrastructure_module_1 = require("../infrastructure/infrastructure.module");
 let MemoryModule = class MemoryModule {
 };
 exports.MemoryModule = MemoryModule;
 exports.MemoryModule = MemoryModule = __decorate([
     (0, common_1.Module)({
+        imports: [(0, common_1.forwardRef)(() => infrastructure_module_1.InfrastructureModule)],
         controllers: [memory_controller_1.MemoryController],
         providers: [
             memory_ingestion_service_1.MemoryIngestionService,

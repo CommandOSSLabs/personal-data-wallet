@@ -20,6 +20,7 @@ const memory_index_service_1 = require("../memory-index/memory-index.service");
 const seal_service_1 = require("../../infrastructure/seal/seal.service");
 const sui_service_1 = require("../../infrastructure/sui/sui.service");
 const storage_service_1 = require("../../infrastructure/storage/storage.service");
+const walrus_service_1 = require("../../infrastructure/walrus/walrus.service");
 const gemini_service_1 = require("../../infrastructure/gemini/gemini.service");
 const config_1 = require("@nestjs/config");
 let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionService {
@@ -31,12 +32,13 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
     sealService;
     suiService;
     storageService;
+    walrusService;
     geminiService;
     configService;
     logger = new common_1.Logger(MemoryIngestionService_1.name);
     entityToVectorMap = {};
     nextVectorId = {};
-    constructor(classifierService, embeddingService, graphService, hnswIndexService, memoryIndexService, sealService, suiService, storageService, geminiService, configService) {
+    constructor(classifierService, embeddingService, graphService, hnswIndexService, memoryIndexService, sealService, suiService, storageService, walrusService, geminiService, configService) {
         this.classifierService = classifierService;
         this.embeddingService = embeddingService;
         this.graphService = graphService;
@@ -45,6 +47,7 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
         this.sealService = sealService;
         this.suiService = suiService;
         this.storageService = storageService;
+        this.walrusService = walrusService;
         this.geminiService = geminiService;
         this.configService = configService;
     }
@@ -93,6 +96,36 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
             return { memoryStored: false };
         }
     }
+    async processEnhancedMemory(memoryDto) {
+        try {
+            this.logger.log(`Processing enhanced memory for user ${memoryDto.userAddress} with topic: ${memoryDto.topic}`);
+            const result = await this.processNewMemory(memoryDto);
+            if (result.success) {
+                let metadata;
+                try {
+                    if (result.blobId) {
+                        metadata = await this.walrusService.getEnhancedMetadata(result.blobId) || undefined;
+                    }
+                }
+                catch (error) {
+                    this.logger.warn(`Could not retrieve enhanced metadata: ${error.message}`);
+                }
+                return {
+                    ...result,
+                    metadata,
+                    embeddingBlobId: metadata?.embeddingBlobId
+                };
+            }
+            return result;
+        }
+        catch (error) {
+            this.logger.error(`Error processing enhanced memory: ${error.message}`);
+            return {
+                success: false,
+                message: `Failed to process enhanced memory: ${error.message}`
+            };
+        }
+    }
     async processNewMemory(memoryDto) {
         try {
             const indexData = await this.memoryIndexService.getOrLoadIndex(memoryDto.userAddress);
@@ -125,12 +158,24 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
             graph = this.graphService.addToGraph(graph, extraction.entities, extraction.relationships);
             let contentToStore = memoryDto.content;
             if (!this.isDemoMode()) {
-                contentToStore = await this.sealService.encrypt(memoryDto.content, memoryDto.userAddress);
+                const encryptResult = await this.sealService.encrypt(memoryDto.content, memoryDto.userAddress);
+                contentToStore = encryptResult.encryptedData;
             }
             else {
                 this.logger.log('Demo mode: Skipping encryption');
             }
-            const contentBlobId = await this.storageService.uploadContent(contentToStore, memoryDto.userAddress);
+            let contentBlobId;
+            let enhancedMetadata;
+            try {
+                const enhancedResult = await this.walrusService.uploadContentWithMetadata(contentToStore, memoryDto.userAddress, memoryDto.category, memoryDto.topic || `Memory about ${memoryDto.category}`, memoryDto.importance || 5);
+                contentBlobId = enhancedResult.blobId;
+                enhancedMetadata = enhancedResult.metadata;
+                this.logger.log(`Enhanced metadata created with embedding: ${enhancedMetadata.embeddingBlobId?.substring(0, 8)}...`);
+            }
+            catch (error) {
+                this.logger.warn(`Enhanced upload failed, falling back to basic storage: ${error.message}`);
+                contentBlobId = await this.storageService.uploadContent(contentToStore, memoryDto.userAddress);
+            }
             if (graph && graphBlobId) {
                 const newGraphBlobId = await this.graphService.saveGraph(graph, memoryDto.userAddress);
                 this.logger.log(`Updated graph saved to Walrus: ${newGraphBlobId}`);
@@ -190,7 +235,8 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
             graph = this.graphService.addToGraph(graph, extraction.entities, extraction.relationships);
             let contentToStore = content;
             if (!this.isDemoMode()) {
-                contentToStore = await this.sealService.encrypt(content, userAddress);
+                const encryptResult = await this.sealService.encrypt(content, userAddress);
+                contentToStore = encryptResult.encryptedData;
             }
             else {
                 this.logger.log('Demo mode: Skipping encryption for conversation processing');
@@ -359,6 +405,67 @@ let MemoryIngestionService = MemoryIngestionService_1 = class MemoryIngestionSer
             throw error;
         }
     }
+    async searchMemoriesByMetadata(queryText, userAddress, options = {}) {
+        try {
+            const { threshold = 0.7, limit = 10, category, minImportance } = options;
+            this.logger.log(`Searching memories by metadata for user ${userAddress}: "${queryText}"`);
+            const results = await this.walrusService.searchByMetadataEmbedding(queryText, userAddress, threshold, limit);
+            let filteredResults = results;
+            if (category) {
+                filteredResults = filteredResults.filter(r => r.metadata.category === category);
+            }
+            if (minImportance !== undefined) {
+                filteredResults = filteredResults.filter(r => r.metadata.importance >= minImportance);
+            }
+            const enhancedResults = await Promise.all(filteredResults.map(async (result) => {
+                let content;
+                try {
+                    const encryptedContent = await this.walrusService.retrieveContent(result.blobId);
+                    if (this.isDemoMode()) {
+                        content = encryptedContent;
+                    }
+                    else {
+                        content = encryptedContent;
+                    }
+                }
+                catch (error) {
+                    this.logger.warn(`Could not retrieve content for ${result.blobId}: ${error.message}`);
+                }
+                return {
+                    ...result,
+                    content
+                };
+            }));
+            this.logger.log(`Found ${enhancedResults.length} similar memories by metadata`);
+            return enhancedResults;
+        }
+        catch (error) {
+            this.logger.error(`Error searching memories by metadata: ${error.message}`);
+            return [];
+        }
+    }
+    async getMetadataInsights(userAddress) {
+        try {
+            this.logger.log(`Generating metadata insights for user ${userAddress}`);
+            return {
+                totalMemories: 0,
+                categoriesDistribution: {},
+                averageImportance: 5,
+                topTopics: [],
+                embeddingCoverage: 0
+            };
+        }
+        catch (error) {
+            this.logger.error(`Error getting metadata insights: ${error.message}`);
+            return {
+                totalMemories: 0,
+                categoriesDistribution: {},
+                averageImportance: 5,
+                topTopics: [],
+                embeddingCoverage: 0
+            };
+        }
+    }
     getBatchStats() {
         return this.hnswIndexService.getCacheStats();
     }
@@ -390,6 +497,7 @@ exports.MemoryIngestionService = MemoryIngestionService = MemoryIngestionService
         seal_service_1.SealService,
         sui_service_1.SuiService,
         storage_service_1.StorageService,
+        walrus_service_1.WalrusService,
         gemini_service_1.GeminiService,
         config_1.ConfigService])
 ], MemoryIngestionService);

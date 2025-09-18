@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@mysten/seal": "^0.6.0",
     "@mysten/sui": "^1.37.1",
     "@mysten/sui.js": "^0.54.1",
     "@mysten/walrus": "^0.5.3",
@@ -36,7 +37,7 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/swagger": "^11.2.0",
     "@nestjs/typeorm": "^11.0.0",
-    "@types/uuid": "^10.0.0",
+    "@types/uuid": "^9.0.8",
     "axios": "^1.11.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
@@ -47,7 +48,7 @@
     "rxjs": "^7.8.1",
     "swagger-ui-express": "^5.0.1",
     "typeorm": "^0.3.25",
-    "uuid": "^13.0.0"
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

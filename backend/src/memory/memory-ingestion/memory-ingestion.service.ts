@@ -7,6 +7,7 @@ import { MemoryIndexService } from '../memory-index/memory-index.service';
 import { SealService } from '../../infrastructure/seal/seal.service';
 import { SuiService } from '../../infrastructure/sui/sui.service';
 import { StorageService } from '../../infrastructure/storage/storage.service';
+import { WalrusService, MemoryMetadata, EnhancedUploadResult } from '../../infrastructure/walrus/walrus.service';
 import { GeminiService } from '../../infrastructure/gemini/gemini.service';
 import { ConfigService } from '@nestjs/config';
 
@@ -15,6 +16,14 @@ export interface CreateMemoryDto {
   category: string;
   userAddress: string;
   userSignature?: string;
+  topic?: string;
+  importance?: number;
+}
+
+export interface EnhancedCreateMemoryDto extends CreateMemoryDto {
+  topic: string;
+  importance: number;
+  customMetadata?: Record<string, string>;
 }
 
 export interface ProcessMemoryDto {
@@ -52,6 +61,7 @@ export class MemoryIngestionService {
     private sealService: SealService,
     private suiService: SuiService,
     private storageService: StorageService,
+    private walrusService: WalrusService,
     private geminiService: GeminiService,
     private configService: ConfigService
   ) {}
@@ -143,7 +153,55 @@ export class MemoryIngestionService {
   }
 
   /**
-   * Process a new memory from scratch
+   * Process a new memory with enhanced metadata and embeddings
+   * @param memoryDto Enhanced memory data
+   * @returns Processing result with metadata
+   */
+  async processEnhancedMemory(memoryDto: EnhancedCreateMemoryDto): Promise<{
+    success: boolean;
+    memoryId?: string;
+    blobId?: string;
+    vectorId?: number;
+    metadata?: MemoryMetadata;
+    embeddingBlobId?: string;
+    message?: string;
+  }> {
+    try {
+      this.logger.log(`Processing enhanced memory for user ${memoryDto.userAddress} with topic: ${memoryDto.topic}`);
+      
+      // Use the existing processing logic with enhanced metadata
+      const result = await this.processNewMemory(memoryDto);
+      
+      if (result.success) {
+        // Try to get enhanced metadata from Walrus
+        let metadata: MemoryMetadata | undefined;
+        try {
+          if (result.blobId) {
+            metadata = await this.walrusService.getEnhancedMetadata(result.blobId) || undefined;
+          }
+        } catch (error) {
+          this.logger.warn(`Could not retrieve enhanced metadata: ${error.message}`);
+        }
+
+        return {
+          ...result,
+          metadata,
+          embeddingBlobId: metadata?.embeddingBlobId
+        };
+      }
+
+      return result;
+    } catch (error) {
+      this.logger.error(`Error processing enhanced memory: ${error.message}`);
+      return {
+        success: false,
+        message: `Failed to process enhanced memory: ${error.message}`
+      };
+    }
+  }
+
+  /**
+   * Process a new memory from scratch (original method)
    * @param memoryDto Memory data
    * @returns Processing result
    */
@@ -219,16 +277,36 @@ export class MemoryIngestionService {
       // Step 7: Encrypt the memory content (skip in demo mode)
       let contentToStore = memoryDto.content;
       if (!this.isDemoMode()) {
-        contentToStore = await this.sealService.encrypt(
+        const encryptResult = await this.sealService.encrypt(
           memoryDto.content,
           memoryDto.userAddress
         );
+        contentToStore = encryptResult.encryptedData;
       } else {
         this.logger.log('Demo mode: Skipping encryption');
       }
 
-      // Step 8: Save the content to storage
-      const contentBlobId = await this.storageService.uploadContent(contentToStore, memoryDto.userAddress);
+      // Step 8: Save the content with enhanced metadata to Walrus
+      let contentBlobId: string;
+      let enhancedMetadata: MemoryMetadata | undefined;
+      
+      try {
+        const enhancedResult = await this.walrusService.uploadContentWithMetadata(
+          contentToStore,
+          memoryDto.userAddress,
+          memoryDto.category,
+          memoryDto.topic || `Memory about ${memoryDto.category}`,
+          memoryDto.importance || 5
+        );
+        contentBlobId = enhancedResult.blobId;
+        enhancedMetadata = enhancedResult.metadata;
+        
+        this.logger.log(`Enhanced metadata created with embedding: ${enhancedMetadata.embeddingBlobId?.substring(0, 8)}...`);
+      } catch (error) {
+        this.logger.warn(`Enhanced upload failed, falling back to basic storage: ${error.message}`);
+        // Fallback to regular storage
+        contentBlobId = await this.storageService.uploadContent(contentToStore, memoryDto.userAddress);
+      }
 
       // Step 9: Save the updated graph to Walrus (if we have existing graph data)
       if (graph && graphBlobId) {
@@ -336,10 +414,11 @@ export class MemoryIngestionService {
       // Step 7: Encrypt the memory content (skip in demo mode)
       let contentToStore = content;
       if (!this.isDemoMode()) {
-        contentToStore = await this.sealService.encrypt(
+        const encryptResult = await this.sealService.encrypt(
           content,
           userAddress
         );
+        contentToStore = encryptResult.encryptedData;
       } else {
         this.logger.log('Demo mode: Skipping encryption for conversation processing');
       }
@@ -583,6 +662,132 @@ export class MemoryIngestionService {
       }
 
       throw error;
+    }
+  }
+
+  /**
+   * Search memories by metadata embedding similarity
+   * @param queryText Text to search for
+   * @param userAddress User's address
+   * @param options Search options
+   * @returns Similar memories with metadata
+   */
+  async searchMemoriesByMetadata(
+    queryText: string,
+    userAddress: string,
+    options: {
+      threshold?: number;
+      limit?: number;
+      category?: string;
+      minImportance?: number;
+    } = {}
+  ): Promise<Array<{
+    blobId: string;
+    content?: string;
+    metadata: MemoryMetadata;
+    similarity: number;
+  }>> {
+    try {
+      const {
+        threshold = 0.7,
+        limit = 10,
+        category,
+        minImportance
+      } = options;
+
+      this.logger.log(`Searching memories by metadata for user ${userAddress}: "${queryText}"`);
+
+      // Use WalrusService to search by metadata embeddings
+      const results = await this.walrusService.searchByMetadataEmbedding(
+        queryText,
+        userAddress,
+        threshold,
+        limit
+      );
+
+      // Filter results based on options
+      let filteredResults = results;
+
+      if (category) {
+        filteredResults = filteredResults.filter(r => r.metadata.category === category);
+      }
+
+      if (minImportance !== undefined) {
+        filteredResults = filteredResults.filter(r => r.metadata.importance >= minImportance);
+      }
+
+      // For each result, try to decrypt and retrieve content if needed
+      const enhancedResults = await Promise.all(
+        filteredResults.map(async (result) => {
+          let content: string | undefined;
+          
+          try {
+            // Retrieve and decrypt content if not in demo mode
+            const encryptedContent = await this.walrusService.retrieveContent(result.blobId);
+            
+            if (this.isDemoMode()) {
+              content = encryptedContent;
+            } else {
+              // In production, decrypt using SEAL
+              // content = await this.sealService.decrypt(encryptedContent, userAddress);
+              content = encryptedContent; // Placeholder
+            }
+          } catch (error) {
+            this.logger.warn(`Could not retrieve content for ${result.blobId}: ${error.message}`);
+          }
+
+          return {
+            ...result,
+            content
+          };
+        })
+      );
+
+      this.logger.log(`Found ${enhancedResults.length} similar memories by metadata`);
+      return enhancedResults;
+    } catch (error) {
+      this.logger.error(`Error searching memories by metadata: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get metadata insights for a user's memories
+   * @param userAddress User's address
+   * @returns Metadata analytics
+   */
+  async getMetadataInsights(userAddress: string): Promise<{
+    totalMemories: number;
+    categoriesDistribution: Record<string, number>;
+    averageImportance: number;
+    topTopics: Array<{ topic: string; count: number }>;
+    embeddingCoverage: number; // Percentage of memories with embeddings
+  }> {
+    try {
+      // This is a placeholder implementation
+      // In production, this would:
+      // 1. Query all memory objects for the user from Sui blockchain
+      // 2. Retrieve metadata for each memory
+      // 3. Calculate analytics
+      
+      this.logger.log(`Generating metadata insights for user ${userAddress}`);
+      
+      return {
+        totalMemories: 0,
+        categoriesDistribution: {},
+        averageImportance: 5,
+        topTopics: [],
+        embeddingCoverage: 0
+      };
+    } catch (error) {
+      this.logger.error(`Error getting metadata insights: ${error.message}`);
+      return {
+        totalMemories: 0,
+        categoriesDistribution: {},
+        averageImportance: 5,
+        topTopics: [],
+        embeddingCoverage: 0
+      };
     }
   }
 

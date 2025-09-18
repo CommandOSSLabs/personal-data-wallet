@@ -101,10 +101,6 @@ The system uses a hybrid storage approach:
 - Vector storage
 - Relationship graphs
 
-### Chat Sessions Module
-- Session metadata
-- Message references
-
 ## API Endpoints
 
 ### Memory API

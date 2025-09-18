@@ -1,0 +1,5 @@
+runtimes:
+    - python@3.11.11
+tools:
+    - semgrep@1.78.0
+    - trivy@0.65.0

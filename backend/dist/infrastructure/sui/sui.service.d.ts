@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { SuiClient } from '@mysten/sui/client';
 import { ChatMessage, ChatSession } from '../../types/chat.types';
 export declare class SuiService {
     private configService;
@@ -54,6 +55,7 @@ export declare class SuiService {
     }>;
     deleteMemory(memoryId: string, userAddress: string): Promise<boolean>;
     private executeTransaction;
+    getClient(): SuiClient;
     private extractCreatedObjectId;
     private deserializeMessages;
 }
