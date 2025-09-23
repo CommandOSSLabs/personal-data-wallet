@@ -21,11 +21,23 @@ export declare const AccessChanged: MoveStruct<{
     granted_by: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
 }, "@local-pkg/pdw::seal_access_control::AccessChanged">;
 export declare const AccessRegistry: MoveStruct<{
-    id: any;
+    id: MoveStruct<{
+        id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    }, "0x2::object::UID">;
     /** Maps content_id -> owner address */
-    owners: any;
+    owners: MoveStruct<{
+        id: MoveStruct<{
+            id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+        }, "0x2::object::UID">;
+        size: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
+    }, "0x2::table::Table">;
     /** Maps (content_id, user_address) -> AccessPermission */
-    permissions: any;
+    permissions: MoveStruct<{
+        id: MoveStruct<{
+            id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+        }, "0x2::object::UID">;
+        size: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
+    }, "0x2::table::Table">;
 }, "@local-pkg/pdw::seal_access_control::AccessRegistry">;
 export declare const AccessPermission: MoveStruct<{
     access_level: import("@mysten/sui/bcs").BcsType<string, string, "string">;
@@ -34,7 +46,9 @@ export declare const AccessPermission: MoveStruct<{
     granted_by: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
 }, "@local-pkg/pdw::seal_access_control::AccessPermission">;
 export declare const AccessLog: MoveStruct<{
-    id: any;
+    id: MoveStruct<{
+        id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    }, "0x2::object::UID">;
     content_id: import("@mysten/sui/bcs").BcsType<string, string, "string">;
     requester: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
     access_type: import("@mysten/sui/bcs").BcsType<string, string, "string">;

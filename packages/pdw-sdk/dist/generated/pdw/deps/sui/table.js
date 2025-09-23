@@ -56,7 +56,7 @@ exports.Table = void 0;
  * assert!(&table1 != &table2);
  * ```
  */
-const index_js_1 = require("../../utils/index.js");
+const index_js_1 = require("../../../utils/index.js");
 const bcs_1 = require("@mysten/sui/bcs");
 const object = __importStar(require("./object.js"));
 const $moduleName = '0x2::table';

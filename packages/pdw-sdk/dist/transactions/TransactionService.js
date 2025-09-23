@@ -90,11 +90,14 @@ class TransactionService {
         if (options.gasPrice) {
             tx.setGasPrice(options.gasPrice);
         }
-        MemoryModule.updateMemoryMetadata({
-            tx,
-            memoryId: options.memoryId,
-            metadataBlobId: options.metadataBlobId,
-            embeddingDimension: options.embeddingDimension,
+        // Note: Using tx.moveCall for actual implementation
+        tx.moveCall({
+            target: `${this.config.packageId}::memory::update_memory_metadata`,
+            arguments: [
+                tx.pure.string(options.memoryId),
+                tx.pure.string(options.metadataBlobId),
+                tx.pure.u64(options.embeddingDimension || 0)
+            ]
         });
         return tx;
     }
@@ -109,9 +112,10 @@ class TransactionService {
         if (options.gasPrice) {
             tx.setGasPrice(options.gasPrice);
         }
-        MemoryModule.deleteMemoryRecord({
-            tx,
-            memoryId: options.memoryId,
+        // Note: Using tx.moveCall for actual implementation
+        tx.moveCall({
+            target: `${this.config.packageId}::memory::delete_memory_record`,
+            arguments: [tx.pure.string(options.memoryId)]
         });
         return tx;
     }
@@ -126,10 +130,13 @@ class TransactionService {
         if (options.gasPrice) {
             tx.setGasPrice(options.gasPrice);
         }
-        MemoryModule.createMemoryIndex({
-            tx,
-            indexBlobId: options.indexBlobId,
-            graphBlobId: options.graphBlobId,
+        // Note: Using tx.moveCall for actual implementation
+        tx.moveCall({
+            target: `${this.config.packageId}::memory::create_memory_index`,
+            arguments: [
+                tx.pure.string(options.indexBlobId),
+                tx.pure.string(options.graphBlobId)
+            ]
         });
         return tx;
     }
@@ -144,11 +151,14 @@ class TransactionService {
         if (options.gasPrice) {
             tx.setGasPrice(options.gasPrice);
         }
-        MemoryModule.updateMemoryIndex({
-            tx,
-            indexId: options.indexId,
-            newIndexBlobId: options.newIndexBlobId,
-            newGraphBlobId: options.newGraphBlobId,
+        // Note: Using tx.moveCall for actual implementation
+        tx.moveCall({
+            target: `${this.config.packageId}::memory::update_memory_index`,
+            arguments: [
+                tx.pure.string(options.indexId),
+                tx.pure.string(options.newIndexBlobId),
+                tx.pure.string(options.newGraphBlobId || '')
+            ]
         });
         return tx;
     }
@@ -164,12 +174,15 @@ class TransactionService {
         if (options.gasPrice) {
             tx.setGasPrice(options.gasPrice);
         }
-        AccessModule.grantAccess({
-            tx,
-            contentId: options.contentId,
-            recipient: options.recipient,
-            permissions: options.permissions,
-            expirationTime: options.expirationTime || 0,
+        // Note: Using tx.moveCall for actual implementation
+        tx.moveCall({
+            target: `${this.config.packageId}::access::grant_access`,
+            arguments: [
+                tx.pure.string(options.contentId),
+                tx.pure.address(options.recipient),
+                tx.pure.u8(Array.isArray(options.permissions) ? options.permissions[0] : options.permissions),
+                tx.pure.u64(options.expirationTime || 0)
+            ]
         });
         return tx;
     }
@@ -184,10 +197,13 @@ class TransactionService {
         if (options.gasPrice) {
             tx.setGasPrice(options.gasPrice);
         }
-        AccessModule.revokeAccess({
-            tx,
-            contentId: options.contentId,
-            recipient: options.recipient,
+        // Note: Using tx.moveCall for actual implementation
+        tx.moveCall({
+            target: `${this.config.packageId}::access::revoke_access`,
+            arguments: [
+                tx.pure.string(options.contentId),
+                tx.pure.address(options.recipient)
+            ]
         });
         return tx;
     }
@@ -202,11 +218,14 @@ class TransactionService {
         if (options.gasPrice) {
             tx.setGasPrice(options.gasPrice);
         }
-        AccessModule.registerContent({
-            tx,
-            contentHash: options.contentHash,
-            encryptionKey: options.encryptionKey,
-            accessPolicy: options.accessPolicy,
+        // Note: Using tx.moveCall for actual implementation
+        tx.moveCall({
+            target: `${this.config.packageId}::access::register_content`,
+            arguments: [
+                tx.pure.string(options.contentHash),
+                tx.pure.string(options.encryptionKey),
+                tx.pure.string(Array.isArray(options.accessPolicy) ? JSON.stringify(options.accessPolicy) : options.accessPolicy)
+            ]
         });
         return tx;
     }

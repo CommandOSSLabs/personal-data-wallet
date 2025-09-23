@@ -15,10 +15,14 @@ export function createDefaultConfig() {
             },
         },
         storageConfig: {
-            provider: 'walrus',
             cacheEnabled: true,
             encryptionEnabled: true,
         },
+        // Walrus Storage Configuration
+        walrusPublisherUrl: 'https://publisher.walrus-testnet.walrus.space',
+        walrusAggregatorUrl: 'https://aggregator.walrus-testnet.walrus.space',
+        walrusMaxFileSize: 1024 * 1024 * 1024, // 1GB
+        walrusTimeout: 30000, // 30 seconds
     };
 }
 export function createProductionConfig(overrides = {}) {
@@ -35,6 +39,9 @@ export function createProductionConfig(overrides = {}) {
                 threshold: 2,
             },
         },
+        // Production Walrus endpoints
+        walrusPublisherUrl: 'https://publisher.walrus.space',
+        walrusAggregatorUrl: 'https://aggregator.walrus.space',
         ...overrides,
     };
 }
@@ -52,6 +59,9 @@ export function createTestnetConfig(overrides = {}) {
                 threshold: 2,
             },
         },
+        // Testnet Walrus endpoints (same as default for now)
+        walrusPublisherUrl: 'https://publisher.walrus-testnet.walrus.space',
+        walrusAggregatorUrl: 'https://aggregator.walrus-testnet.walrus.space',
         ...overrides,
     };
 }

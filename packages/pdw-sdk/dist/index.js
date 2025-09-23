@@ -2,78 +2,269 @@
 /**
  * Personal Data Wallet SDK
  *
- * A TypeScript SDK for building memory-aware applications with decentralized storage,
- * SEAL encryption, and Sui blockchain integration.
+ * Comprehensive SDK for decentralized memory processing with AI-powered insights.
+ *
+ * Features:
+ * - 🧠 Local AI embedding generation (Gemini API)
+ * - 🔍 HNSW vector indexing with intelligent batching
+ * - 📊 Knowledge graph extraction and management
+ * - 🗄️ Walrus decentralized storage with encryption
+ * - ⛓️ Sui blockchain ownership tracking
+ * - 🔄 Unified processing pipeline with monitoring
+ *
+ * @version 1.0.0
+ * @author Personal Data Wallet Team
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __exportStar = (this && this.__exportStar) || function(m, exports) {
-    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
-};
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.VERSION = exports.sealAccessContract = exports.memoryContract = exports.PDWApiClient = exports.ConfigurationError = exports.validateConfig = exports.createTestnetConfig = exports.createProductionConfig = exports.createDefaultConfig = exports.createTestnetPDWClient = exports.createDevPDWClient = exports.extendWithPDW = exports.createPDWClient = exports.EncryptionService = exports.StorageService = exports.ChatService = exports.MemoryService = void 0;
-// Core types - export everything from types
-__exportStar(require("./types"), exports);
-// Service classes for advanced usage
-var MemoryService_1 = require("./memory/MemoryService");
-Object.defineProperty(exports, "MemoryService", { enumerable: true, get: function () { return MemoryService_1.MemoryService; } });
-var ChatService_1 = require("./chat/ChatService");
-Object.defineProperty(exports, "ChatService", { enumerable: true, get: function () { return ChatService_1.ChatService; } });
-var StorageService_1 = require("./storage/StorageService");
-Object.defineProperty(exports, "StorageService", { enumerable: true, get: function () { return StorageService_1.StorageService; } });
-var EncryptionService_1 = require("./encryption/EncryptionService");
-Object.defineProperty(exports, "EncryptionService", { enumerable: true, get: function () { return EncryptionService_1.EncryptionService; } });
-// Client factory functions
-var factory_1 = require("./client/factory");
-Object.defineProperty(exports, "createPDWClient", { enumerable: true, get: function () { return factory_1.createPDWClient; } });
-Object.defineProperty(exports, "extendWithPDW", { enumerable: true, get: function () { return factory_1.extendWithPDW; } });
-Object.defineProperty(exports, "createDevPDWClient", { enumerable: true, get: function () { return factory_1.createDevPDWClient; } });
-Object.defineProperty(exports, "createTestnetPDWClient", { enumerable: true, get: function () { return factory_1.createTestnetPDWClient; } });
-// Configuration utilities
-var defaults_1 = require("./config/defaults");
-Object.defineProperty(exports, "createDefaultConfig", { enumerable: true, get: function () { return defaults_1.createDefaultConfig; } });
-Object.defineProperty(exports, "createProductionConfig", { enumerable: true, get: function () { return defaults_1.createProductionConfig; } });
-Object.defineProperty(exports, "createTestnetConfig", { enumerable: true, get: function () { return defaults_1.createTestnetConfig; } });
-var validation_1 = require("./config/validation");
-Object.defineProperty(exports, "validateConfig", { enumerable: true, get: function () { return validation_1.validateConfig; } });
-Object.defineProperty(exports, "ConfigurationError", { enumerable: true, get: function () { return validation_1.ConfigurationError; } });
-// API client for direct backend access
-var client_1 = require("./api/client");
-Object.defineProperty(exports, "PDWApiClient", { enumerable: true, get: function () { return client_1.PDWApiClient; } });
-// Generated Move types (now available!)
-exports.memoryContract = __importStar(require("./generated/pdw/memory.js"));
-exports.sealAccessContract = __importStar(require("./generated/pdw/seal_access_control.js"));
-// Version
-exports.VERSION = '0.1.0';
+exports.VERSION = exports.SDK = exports.QuickStartConfigs = exports.SDK_NAME = exports.SDK_VERSION = exports.Config = exports.ConfigurationHelper = exports.MemoryDecryptionPipeline = exports.MemoryRetrievalService = exports.BlockchainManager = exports.SuiService = exports.StorageManager = exports.WalrusService = exports.KnowledgeGraphManager = exports.GraphService = exports.MemoryProcessingCache = exports.BatchingService = exports.BatchManager = exports.HnswIndexService = exports.VectorManager = exports.EmbeddingService = exports.PipelineManager = exports.MemoryPipeline = void 0;
+exports.createQuickStartPipeline = createQuickStartPipeline;
+exports.createPipelineManager = createPipelineManager;
+// Core pipeline - the main entry point
+var pipeline_1 = require("./pipeline");
+Object.defineProperty(exports, "MemoryPipeline", { enumerable: true, get: function () { return pipeline_1.MemoryPipeline; } });
+Object.defineProperty(exports, "PipelineManager", { enumerable: true, get: function () { return pipeline_1.PipelineManager; } });
+// Import for internal use
+const MemoryPipeline_1 = require("./pipeline/MemoryPipeline");
+const PipelineManager_1 = require("./pipeline/PipelineManager");
+// Individual service modules
+var embedding_1 = require("./embedding");
+Object.defineProperty(exports, "EmbeddingService", { enumerable: true, get: function () { return embedding_1.EmbeddingService; } });
+var vector_1 = require("./vector");
+Object.defineProperty(exports, "VectorManager", { enumerable: true, get: function () { return vector_1.VectorManager; } });
+Object.defineProperty(exports, "HnswIndexService", { enumerable: true, get: function () { return vector_1.HnswIndexService; } });
+var batch_1 = require("./batch");
+Object.defineProperty(exports, "BatchManager", { enumerable: true, get: function () { return batch_1.BatchManager; } });
+Object.defineProperty(exports, "BatchingService", { enumerable: true, get: function () { return batch_1.BatchingService; } });
+Object.defineProperty(exports, "MemoryProcessingCache", { enumerable: true, get: function () { return batch_1.MemoryProcessingCache; } });
+var graph_1 = require("./graph");
+Object.defineProperty(exports, "GraphService", { enumerable: true, get: function () { return graph_1.GraphService; } });
+Object.defineProperty(exports, "KnowledgeGraphManager", { enumerable: true, get: function () { return graph_1.KnowledgeGraphManager; } });
+var storage_1 = require("./storage");
+Object.defineProperty(exports, "WalrusService", { enumerable: true, get: function () { return storage_1.WalrusService; } });
+Object.defineProperty(exports, "StorageManager", { enumerable: true, get: function () { return storage_1.StorageManager; } });
+var blockchain_1 = require("./blockchain");
+Object.defineProperty(exports, "SuiService", { enumerable: true, get: function () { return blockchain_1.SuiService; } });
+Object.defineProperty(exports, "BlockchainManager", { enumerable: true, get: function () { return blockchain_1.BlockchainManager; } });
+// Memory retrieval, analytics, and decryption
+var retrieval_1 = require("./retrieval");
+Object.defineProperty(exports, "MemoryRetrievalService", { enumerable: true, get: function () { return retrieval_1.MemoryRetrievalService; } });
+Object.defineProperty(exports, "MemoryDecryptionPipeline", { enumerable: true, get: function () { return retrieval_1.MemoryDecryptionPipeline; } });
+// Configuration management
+var config_1 = require("./config");
+Object.defineProperty(exports, "ConfigurationHelper", { enumerable: true, get: function () { return config_1.ConfigurationHelper; } });
+Object.defineProperty(exports, "Config", { enumerable: true, get: function () { return config_1.Config; } });
+// Utility exports - using imported classes above
+/**
+ * SDK Version Information
+ */
+exports.SDK_VERSION = '1.0.0';
+exports.SDK_NAME = 'Personal Data Wallet SDK';
+/**
+ * Quick start configuration presets
+ */
+exports.QuickStartConfigs = {
+    /**
+     * Basic configuration for simple memory processing
+     */
+    BASIC: {
+        embedding: {
+            enableBatching: true,
+            batchSize: 10
+        },
+        storage: {
+            enableEncryption: false,
+            enableBatching: false
+        },
+        blockchain: {
+            enableOwnershipTracking: false
+        }
+    },
+    /**
+     * Full decentralized configuration with all features
+     */
+    DECENTRALIZED: {
+        embedding: {
+            enableBatching: true,
+            batchSize: 20
+        },
+        vector: {
+            enablePersistence: true,
+            maxElements: 10000
+        },
+        graph: {
+            enableExtraction: true,
+            confidenceThreshold: 0.7
+        },
+        storage: {
+            enableEncryption: true,
+            enableBatching: true,
+            network: 'testnet'
+        },
+        blockchain: {
+            enableOwnershipTracking: true,
+            enableBatching: true,
+            network: 'testnet'
+        },
+        enableRollback: true,
+        enableMonitoring: true
+    },
+    /**
+     * High-performance configuration optimized for throughput
+     */
+    HIGH_PERFORMANCE: {
+        embedding: {
+            enableBatching: true,
+            batchSize: 50
+        },
+        batch: {
+            enableBatching: true,
+            batchSize: 100,
+            batchDelayMs: 2000
+        },
+        vector: {
+            maxElements: 50000,
+            enablePersistence: true
+        },
+        graph: {
+            enableExtraction: false // Disable for performance
+        },
+        storage: {
+            enableBatching: true,
+            enableEncryption: false // Disable for performance
+        },
+        blockchain: {
+            enableBatching: true,
+            enableOwnershipTracking: true
+        },
+        skipFailedSteps: true,
+        maxRetryAttempts: 1,
+        enableMonitoring: true
+    },
+    /**
+     * Development configuration with enhanced debugging
+     */
+    DEVELOPMENT: {
+        embedding: {
+            enableBatching: false // Process individually for debugging
+        },
+        vector: {
+            maxElements: 1000
+        },
+        graph: {
+            enableExtraction: true,
+            confidenceThreshold: 0.5 // Lower threshold for testing
+        },
+        storage: {
+            enableEncryption: false,
+            enableBatching: false
+        },
+        blockchain: {
+            enableOwnershipTracking: false, // Skip for dev
+            enableBatching: false
+        },
+        enableRollback: true,
+        enableMonitoring: true,
+        skipFailedSteps: false,
+        maxRetryAttempts: 0 // Fail fast for debugging
+    }
+};
+/**
+ * Create a pre-configured pipeline with quick start settings
+ */
+function createQuickStartPipeline(preset, overrides = {}) {
+    const baseConfig = exports.QuickStartConfigs[preset];
+    const mergedConfig = { ...baseConfig, ...overrides };
+    // Auto-configure API key if not provided
+    if (!mergedConfig.embedding?.apiKey) {
+        try {
+            const { Config } = require('./config');
+            const apiKey = Config.getGeminiKey();
+            mergedConfig.embedding = {
+                ...mergedConfig.embedding,
+                apiKey
+            };
+            console.log('✅ Auto-configured Gemini API key from environment');
+        }
+        catch (error) {
+            console.warn('⚠️ No Gemini API key found. Please provide one for AI features to work.');
+        }
+    }
+    return new MemoryPipeline_1.MemoryPipeline(mergedConfig);
+}
+/**
+ * Create a pipeline manager with recommended settings
+ */
+function createPipelineManager(config = {}) {
+    const defaultConfig = {
+        maxConcurrentPipelines: 5,
+        enableScheduling: true,
+        enableHealthChecks: true,
+        enableMetricsCollection: true,
+        defaultPipelineConfig: exports.QuickStartConfigs.BASIC
+    };
+    const mergedConfig = { ...defaultConfig, ...config };
+    return new PipelineManager_1.PipelineManager(mergedConfig);
+}
+/**
+ * SDK Information and utilities
+ */
+exports.SDK = {
+    version: exports.SDK_VERSION,
+    name: exports.SDK_NAME,
+    /**
+     * Get SDK build information
+     */
+    getBuildInfo() {
+        return {
+            version: exports.SDK_VERSION,
+            name: exports.SDK_NAME,
+            buildDate: new Date().toISOString(),
+            features: [
+                'AI Embedding Generation',
+                'HNSW Vector Indexing',
+                'Knowledge Graph Extraction',
+                'Walrus Decentralized Storage',
+                'Sui Blockchain Integration',
+                'Unified Processing Pipeline',
+                'Batch Processing & Caching',
+                'Comprehensive Monitoring'
+            ]
+        };
+    },
+    /**
+     * Validate configuration
+     */
+    validateConfig(config) {
+        const errors = [];
+        const warnings = [];
+        // Validate embedding config
+        if (config.embedding?.batchSize && config.embedding.batchSize > 100) {
+            warnings.push('Large embedding batch size may cause memory issues');
+        }
+        // Validate vector config  
+        if (config.vector?.maxElements && config.vector.maxElements > 100000) {
+            warnings.push('Large vector index may impact performance');
+        }
+        // Validate network consistency
+        if (config.storage?.network !== config.blockchain?.network) {
+            warnings.push('Storage and blockchain networks should match');
+        }
+        return {
+            isValid: errors.length === 0,
+            errors,
+            warnings
+        };
+    }
+};
+// Default export for convenience
+exports.default = {
+    MemoryPipeline: MemoryPipeline_1.MemoryPipeline,
+    PipelineManager: PipelineManager_1.PipelineManager,
+    createQuickStartPipeline,
+    createPipelineManager,
+    QuickStartConfigs: exports.QuickStartConfigs,
+    SDK: exports.SDK
+};
+// Legacy version for compatibility
+exports.VERSION = '1.0.0';
 //# sourceMappingURL=index.js.map

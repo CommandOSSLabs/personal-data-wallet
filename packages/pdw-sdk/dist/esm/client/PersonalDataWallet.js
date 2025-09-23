@@ -15,64 +15,83 @@ var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (
     if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
     return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
 };
-var _PersonalDataWallet_client, _PersonalDataWallet_config, _PersonalDataWallet_memory, _PersonalDataWallet_chat, _PersonalDataWallet_storage, _PersonalDataWallet_encryption;
+var _PersonalDataWallet_client, _PersonalDataWallet_config, _PersonalDataWallet_apiClient, _PersonalDataWallet_transactions, _PersonalDataWallet_view, _PersonalDataWallet_memory, _PersonalDataWallet_chat, _PersonalDataWallet_storage, _PersonalDataWallet_encryption;
 import { MemoryService } from '../memory/MemoryService';
 import { ChatService } from '../chat/ChatService';
 import { StorageService } from '../storage/StorageService';
 import { EncryptionService } from '../encryption/EncryptionService';
+import { TransactionService } from '../transactions/TransactionService';
+import { ViewService } from '../view/ViewService';
+import { PDWApiClient } from '../api/client';
 import { createDefaultConfig } from '../config/defaults';
 import { validateConfig } from '../config/validation';
 export class PersonalDataWallet {
     constructor(client, config) {
         _PersonalDataWallet_client.set(this, void 0);
         _PersonalDataWallet_config.set(this, void 0);
+        _PersonalDataWallet_apiClient.set(this, void 0);
+        _PersonalDataWallet_transactions.set(this, void 0);
+        _PersonalDataWallet_view.set(this, void 0);
         _PersonalDataWallet_memory.set(this, void 0);
         _PersonalDataWallet_chat.set(this, void 0);
         _PersonalDataWallet_storage.set(this, void 0);
         _PersonalDataWallet_encryption.set(this, void 0);
         __classPrivateFieldSet(this, _PersonalDataWallet_client, client, "f");
         __classPrivateFieldSet(this, _PersonalDataWallet_config, validateConfig({ ...createDefaultConfig(), ...config }), "f");
+        __classPrivateFieldSet(this, _PersonalDataWallet_apiClient, new PDWApiClient(__classPrivateFieldGet(this, _PersonalDataWallet_config, "f").apiUrl), "f");
         // Initialize services
+        __classPrivateFieldSet(this, _PersonalDataWallet_transactions, new TransactionService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
+        __classPrivateFieldSet(this, _PersonalDataWallet_view, new ViewService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
         __classPrivateFieldSet(this, _PersonalDataWallet_memory, new MemoryService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
-        __classPrivateFieldSet(this, _PersonalDataWallet_chat, new ChatService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
-        __classPrivateFieldSet(this, _PersonalDataWallet_storage, new StorageService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
+        __classPrivateFieldSet(this, _PersonalDataWallet_chat, new ChatService(__classPrivateFieldGet(this, _PersonalDataWallet_apiClient, "f")), "f");
+        __classPrivateFieldSet(this, _PersonalDataWallet_storage, new StorageService(__classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
         __classPrivateFieldSet(this, _PersonalDataWallet_encryption, new EncryptionService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
         // Bind methods after services are initialized
         this.createMemory = __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").createMemory.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f"));
         this.searchMemories = __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").searchMemories.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f"));
         this.getMemoryContext = __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").getMemoryContext.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f"));
-        this.startChat = __classPrivateFieldGet(this, _PersonalDataWallet_chat, "f").startChat.bind(__classPrivateFieldGet(this, _PersonalDataWallet_chat, "f"));
+        this.uploadToStorage = __classPrivateFieldGet(this, _PersonalDataWallet_storage, "f").upload.bind(__classPrivateFieldGet(this, _PersonalDataWallet_storage, "f"));
+        this.retrieveFromStorage = __classPrivateFieldGet(this, _PersonalDataWallet_storage, "f").retrieve.bind(__classPrivateFieldGet(this, _PersonalDataWallet_storage, "f"));
     }
     // Transaction builders
     get tx() {
         return {
-            createMemoryRecord: __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").tx.createMemoryRecord.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").tx),
-            deleteMemory: __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").tx.deleteMemory.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").tx),
-            updateMemoryMetadata: __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").tx.updateMemoryMetadata.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").tx),
-            grantAccess: __classPrivateFieldGet(this, _PersonalDataWallet_encryption, "f").tx.grantAccess.bind(__classPrivateFieldGet(this, _PersonalDataWallet_encryption, "f").tx),
-            revokeAccess: __classPrivateFieldGet(this, _PersonalDataWallet_encryption, "f").tx.revokeAccess.bind(__classPrivateFieldGet(this, _PersonalDataWallet_encryption, "f").tx),
+            createMemoryRecord: __classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f").buildCreateMemoryRecord.bind(__classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f")),
+            updateMemoryMetadata: __classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f").buildUpdateMemoryMetadata.bind(__classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f")),
+            deleteMemoryRecord: __classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f").buildDeleteMemoryRecord.bind(__classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f")),
+            grantAccess: __classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f").buildGrantAccess.bind(__classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f")),
+            revokeAccess: __classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f").buildRevokeAccess.bind(__classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f")),
+            registerContent: __classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f").buildRegisterContent.bind(__classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f")),
+            executeBatch: __classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f").executeBatch.bind(__classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f")),
         };
     }
-    // Move call builders
+    // Transaction execution (async thunks)
     get call() {
         return {
-            createMemoryRecord: __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").call.createMemoryRecord.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").call),
-            deleteMemory: __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").call.deleteMemory.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").call),
-            updateMemoryIndex: __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").call.updateMemoryIndex.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").call),
-            grantAccess: __classPrivateFieldGet(this, _PersonalDataWallet_encryption, "f").call.grantAccess.bind(__classPrivateFieldGet(this, _PersonalDataWallet_encryption, "f").call),
-            revokeAccess: __classPrivateFieldGet(this, _PersonalDataWallet_encryption, "f").call.revokeAccess.bind(__classPrivateFieldGet(this, _PersonalDataWallet_encryption, "f").call),
+            createMemoryRecord: __classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f").createMemoryRecord.bind(__classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f")),
+            updateMemoryMetadata: __classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f").updateMemoryMetadata.bind(__classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f")),
+            deleteMemoryRecord: __classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f").deleteMemoryRecord.bind(__classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f")),
+            grantAccess: __classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f").grantAccess.bind(__classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f")),
+            revokeAccess: __classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f").revokeAccess.bind(__classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f")),
+            executeBatch: __classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f").executeBatch.bind(__classPrivateFieldGet(this, _PersonalDataWallet_transactions, "f")),
         };
     }
     // View methods
     get view() {
         return {
-            getUserMemories: __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").view.getUserMemories.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").view),
-            getMemoryIndex: __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").view.getMemoryIndex.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").view),
-            getMemory: __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").view.getMemory.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").view),
-            getMemoryStats: __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").view.getMemoryStats.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").view),
-            getChatSessions: __classPrivateFieldGet(this, _PersonalDataWallet_chat, "f").view.getChatSessions.bind(__classPrivateFieldGet(this, _PersonalDataWallet_chat, "f").view),
-            getChatSession: __classPrivateFieldGet(this, _PersonalDataWallet_chat, "f").view.getChatSession.bind(__classPrivateFieldGet(this, _PersonalDataWallet_chat, "f").view),
-            getAccessPermissions: __classPrivateFieldGet(this, _PersonalDataWallet_encryption, "f").view.getAccessPermissions.bind(__classPrivateFieldGet(this, _PersonalDataWallet_encryption, "f").view),
+            getUserMemories: __classPrivateFieldGet(this, _PersonalDataWallet_view, "f").getUserMemories.bind(__classPrivateFieldGet(this, _PersonalDataWallet_view, "f")),
+            getMemoryIndex: __classPrivateFieldGet(this, _PersonalDataWallet_view, "f").getMemoryIndex.bind(__classPrivateFieldGet(this, _PersonalDataWallet_view, "f")),
+            getMemory: __classPrivateFieldGet(this, _PersonalDataWallet_view, "f").getMemory.bind(__classPrivateFieldGet(this, _PersonalDataWallet_view, "f")),
+            getMemoryStats: __classPrivateFieldGet(this, _PersonalDataWallet_view, "f").getMemoryStats.bind(__classPrivateFieldGet(this, _PersonalDataWallet_view, "f")),
+            getChatSessions: __classPrivateFieldGet(this, _PersonalDataWallet_chat, "f").getSessions.bind(__classPrivateFieldGet(this, _PersonalDataWallet_chat, "f")),
+            getChatSession: __classPrivateFieldGet(this, _PersonalDataWallet_chat, "f").getSession.bind(__classPrivateFieldGet(this, _PersonalDataWallet_chat, "f")),
+            getStorageStats: __classPrivateFieldGet(this, _PersonalDataWallet_storage, "f").getStats.bind(__classPrivateFieldGet(this, _PersonalDataWallet_storage, "f")),
+            listStoredItems: __classPrivateFieldGet(this, _PersonalDataWallet_storage, "f").list.bind(__classPrivateFieldGet(this, _PersonalDataWallet_storage, "f")),
+            getAccessPermissions: __classPrivateFieldGet(this, _PersonalDataWallet_view, "f").getAccessPermissions.bind(__classPrivateFieldGet(this, _PersonalDataWallet_view, "f")),
+            getContentRegistry: __classPrivateFieldGet(this, _PersonalDataWallet_view, "f").getContentRegistry.bind(__classPrivateFieldGet(this, _PersonalDataWallet_view, "f")),
+            objectExists: __classPrivateFieldGet(this, _PersonalDataWallet_view, "f").objectExists.bind(__classPrivateFieldGet(this, _PersonalDataWallet_view, "f")),
+            getObjectType: __classPrivateFieldGet(this, _PersonalDataWallet_view, "f").getObjectType.bind(__classPrivateFieldGet(this, _PersonalDataWallet_view, "f")),
+            findMemoryByContentHash: __classPrivateFieldGet(this, _PersonalDataWallet_view, "f").findMemoryByContentHash.bind(__classPrivateFieldGet(this, _PersonalDataWallet_view, "f")),
         };
     }
     // BCS types from generated contracts
@@ -102,6 +121,7 @@ export class PersonalDataWallet {
     get storage() { return __classPrivateFieldGet(this, _PersonalDataWallet_storage, "f"); }
     get encryption() { return __classPrivateFieldGet(this, _PersonalDataWallet_encryption, "f"); }
     get config() { return __classPrivateFieldGet(this, _PersonalDataWallet_config, "f"); }
+    get viewService() { return __classPrivateFieldGet(this, _PersonalDataWallet_view, "f"); }
     // Client extension factory
     static asClientExtension(config) {
         return {
@@ -121,7 +141,7 @@ export class PersonalDataWallet {
         };
     }
 }
-_PersonalDataWallet_client = new WeakMap(), _PersonalDataWallet_config = new WeakMap(), _PersonalDataWallet_memory = new WeakMap(), _PersonalDataWallet_chat = new WeakMap(), _PersonalDataWallet_storage = new WeakMap(), _PersonalDataWallet_encryption = new WeakMap();
+_PersonalDataWallet_client = new WeakMap(), _PersonalDataWallet_config = new WeakMap(), _PersonalDataWallet_apiClient = new WeakMap(), _PersonalDataWallet_transactions = new WeakMap(), _PersonalDataWallet_view = new WeakMap(), _PersonalDataWallet_memory = new WeakMap(), _PersonalDataWallet_chat = new WeakMap(), _PersonalDataWallet_storage = new WeakMap(), _PersonalDataWallet_encryption = new WeakMap();
 // Export for easier usage
 export default PersonalDataWallet;
 //# sourceMappingURL=PersonalDataWallet.js.map

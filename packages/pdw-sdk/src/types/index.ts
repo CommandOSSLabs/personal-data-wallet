@@ -464,6 +464,63 @@ export interface DecryptionOptions {
   signedTxBytes?: Uint8Array;
 }
 
+// SEAL-specific encryption types
+export interface SealEncryptionResult {
+  encryptedData: string;
+  backupKey: string;
+  contentHash: string;
+}
+
+export interface SealDecryptionOptions {
+  encryptedData: string;
+  userAddress: string;
+  sessionKey?: any; // SessionKey from @mysten/seal
+  signedTxBytes?: Uint8Array;
+}
+
+export interface AccessGrantOptions {
+  ownerAddress: string;
+  recipientAddress: string;
+  contentId: string;
+  accessLevel: 'read' | 'write';
+  expiresIn?: number;
+}
+
+export interface AccessRevokeOptions {
+  ownerAddress: string;
+  recipientAddress: string;
+  contentId: string;
+}
+
+// Error handling types
+export type ErrorCategory = 
+  | 'validation'
+  | 'blockchain'
+  | 'storage' 
+  | 'encryption'
+  | 'network'
+  | 'configuration'
+  | 'authentication'
+  | 'permission';
+
+export type ErrorSeverity = 'info' | 'warning' | 'error' | 'critical';
+
+export interface ErrorObject {
+  name: string;
+  message: string;
+  code: string;
+  category: ErrorCategory;
+  severity: ErrorSeverity;
+  context?: Record<string, any>;
+  timestamp: string;
+  stack?: string;
+  originalError?: {
+    name: string;
+    message: string;
+    stack?: string;
+  };
+}
+
 export interface AccessControlOptions {
   memoryId: string;
   grantee: string;

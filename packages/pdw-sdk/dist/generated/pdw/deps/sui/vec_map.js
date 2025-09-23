@@ -6,7 +6,7 @@ exports.VecMap = VecMap;
  * THIS FILE IS GENERATED AND SHOULD NOT BE MANUALLY MODIFIED *
  **************************************************************/
 const bcs_1 = require("@mysten/sui/bcs");
-const index_js_1 = require("../../utils/index.js");
+const index_js_1 = require("../../../utils/index.js");
 const $moduleName = '0x2::vec_map';
 /** An entry in the map */
 function Entry(...typeParameters) {

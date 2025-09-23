@@ -1,1 +1,1 @@
-{"version":3,"file":"table.d.ts","sourceRoot":"","sources":["../../../../../src/generated/pdw/deps/sui/table.ts"],"names":[],"mappings":"AAAA;;gEAEgE;AA2BhE,eAAO,MAAM,KAAK,KAKV,CAAC"}
+{"version":3,"file":"table.d.ts","sourceRoot":"","sources":["../../../../../src/generated/pdw/deps/sui/table.ts"],"names":[],"mappings":"AAAA;;gEAEgE;AAGhE;;;;;;;;;;;;;;;;;;GAkBG;AAEH,OAAO,EAAE,UAAU,EAAE,MAAM,yBAAyB,CAAC;AAIrD,eAAO,MAAM,KAAK;IACV,2BAA2B;;;;IAE3B,iDAAiD;;uBAEjD,CAAC"}

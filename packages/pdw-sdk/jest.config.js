@@ -1,7 +1,7 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  roots: ['<rootDir>/src'],
+  roots: ['<rootDir>/src', '<rootDir>/test'],
   testMatch: [
     '**/__tests__/**/*.+(ts|tsx|js)',
     '**/*.(test|spec).+(ts|tsx|js)'
@@ -14,7 +14,10 @@ module.exports = {
     '!src/**/*.d.ts',
     '!src/generated/**/*'
   ],
-  moduleNameMapping: {
+  setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],
+  testTimeout: 60000, // 60 seconds for SEAL operations
+  verbose: true,
+  moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1'
   }
 };

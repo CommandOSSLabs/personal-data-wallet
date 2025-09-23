@@ -25,7 +25,7 @@ export class MemoryService {
         return response.data.memoryId;
     }
     /**
-     * Search memories using HNSW vector similarity
+     * Search memories using HNSW vector similarity with advanced options
      */
     async searchMemories(options) {
         const response = await this.apiClient.searchMemories(options);
@@ -33,6 +33,61 @@ export class MemoryService {
             throw new Error(response.message || 'Failed to search memories');
         }
         return response.data.results;
+    }
+    /**
+     * Advanced memory search with similarity scoring and filtering
+     */
+    async searchMemoriesAdvanced(options) {
+        const startTime = Date.now();
+        // First get results from backend
+        const searchOptions = {
+            query: options.query,
+            userAddress: options.userAddress,
+            category: options.category,
+            k: options.k || 20, // Get more results initially for filtering
+            threshold: options.threshold || 0.7
+        };
+        const response = await this.apiClient.searchMemories(searchOptions);
+        if (!response.success) {
+            throw new Error(response.message || 'Failed to search memories');
+        }
+        let results = response.data.results;
+        const totalResults = results.length;
+        // Apply similarity threshold filtering
+        if (options.threshold) {
+            results = results.filter(memory => (memory.similarity_score || 0) >= options.threshold);
+        }
+        // Apply time range filtering
+        if (options.timeRange) {
+            results = results.filter(memory => {
+                const memoryTime = new Date(memory.timestamp);
+                const afterStart = !options.timeRange.start || memoryTime >= options.timeRange.start;
+                const beforeEnd = !options.timeRange.end || memoryTime <= options.timeRange.end;
+                return afterStart && beforeEnd;
+            });
+        }
+        // Limit final results
+        results = results.slice(0, options.k || 10);
+        // Calculate metadata
+        const similarities = results.map(r => r.similarity_score || 0).filter(s => s > 0);
+        const averageSimilarity = similarities.length > 0
+            ? similarities.reduce((sum, sim) => sum + sim, 0) / similarities.length
+            : 0;
+        const categories = {};
+        results.forEach(memory => {
+            categories[memory.category] = (categories[memory.category] || 0) + 1;
+        });
+        const queryTime = Date.now() - startTime;
+        return {
+            results,
+            searchMetadata: {
+                queryTime,
+                totalResults,
+                filteredResults: results.length,
+                averageSimilarity,
+                categories
+            }
+        };
     }
     /**
      * Get memory context for AI chat integration
@@ -370,6 +425,217 @@ export class MemoryService {
             throw new Error(`Failed to flush user data: ${response.statusText}`);
         }
         return response.json();
+    }
+    // ==================== ADVANCED MEMORY FEATURES ====================
+    /**
+     * Generate embeddings for text content using backend AI service
+     */
+    async generateEmbeddings(options) {
+        const startTime = Date.now();
+        // This would call the backend embedding service
+        const response = await fetch(`${this.apiClient['baseUrl']}/embeddings/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text: options.text,
+                type: options.type || 'content',
+                userAddress: options.userAddress
+            })
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to generate embeddings: ${response.statusText}`);
+        }
+        const result = await response.json();
+        return {
+            embeddings: result.embeddings,
+            dimension: result.dimension || 768,
+            model: result.model || 'text-embedding-3-large',
+            processingTime: Date.now() - startTime
+        };
+    }
+    /**
+     * Perform HNSW vector similarity search
+     */
+    async vectorSearch(options) {
+        const startTime = Date.now();
+        // This would call the backend HNSW search service
+        const response = await fetch(`${this.apiClient['baseUrl']}/memories/vector-search`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                queryVector: options.queryVector,
+                userAddress: options.userAddress,
+                k: options.k || 10,
+                efSearch: options.efSearch || 50,
+                category: options.category,
+                minSimilarity: options.minSimilarity || 0.7
+            })
+        });
+        if (!response.ok) {
+            throw new Error(`Vector search failed: ${response.statusText}`);
+        }
+        const result = await response.json();
+        return {
+            results: result.results || [],
+            searchStats: {
+                searchTime: Date.now() - startTime,
+                nodesVisited: result.stats?.nodesVisited || 0,
+                exactMatches: result.stats?.exactMatches || 0,
+                approximateMatches: result.stats?.approximateMatches || 0
+            }
+        };
+    }
+    /**
+     * Create memory with enhanced metadata embeddings
+     */
+    async createMemoryWithEmbeddings(options) {
+        const startTime = Date.now();
+        const stats = {
+            totalTime: 0,
+            embeddingTime: 0,
+            storageTime: 0,
+            blockchainTime: 0
+        };
+        let embeddings;
+        // Generate embeddings if requested
+        if (options.generateEmbeddings !== false) {
+            const embeddingStartTime = Date.now();
+            // Content embeddings
+            const contentEmbeddings = await this.generateEmbeddings({
+                text: options.content,
+                type: 'content',
+                userAddress: options.userAddress
+            });
+            // Metadata embeddings (from topic + category + importance)
+            const metadataText = `${options.category} ${options.topic || ''} importance:${options.importance || 5}`.trim();
+            const metadataEmbeddings = await this.generateEmbeddings({
+                text: metadataText,
+                type: 'metadata',
+                userAddress: options.userAddress
+            });
+            embeddings = {
+                content: contentEmbeddings.embeddings,
+                metadata: metadataEmbeddings.embeddings
+            };
+            stats.embeddingTime = Date.now() - embeddingStartTime;
+        }
+        // Create memory via backend API
+        const storageStartTime = Date.now();
+        const memoryId = await this.createMemory({
+            content: options.content,
+            category: options.category,
+            userAddress: options.userAddress,
+            topic: options.topic,
+            importance: options.importance,
+            customMetadata: options.customMetadata,
+            signer: options.signer
+        });
+        stats.storageTime = Date.now() - storageStartTime;
+        // If signer provided, also create blockchain record
+        if (options.signer && embeddings) {
+            const blockchainStartTime = Date.now();
+            // This would create the blockchain record with embeddings
+            // For now, we'll simulate this
+            stats.blockchainTime = Date.now() - blockchainStartTime;
+        }
+        stats.totalTime = Date.now() - startTime;
+        return {
+            memoryId,
+            embeddings,
+            processingStats: stats
+        };
+    }
+    /**
+     * Smart memory retrieval with context awareness
+     */
+    async getMemoryWithContext(options) {
+        // Get the primary memory
+        const memory = await this.view.getMemory(options.memoryId);
+        if (!memory) {
+            throw new Error(`Memory ${options.memoryId} not found`);
+        }
+        let relatedMemories;
+        let contextGraph;
+        if (options.includeRelated) {
+            // Find related memories using similarity search
+            const searchResults = await this.searchMemoriesAdvanced({
+                query: memory.content || '',
+                userAddress: options.userAddress,
+                k: options.relatedCount || 5,
+                threshold: options.contextRadius || 0.7
+            });
+            relatedMemories = searchResults.results.filter(r => r.id !== options.memoryId);
+            // Build context graph
+            if (relatedMemories.length > 0) {
+                const nodes = [
+                    {
+                        id: options.memoryId,
+                        label: memory.content?.substring(0, 50) + '...' || 'Memory',
+                        category: memory.category || 'unknown'
+                    },
+                    ...relatedMemories.map(m => ({
+                        id: m.id,
+                        label: m.content?.substring(0, 50) + '...' || 'Related Memory',
+                        category: m.category
+                    }))
+                ];
+                const edges = relatedMemories.map(m => ({
+                    from: options.memoryId,
+                    to: m.id,
+                    similarity: m.similarity_score || 0
+                }));
+                contextGraph = { nodes, edges };
+            }
+        }
+        return {
+            memory: memory,
+            relatedMemories,
+            contextGraph
+        };
+    }
+    /**
+     * Batch process multiple memories with embeddings
+     */
+    async batchProcessMemories(options) {
+        const startTime = Date.now();
+        const batchSize = options.batchSize || 10;
+        const results = [];
+        // Process in batches
+        for (let i = 0; i < options.memories.length; i += batchSize) {
+            const batch = options.memories.slice(i, i + batchSize);
+            // Process batch in parallel
+            const batchPromises = batch.map(async (memory) => {
+                try {
+                    const result = await this.createMemoryWithEmbeddings({
+                        ...memory,
+                        userAddress: options.userAddress,
+                        generateEmbeddings: options.generateEmbeddings
+                    });
+                    return { success: true, memoryId: result.memoryId };
+                }
+                catch (error) {
+                    return {
+                        success: false,
+                        error: error instanceof Error ? error.message : 'Unknown error'
+                    };
+                }
+            });
+            const batchResults = await Promise.all(batchPromises);
+            results.push(...batchResults);
+        }
+        const totalTime = Date.now() - startTime;
+        const successful = results.filter(r => r.success).length;
+        const failed = results.length - successful;
+        return {
+            results,
+            batchStats: {
+                totalProcessed: results.length,
+                successful,
+                failed,
+                totalTime,
+                averageTimePerMemory: totalTime / results.length
+            }
+        };
     }
 }
 //# sourceMappingURL=MemoryService.js.map

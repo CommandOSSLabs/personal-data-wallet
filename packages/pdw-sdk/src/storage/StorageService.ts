@@ -1,3 +1,19 @@
+import { SuiClient } from '@mysten/sui/client';
+import { WalrusClient, WalrusFile, TESTNET_WALRUS_PACKAGE_CONFIG, MAINNET_WALRUS_PACKAGE_CONFIG } from '@mysten/walrus';
+import type { WalrusClientConfig } from '@mysten/walrus';
+import type { Signer } from '@mysten/sui/cryptography';
+import {
+  PDWConfig,
+  StorageOptions,
+  StorageResult,
+  RetrieveOptions,
+  RetrieveResult,
+  StorageMetadata,
+  StorageStats,
+  CacheEntry,
+  StorageFilter,
+} from '../types';
+
 // Use Web Crypto API for both browser and Node.js environments
 const crypto = (() => {
   if (typeof window !== 'undefined' && window.crypto) {
@@ -12,26 +28,15 @@ const crypto = (() => {
     }
   }
 })();
-import {
-  PDWConfig,
-  StorageOptions,
-  StorageResult,
-  RetrieveOptions,
-  RetrieveResult,
-  StorageMetadata,
-  StorageStats,
-  WalrusConfig,
-  CacheEntry,
-  StorageFilter,
-} from '../types';
 
 /**
- * StorageService handles Walrus decentralized storage operations with
- * caching, encryption, compression, and local fallback capabilities.
+ * StorageService handles Walrus decentralized storage operations using
+ * the official @mysten/walrus SDK with caching and local fallback capabilities.
  */
 export class StorageService {
+  private walrusClient: WalrusClient;
+  private suiClient: SuiClient;
   private cache: Map<string, CacheEntry> = new Map();
-  private walrusConfig: WalrusConfig;
   private stats: StorageStats = {
     totalItems: 0,
     totalSize: 0,
@@ -41,13 +46,175 @@ export class StorageService {
     averageRetrievalTime: 0,
   };
 
-  constructor(private config: PDWConfig) {
-    this.walrusConfig = {
-      publisherUrl: config.walrusPublisherUrl || 'https://publisher.walrus.space',
-      aggregatorUrl: config.walrusAggregatorUrl || 'https://aggregator.walrus.space',
-      maxFileSize: config.walrusMaxFileSize || 1024 * 1024 * 1024, // 1GB
-      timeout: config.walrusTimeout || 30000, // 30s
+  constructor(private config: PDWConfig & { 
+    suiClient?: SuiClient; 
+    network?: 'testnet' | 'mainnet';
+    maxFileSize?: number;
+    timeout?: number;
+  }) {
+    // Use provided SuiClient or create a new one
+    this.suiClient = config.suiClient || new SuiClient({ 
+      url: 'https://fullnode.testnet.sui.io'
+    });
+
+    // Configure WalrusClient based on network (default to testnet)
+    const walrusConfig: WalrusClientConfig = {
+      packageConfig: config.network === 'mainnet' 
+        ? MAINNET_WALRUS_PACKAGE_CONFIG 
+        : TESTNET_WALRUS_PACKAGE_CONFIG,
+      suiClient: this.suiClient,
     };
+
+    this.walrusClient = new WalrusClient(walrusConfig);
+  }
+
+  /**
+   * Store multiple files as a Walrus quilt with proper SDK integration
+   */
+  async storeFiles(
+    files: Array<{
+      identifier: string;
+      content: Uint8Array | string;
+      tags?: Record<string, string>;
+    }>,
+    options: {
+      signer: Signer;
+      epochs?: number;
+      deletable?: boolean;
+    }
+  ): Promise<{
+    id: string;
+    blobId: string;
+    files: Array<{ identifier: string; blobId: string }>;
+  }> {
+    try {
+      // Convert files to proper WalrusFile format
+      const walrusFiles = files.map(file => {
+        const content = typeof file.content === 'string' 
+          ? new TextEncoder().encode(file.content) 
+          : file.content;
+          
+        return WalrusFile.from({
+          contents: content,
+          identifier: file.identifier,
+          tags: file.tags || {}
+        });
+      });
+
+      // Use WalrusClient writeFiles method
+      const results = await this.walrusClient.writeFiles({
+        files: walrusFiles,
+        signer: options.signer,
+        epochs: options.epochs || 1,
+        deletable: options.deletable ?? true,
+      });
+
+      // Return first result with combined info
+      const firstResult = results[0];
+      return {
+        id: firstResult.id,
+        blobId: firstResult.blobId,
+        files: results.map(r => ({
+          identifier: r.id, // Using id as identifier
+          blobId: r.blobId
+        }))
+      };
+    } catch (error) {
+      throw new Error(`Failed to store files: ${error}`);
+    }
+  }
+
+  /**
+   * Retrieve files by their IDs using Walrus SDK
+   */
+  async getFiles(ids: string[]): Promise<Array<{
+    identifier: string;
+    content: Uint8Array;
+    tags: Record<string, string>;
+  }>> {
+    try {
+      const walrusFiles = await this.walrusClient.getFiles({ ids });
+      
+      const results = await Promise.all(
+        walrusFiles.map(async (file) => {
+          const [identifier, content, tags] = await Promise.all([
+            file.getIdentifier(),
+            file.bytes(),
+            file.getTags()
+          ]);
+          
+          return {
+            identifier: identifier || '',
+            content,
+            tags
+          };
+        })
+      );
+      
+      return results;
+    } catch (error) {
+      throw new Error(`Failed to retrieve files: ${error}`);
+    }
+  }
+
+  /**
+   * Get a Walrus blob object for advanced operations
+   */
+  async getBlob(blobId: string): Promise<{
+    blobId: string;
+    exists: boolean;
+    storedUntil: number | null;
+  }> {
+    try {
+      const walrusBlob = await this.walrusClient.getBlob({ blobId });
+      
+      const [exists, storedUntil] = await Promise.all([
+        walrusBlob.exists(),
+        walrusBlob.storedUntil()
+      ]);
+      
+      return {
+        blobId,
+        exists,
+        storedUntil
+      };
+    } catch (error) {
+      throw new Error(`Failed to get blob ${blobId}: ${error}`);
+    }
+  }
+
+  /**
+   * Get files from a blob
+   */
+  async getFilesFromBlob(blobId: string): Promise<Array<{
+    identifier: string;
+    content: Uint8Array;
+    tags: Record<string, string>;
+  }>> {
+    try {
+      const walrusBlob = await this.walrusClient.getBlob({ blobId });
+      const files = await walrusBlob.files();
+      
+      const results = await Promise.all(
+        files.map(async (file) => {
+          const [identifier, content, tags] = await Promise.all([
+            file.getIdentifier(),
+            file.bytes(),
+            file.getTags()
+          ]);
+          
+          return {
+            identifier: identifier || '',
+            content,
+            tags
+          };
+        })
+      );
+      
+      return results;
+    } catch (error) {
+      throw new Error(`Failed to get files from blob ${blobId}: ${error}`);
+    }
   }
 
   /**
@@ -55,7 +222,7 @@ export class StorageService {
    */
   async upload(
     content: Uint8Array | string, 
-    options: StorageOptions = {}
+    options: StorageOptions & { signer?: Signer; epochs?: number } = {}
   ): Promise<StorageResult> {
     const startTime = Date.now();
     
@@ -75,13 +242,27 @@ export class StorageService {
         processedContent = await this.encryptContent(processedContent);
       }
 
-      // Check file size limits
-      if (processedContent.length > this.walrusConfig.maxFileSize!) {
-        throw new Error(`Content size (${processedContent.length}) exceeds Walrus limit (${this.walrusConfig.maxFileSize})`);
+      // Check file size limits (1GB default)
+      const maxFileSize = this.config.maxFileSize || this.config.walrusMaxFileSize || 1024 * 1024 * 1024;
+      if (processedContent.length > maxFileSize) {
+        throw new Error(`Content size (${processedContent.length}) exceeds Walrus limit (${maxFileSize})`);
       }
 
-      // Upload to Walrus
-      const blobId = await this.uploadToWalrus(processedContent);
+      // Upload to Walrus using official SDK
+      let blobId: string;
+      
+      if (options.signer) {
+        // Full upload with blockchain registration
+        const uploadResult = await this.uploadBlobWithSigner(
+          processedContent, 
+          options.signer, 
+          options.epochs || 1
+        );
+        blobId = uploadResult.blobId;
+      } else {
+        // Just encode to get blobId (no blockchain registration)
+        blobId = await this.encodeBlobForId(processedContent);
+      }
       
       // Create metadata
       const metadata: StorageMetadata = {
@@ -104,7 +285,7 @@ export class StorageService {
 
       return {
         blobId,
-        walrusUrl: `${this.walrusConfig.aggregatorUrl}/v1/${blobId}`,
+        walrusUrl: `walrus://${blobId}`, // Use walrus:// protocol
         metadata,
         cached: options.cacheLocally || false,
         processingTimeMs: processingTime,
@@ -141,8 +322,11 @@ export class StorageService {
         }
       }
 
-      // Retrieve from Walrus
-      const content = await this.retrieveFromWalrus(blobId);
+      // Retrieve from Walrus using official SDK
+      const content = await this.walrusClient.readBlob({ 
+        blobId,
+        signal: undefined // Could pass AbortController signal here
+      });
       
       // We need metadata to properly decrypt/decompress
       // In a real implementation, metadata would be stored separately or embedded
@@ -275,54 +459,53 @@ export class StorageService {
 
   // ==================== PRIVATE METHODS ====================
 
-  private async uploadToWalrus(content: Uint8Array): Promise<string> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.walrusConfig.timeout);
-
+  /**
+   * Upload blob to Walrus using official SDK with signer
+   * Note: This requires a signer for the full upload process
+   */
+  private async uploadBlobWithSigner(
+    content: Uint8Array, 
+    signer: Signer,
+    epochs: number = 1
+  ): Promise<{ blobId: string; blobObject: any }> {
     try {
-      const response = await fetch(`${this.walrusConfig.publisherUrl}/v1/store`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-        },
-        body: new Uint8Array(content),
-        signal: controller.signal,
+      const result = await this.walrusClient.writeBlob({
+        blob: content,
+        deletable: true,
+        epochs,
+        signer,
       });
-
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        throw new Error(`Walrus upload failed: ${response.status} ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      return result.blobId || result.blob_id || result.id;
+      
+      return result;
     } catch (error) {
-      clearTimeout(timeout);
-      throw error;
+      throw new Error(`Walrus upload with signer failed: ${error}`);
     }
   }
 
-  private async retrieveFromWalrus(blobId: string): Promise<Uint8Array> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.walrusConfig.timeout);
-
+  /**
+   * Encode blob and get blobId without blockchain registration
+   * This is useful for getting the blobId without a signer
+   */
+  private async encodeBlobForId(content: Uint8Array): Promise<string> {
     try {
-      const response = await fetch(`${this.walrusConfig.aggregatorUrl}/v1/${blobId}`, {
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        throw new Error(`Walrus retrieval failed: ${response.status} ${response.statusText}`);
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      return new Uint8Array(arrayBuffer);
+      const result = await this.walrusClient.encodeBlob(content);
+      return result.blobId;
     } catch (error) {
-      clearTimeout(timeout);
-      throw error;
+      throw new Error(`Walrus blob encoding failed: ${error}`);
+    }
+  }
+
+  /**
+   * Retrieve blob from Walrus using official SDK
+   */
+  private async retrieveBlobFromWalrus(
+    blobId: string, 
+    signal?: AbortSignal
+  ): Promise<Uint8Array> {
+    try {
+      return await this.walrusClient.readBlob({ blobId, signal });
+    } catch (error) {
+      throw new Error(`Walrus retrieval failed: ${error}`);
     }
   }
 

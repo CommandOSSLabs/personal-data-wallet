@@ -1,7 +1,7 @@
 {
   "name": "@personal-data-wallet/sdk",
   "version": "0.1.0",
-  "description": "TypeScript SDK for Personal Data Wallet - Decentralized memory system with SEAL encryption and Walrus storage",
+  "description": "TypeScript SDK for Personal Data Wallet - Decentralized memory system with AI embeddings, HNSW vector search, SEAL encryption and Walrus storage",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",
   "types": "dist/index.d.ts",
@@ -12,11 +12,16 @@
   "scripts": {
     "build": "npm run codegen && npm run build:ts",
     "build:ts": "tsc && tsc -p tsconfig.esm.json",
-    "codegen": "sui-ts-codegen generate",
+    "codegen": "sui-ts-codegen generate && node scripts/fix-codegen-paths.js",
     "codegen:summaries": "cd ../../smart-contract && sui move summary",
     "dev": "tsc --watch",
     "test": "jest",
     "test:watch": "jest --watch",
+    "test:seal": "jest --testPathPattern=seal-deployment --verbose",
+    "test:seal:watch": "jest --testPathPattern=seal-deployment --watch --verbose",
+    "test:deploy": "npm run build && npm run test:seal",
+    "verify:deployment": "node scripts/verify-deployment.js",
+    "verify:quick": "npx jest test/simple-config.test.ts && npm run verify:deployment",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
     "prepublishOnly": "npm run build"
@@ -25,6 +30,10 @@
     "sui",
     "blockchain",
     "memory",
+    "ai",
+    "embeddings",
+    "vector-search",
+    "hnsw",
     "encryption",
     "seal",
     "walrus",
@@ -40,18 +49,25 @@
     "directory": "packages/pdw-sdk"
   },
   "peerDependencies": {
-    "@mysten/sui": "^1.37.0"
+    "@mysten/sui": "^1.38.0"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@mysten/bcs": "^1.8.0",
     "@mysten/codegen": "^0.5.0",
     "@mysten/seal": "^0.6.0",
-    "@mysten/walrus": "^0.5.3"
+    "@mysten/utils": "^0.2.0",
+    "@mysten/walrus": "^0.7.0",
+    "hnswlib-node": "^1.4.2",
+    "sha3": "^2.1.4"
   },
   "devDependencies": {
+    "@types/dotenv": "^6.1.1",
     "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
+    "dotenv": "^17.2.2",
     "eslint": "^8.0.0",
     "jest": "^29.5.0",
     "ts-jest": "^29.1.0",

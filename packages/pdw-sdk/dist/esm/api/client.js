@@ -4,6 +4,8 @@
  * Handles HTTP communication with the NestJS backend API
  */
 export class PDWApiClient {
+    get baseURL() { return this.baseUrl; }
+    get defaultHeaders() { return this.headers; }
     constructor(apiUrl) {
         this.baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
         this.headers = {
@@ -96,6 +98,24 @@ export class PDWApiClient {
                 userAddress: options.userAddress,
                 memoryContext: options.memoryContext,
             }),
+        });
+    }
+    async updateChatSessionTitle(sessionId, userAddress, title) {
+        return this.request(`/chat/sessions/${sessionId}/title`, {
+            method: 'PUT',
+            body: JSON.stringify({ userAddress, title }),
+        });
+    }
+    async addMessageToSession(sessionId, content, type, userAddress) {
+        return this.request(`/chat/sessions/${sessionId}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({ content, type, userAddress }),
+        });
+    }
+    async saveChatSummary(sessionId, summary, userAddress) {
+        return this.request('/chat/summary', {
+            method: 'POST',
+            body: JSON.stringify({ sessionId, summary, userAddress }),
         });
     }
     /**
