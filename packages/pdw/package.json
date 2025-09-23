@@ -1,0 +1,67 @@
+{
+  "name": "@personal-data-wallet/pdw",
+  "version": "1.0.0",
+  "description": "Streamlined PDW - Vector Embedding Storage on Walrus Decentralized Network",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "npm run codegen && npm run build:ts",
+    "build:ts": "tsc && tsc -p tsconfig.esm.json",
+    "codegen": "sui-ts-codegen generate --outputDir src/generated ../../smart-contract && node scripts/fix-codegen-paths.js",
+    "codegen:summaries": "cd ../../smart-contract && sui move summary",
+    "dev": "tsc --watch",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "walrus",
+    "vector-embeddings",
+    "ai",
+    "embeddings",
+    "hnsw",
+    "decentralized-storage",
+    "gemini",
+    "similarity-search",
+    "pdw",
+    "personal-data-wallet"
+  ],
+  "author": "Personal Data Wallet Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CommandOSSLabs/personal-data-wallet.git",
+    "directory": "packages/pdw"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@mysten/walrus": "^0.7.0",
+    "@mysten/bcs": "^1.8.0", 
+    "@mysten/utils": "^0.2.0",
+    "hnswlib-node": "^1.4.2",
+    "sha3": "^2.1.4"
+  },
+  "peerDependencies": {
+    "@mysten/sui": "^1.38.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
