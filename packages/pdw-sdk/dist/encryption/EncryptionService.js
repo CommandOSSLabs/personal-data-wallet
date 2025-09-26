@@ -10,77 +10,64 @@ exports.EncryptionService = void 0;
 const seal_1 = require("@mysten/seal");
 const transactions_1 = require("@mysten/sui/transactions");
 const utils_1 = require("@mysten/sui/utils");
+const SealService_1 = require("../security/SealService");
 class EncryptionService {
     constructor(client, config) {
         this.client = client;
         this.config = config;
-        this.sealClient = null;
         this.sessionKeyCache = new Map();
         this.suiClient = client.client || client;
         this.packageId = config.packageId || '';
-        this.initializeSealClient();
+        this.sealService = this.initializeSealService();
     }
     /**
-     * Initialize SEAL client with key server configurations
+     * Initialize SEAL service with proper configuration
      */
-    initializeSealClient() {
-        try {
-            const encryptionConfig = this.config.encryptionConfig;
-            if (!encryptionConfig?.enabled) {
-                console.warn('Encryption is disabled in configuration');
-                return;
-            }
-            // Default testnet key servers (replace with actual server object IDs)
-            const defaultKeyServers = [
-                '0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75',
-                '0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8',
-                '0xa1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456'
-            ];
-            const keyServerIds = encryptionConfig.keyServers || defaultKeyServers;
-            this.sealClient = new seal_1.SealClient({
-                suiClient: this.suiClient,
-                serverConfigs: keyServerIds.map(id => ({
-                    objectId: id.trim(),
-                    weight: 1,
-                })),
-                verifyKeyServers: process.env.NODE_ENV === 'production',
-            });
-            console.log('SEAL client initialized successfully');
+    initializeSealService() {
+        const encryptionConfig = this.config.encryptionConfig;
+        if (!encryptionConfig?.enabled) {
+            console.warn('Encryption is disabled in configuration - creating SealService anyway');
         }
-        catch (error) {
-            console.warn(`SEAL client initialization failed: ${error}`);
-            this.sealClient = null;
-        }
+        // Default testnet key servers (replace with actual server object IDs)
+        const defaultKeyServers = [
+            '0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75',
+            '0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8'
+        ];
+        const keyServerIds = encryptionConfig?.keyServers || defaultKeyServers;
+        // Create SealService with proper configuration
+        const sealConfig = {
+            suiClient: this.suiClient,
+            packageId: this.packageId,
+            keyServerUrls: [], // Empty for now, URLs handled separately if needed
+            keyServerObjectIds: keyServerIds,
+            network: process.env.NODE_ENV === 'production' ? 'mainnet' : 'testnet',
+            threshold: 2,
+            enableMetrics: true,
+            retryAttempts: 3,
+            timeoutMs: 30000
+        };
+        return new SealService_1.SealService(sealConfig);
     }
     /**
-     * Encrypt data using SEAL identity-based encryption
+     * Encrypt data using SEAL identity-based encryption via SealService
      */
     async encrypt(data, userAddress, metadata) {
-        if (!this.sealClient) {
-            throw new Error('SEAL client not initialized - encryption unavailable');
-        }
         try {
             // Convert string to Uint8Array if needed
             const dataBytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-            // Optional: Add metadata as additional authenticated data
-            const aad = metadata ?
-                new TextEncoder().encode(JSON.stringify(metadata)) :
-                undefined;
-            // Use SEAL client encrypt method with correct options
-            const encryptResult = await this.sealClient.encrypt({
-                threshold: 2,
-                packageId: this.packageId,
-                id: userAddress,
+            // Use SealService for encryption
+            const encryptResult = await this.sealService.encryptData({
                 data: dataBytes,
-                aad,
+                id: userAddress,
+                threshold: 2
             });
-            // Convert encrypted object to base64 for storage
-            const encryptedData = btoa(String.fromCharCode(...encryptResult.encryptedObject));
+            // ✅ CRITICAL: Keep encrypted data as Uint8Array (NO base64 conversion)
+            const encryptedContent = encryptResult.encryptedObject;
             const backupKeyHex = (0, utils_1.toHex)(encryptResult.key);
             // Generate content hash for verification
             const contentHash = await this.generateContentHash(dataBytes);
             return {
-                encryptedData,
+                encryptedContent, // Changed from encryptedData to encryptedContent (Uint8Array)
                 backupKey: backupKeyHex,
                 contentHash,
             };
@@ -90,12 +77,10 @@ class EncryptionService {
         }
     }
     /**
-     * Decrypt data using SEAL with session keys
+     * Decrypt data using SEAL with session keys via SealService
+     * Handles both new binary format (Uint8Array) and legacy base64 format
      */
     async decrypt(options) {
-        if (!this.sealClient) {
-            throw new Error('SEAL client not initialized - decryption unavailable');
-        }
         try {
             // Get or create session key
             let activeSessionKey = options.sessionKey;
@@ -108,19 +93,29 @@ class EncryptionService {
                 const tx = await this.buildAccessTransaction(options.userAddress, 'read');
                 txBytes = await tx.build({ client: this.suiClient });
             }
-            // Convert base64 string to Uint8Array
-            const encryptedDataBase64 = options.encryptedData;
-            const binaryString = atob(encryptedDataBase64);
-            const encryptedBytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                encryptedBytes[i] = binaryString.charCodeAt(i);
+            // ✅ CRITICAL: Handle both binary and legacy formats
+            let encryptedBytes;
+            if (options.encryptedContent && options.encryptedContent instanceof Uint8Array) {
+                // **NEW BINARY FORMAT** (preferred - matches memory-workflow-seal.ts)
+                encryptedBytes = options.encryptedContent;
             }
-            // Use SEAL client decrypt method
-            const decryptResult = await this.sealClient.decrypt({
-                data: encryptedBytes,
+            else if (options.encryptedData) {
+                // **LEGACY BASE64 FORMAT** (deprecated but supported for backward compatibility)
+                const encryptedDataBase64 = options.encryptedData;
+                const binaryString = atob(encryptedDataBase64);
+                encryptedBytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    encryptedBytes[i] = binaryString.charCodeAt(i);
+                }
+            }
+            else {
+                throw new Error('No encrypted data provided. Use either encryptedContent (Uint8Array) or encryptedData (base64 string)');
+            }
+            // Use SealService for decryption
+            const decryptResult = await this.sealService.decryptData({
+                encryptedObject: encryptedBytes,
                 sessionKey: activeSessionKey,
-                txBytes: txBytes,
-                checkShareConsistency: true,
+                txBytes: txBytes
             });
             return decryptResult;
         }
@@ -130,19 +125,18 @@ class EncryptionService {
     }
     // ==================== SESSION KEY MANAGEMENT ====================
     /**
-     * Create a new session key for a user
+     * Create a new session key for a user via SealService
      */
     async createSessionKey(userAddress) {
         try {
-            const sessionKey = await seal_1.SessionKey.create({
+            const sessionResult = await this.sealService.createSession({
                 address: userAddress,
                 packageId: this.packageId,
                 ttlMin: 60, // 1 hour TTL
-                suiClient: this.suiClient,
             });
             // Cache the session key
-            this.sessionKeyCache.set(userAddress, sessionKey);
-            return sessionKey;
+            this.sessionKeyCache.set(userAddress, sessionResult.sessionKey);
+            return sessionResult.sessionKey;
         }
         catch (error) {
             throw new Error(`Failed to create session key: ${error}`);
@@ -373,17 +367,17 @@ class EncryptionService {
         return actualHash === expectedHash;
     }
     /**
-     * Check if SEAL client is available
+     * Check if SEAL service is available
      */
     isAvailable() {
-        return this.sealClient !== null;
+        return this.sealService !== null;
     }
     /**
-     * Get SEAL client configuration info
+     * Get SEAL service configuration info
      */
     getClientInfo() {
         return {
-            isInitialized: this.sealClient !== null,
+            isInitialized: this.sealService !== null,
             packageId: this.packageId,
             encryptionEnabled: this.config.encryptionConfig?.enabled || false,
         };

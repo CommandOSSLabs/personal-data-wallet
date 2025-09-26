@@ -1,11 +1,11 @@
 /**************************************************************
  * THIS FILE IS GENERATED AND SHOULD NOT BE MANUALLY MODIFIED *
  **************************************************************/
-import { MoveStruct, normalizeMoveArguments, type RawTransactionArgument } from '../utils/index.js';
+import { MoveStruct, normalizeMoveArguments, type RawTransactionArgument } from '../utils/index';
 import { bcs } from '@mysten/sui/bcs';
 import { type Transaction } from '@mysten/sui/transactions';
-import * as vec_map from './deps/sui/vec_map.js';
-import * as object from './deps/sui/object.js';
+import * as vec_map from './deps/sui/vec_map';
+import * as object from './deps/sui/object';
 const $moduleName = '@local-pkg/pdw::memory';
 export const MemoryCreated = new MoveStruct({ name: `${$moduleName}::MemoryCreated`, fields: {
         id: bcs.Address,

@@ -23,7 +23,7 @@ export { EmbeddingService } from './embedding';
 export { VectorManager, HnswIndexService } from './vector';
 export { BatchManager, BatchingService, MemoryProcessingCache } from './batch';
 export { GraphService, KnowledgeGraphManager } from './graph';
-export { WalrusService, StorageManager } from './storage';
+export { WalrusStorageService, StorageManager } from './storage';
 export { SuiService, BlockchainManager } from './blockchain';
 export { MemoryRetrievalService, MemoryDecryptionPipeline } from './retrieval';
 export type { UnifiedMemoryQuery, UnifiedMemoryResult, RetrievalStats, RetrievalContext, KeyServerConfig, DecryptionConfig, DecryptionRequest, DecryptionResult, BatchDecryptionResult } from './retrieval';
@@ -139,5 +139,10 @@ declare const _default: {
     };
 };
 export default _default;
+export { MainWalletService } from './wallet/MainWalletService';
+export { ContextWalletService } from './wallet/ContextWalletService';
+export { PermissionService } from './access/PermissionService';
+export { AggregationService } from './aggregation/AggregationService';
+export type { MainWallet, ContextWallet, ConsentRequest, AccessGrant, CreateMainWalletOptions, CreateContextWalletOptions, DeriveContextIdOptions, RotateKeysOptions, RotateKeysResult, PermissionScope, RequestConsentOptions, GrantPermissionsOptions, RevokePermissionsOptions, AggregatedQueryOptions, PermissionScopes } from './types/wallet';
 export declare const VERSION = "1.0.0";
 //# sourceMappingURL=index.d.ts.map

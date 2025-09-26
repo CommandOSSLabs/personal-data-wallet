@@ -8,10 +8,14 @@
 import type { ClientWithCoreApi, PDWConfig } from '../types';
 import { MemoryService } from '../memory/MemoryService';
 import { ChatService } from '../chat/ChatService';
-import { StorageService } from '../storage/StorageService';
-import { EncryptionService } from '../encryption/EncryptionService';
+import { StorageService } from '../services/StorageService';
+import { EncryptionService } from '../services/EncryptionService';
 import { TransactionService } from '../transactions/TransactionService';
 import { ViewService } from '../view/ViewService';
+import { MainWalletService } from '../wallet/MainWalletService';
+import { ContextWalletService } from '../wallet/ContextWalletService';
+import { PermissionService } from '../access/PermissionService';
+import { AggregationService } from '../aggregation/AggregationService';
 import { PDWApiClient } from '../api/client';
 import { createDefaultConfig } from '../config/defaults';
 import { validateConfig } from '../config/validation';
@@ -59,6 +63,41 @@ export interface PersonalDataWalletExtension {
     getObjectType: ViewService['getObjectType'];
     findMemoryByContentHash: ViewService['findMemoryByContentHash'];
   };
+
+  // Wallet architecture services
+  wallet: {
+    getMainWallet: MainWalletService['getMainWallet'];
+    createMainWallet: MainWalletService['createMainWallet'];
+    deriveContextId: MainWalletService['deriveContextId'];
+    rotateKeys: MainWalletService['rotateKeys'];
+    ensureMainWallet: MainWalletService['ensureMainWallet'];
+  };
+
+  context: {
+    create: ContextWalletService['create'];
+    getContext: ContextWalletService['getContext'];
+    listUserContexts: ContextWalletService['listUserContexts'];
+    addData: ContextWalletService['addData'];
+    removeData: ContextWalletService['removeData'];
+    listData: ContextWalletService['listData'];
+    ensureContext: ContextWalletService['ensureContext'];
+  };
+
+  access: {
+    requestConsent: PermissionService['requestConsent'];
+    grantPermissions: PermissionService['grantPermissions'];
+    revokePermissions: PermissionService['revokePermissions'];
+    checkPermission: PermissionService['checkPermission'];
+    getGrantsByUser: PermissionService['getGrantsByUser'];
+    validateOAuthPermission: PermissionService['validateOAuthPermission'];
+  };
+
+  aggregate: {
+    query: AggregationService['query'];
+    queryWithScopes: AggregationService['queryWithScopes'];
+    search: AggregationService['search'];
+    getAggregatedStats: AggregationService['getAggregatedStats'];
+  };
   
   bcs: {
     // Will be populated by generated types from @mysten/codegen
@@ -74,6 +113,10 @@ export interface PersonalDataWalletExtension {
   storage: StorageService;
   encryption: EncryptionService;
   viewService: ViewService;
+  mainWalletService: MainWalletService;
+  contextWalletService: ContextWalletService;
+  permissionService: PermissionService;
+  aggregationService: AggregationService;
   
   // Configuration
   config: PDWConfig;
@@ -89,6 +132,10 @@ export class PersonalDataWallet {
   #chat: ChatService;
   #storage: StorageService;
   #encryption: EncryptionService;
+  #mainWallet: MainWalletService;
+  #contextWallet: ContextWalletService;
+  #permission: PermissionService;
+  #aggregation: AggregationService;
 
   constructor(client: ClientWithCoreApi, config?: Partial<PDWConfig>) {
     this.#client = client;
@@ -102,6 +149,32 @@ export class PersonalDataWallet {
     this.#chat = new ChatService(this.#apiClient);
     this.#storage = new StorageService(this.#config);
     this.#encryption = new EncryptionService(client, this.#config);
+    
+    // Initialize wallet architecture services
+    this.#mainWallet = new MainWalletService({
+      suiClient: (client as any).client || client,
+      packageId: this.#config.packageId || ''
+    });
+    
+    this.#contextWallet = new ContextWalletService({
+      suiClient: (client as any).client || client,
+      packageId: this.#config.packageId || '',
+      mainWalletService: this.#mainWallet
+    });
+    
+    this.#permission = new PermissionService({
+      suiClient: (client as any).client || client,
+      packageId: this.#config.packageId || '',
+      apiUrl: this.#config.apiUrl,
+      contextWalletService: this.#contextWallet
+    });
+    
+    this.#aggregation = new AggregationService({
+      suiClient: (client as any).client || client,
+      packageId: this.#config.packageId || '',
+      permissionService: this.#permission,
+      contextWalletService: this.#contextWallet
+    });
     
     // Bind methods after services are initialized
     this.createMemory = this.#memory.createMemory.bind(this.#memory);
@@ -186,6 +259,49 @@ export class PersonalDataWallet {
     };
   }
 
+  // Wallet architecture service getters
+  get wallet() {
+    return {
+      getMainWallet: this.#mainWallet.getMainWallet.bind(this.#mainWallet),
+      createMainWallet: this.#mainWallet.createMainWallet.bind(this.#mainWallet),
+      deriveContextId: this.#mainWallet.deriveContextId.bind(this.#mainWallet),
+      rotateKeys: this.#mainWallet.rotateKeys.bind(this.#mainWallet),
+      ensureMainWallet: this.#mainWallet.ensureMainWallet.bind(this.#mainWallet),
+    };
+  }
+
+  get context() {
+    return {
+      create: this.#contextWallet.create.bind(this.#contextWallet),
+      getContext: this.#contextWallet.getContext.bind(this.#contextWallet),
+      listUserContexts: this.#contextWallet.listUserContexts.bind(this.#contextWallet),
+      addData: this.#contextWallet.addData.bind(this.#contextWallet),
+      removeData: this.#contextWallet.removeData.bind(this.#contextWallet),
+      listData: this.#contextWallet.listData.bind(this.#contextWallet),
+      ensureContext: this.#contextWallet.ensureContext.bind(this.#contextWallet),
+    };
+  }
+
+  get access() {
+    return {
+      requestConsent: this.#permission.requestConsent.bind(this.#permission),
+      grantPermissions: this.#permission.grantPermissions.bind(this.#permission),
+      revokePermissions: this.#permission.revokePermissions.bind(this.#permission),
+      checkPermission: this.#permission.checkPermission.bind(this.#permission),
+      getGrantsByUser: this.#permission.getGrantsByUser.bind(this.#permission),
+      validateOAuthPermission: this.#permission.validateOAuthPermission.bind(this.#permission),
+    };
+  }
+
+  get aggregate() {
+    return {
+      query: this.#aggregation.query.bind(this.#aggregation),
+      queryWithScopes: this.#aggregation.queryWithScopes.bind(this.#aggregation),
+      search: this.#aggregation.search.bind(this.#aggregation),
+      getAggregatedStats: this.#aggregation.getAggregatedStats.bind(this.#aggregation),
+    };
+  }
+
   // Service instances
   get memory() { return this.#memory; }
   get chat() { return this.#chat; }
@@ -193,6 +309,10 @@ export class PersonalDataWallet {
   get encryption() { return this.#encryption; }
   get config() { return this.#config; }
   get viewService() { return this.#view; }
+  get mainWalletService() { return this.#mainWallet; }
+  get contextWalletService() { return this.#contextWallet; }
+  get permissionService() { return this.#permission; }
+  get aggregationService() { return this.#aggregation; }
 
   // Client extension factory
   static asClientExtension(config?: Partial<PDWConfig>) {

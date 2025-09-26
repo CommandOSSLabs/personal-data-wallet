@@ -3,11 +3,11 @@ import type { Signer } from '@mysten/sui/cryptography';
 import { PDWConfig, StorageOptions, StorageResult, RetrieveOptions, RetrieveResult, StorageMetadata, StorageStats, StorageFilter } from '../types';
 /**
  * StorageService handles Walrus decentralized storage operations using
- * the official @mysten/walrus SDK with caching and local fallback capabilities.
+ * the official @mysten/walrus SDK with upload relay and proper network configuration.
+ * Based on official examples from https://github.com/MystenLabs/ts-sdks/tree/main/packages/walrus/examples
  */
 export declare class StorageService {
     private config;
-    private walrusClient;
     private suiClient;
     private cache;
     private stats;
@@ -17,6 +17,10 @@ export declare class StorageService {
         maxFileSize?: number;
         timeout?: number;
     });
+    /**
+     * Configure network settings for better reliability based on official examples
+     */
+    private initializeNetworkConfiguration;
     /**
      * Store multiple files as a Walrus quilt with proper SDK integration
      */
@@ -68,9 +72,49 @@ export declare class StorageService {
         epochs?: number;
     }): Promise<StorageResult>;
     /**
+     * Upload SEAL encrypted memory package using successful test pattern
+     *
+     * SUCCESSFUL PATTERN from memory-workflow-seal.ts test:
+     * - Direct binary storage for SEAL encrypted data (preserves Uint8Array format)
+     * - Rich metadata stored in Walrus attributes for searchability
+     * - Binary format preservation throughout the process
+     *
+     * @param memoryData - The memory content with SEAL encrypted data
+     * @param options - Upload options including signer and metadata
+     * @returns Upload result with blob ID and metadata
+     */
+    uploadSealMemory(memoryData: {
+        content: string;
+        embedding: number[];
+        metadata: Record<string, any>;
+        encryptedContent: Uint8Array;
+        encryptionType: string;
+        identity: string;
+    }, options: {
+        signer: Signer;
+        epochs?: number;
+    }): Promise<StorageResult>;
+    /**
      * Retrieve content from Walrus storage with caching support
      */
     retrieve(blobId: string, options?: RetrieveOptions): Promise<RetrieveResult>;
+    /**
+     * Retrieve SEAL encrypted memory package using successful test pattern
+     *
+     * SUCCESSFUL PATTERN from memory-workflow-seal.ts test:
+     * - Direct binary retrieval preserves SEAL Uint8Array format
+     * - Binary format detection and validation
+     * - Proper format preservation for SEAL decryption
+     *
+     * @param blobId - The Walrus blob ID to retrieve
+     * @returns Retrieved SEAL encrypted data ready for decryption
+     */
+    retrieveSealMemory(blobId: string): Promise<{
+        content: Uint8Array;
+        storageApproach: 'direct-binary';
+        metadata: StorageMetadata;
+        isEncrypted: true;
+    }>;
     /**
      * Delete content from cache and Walrus (if supported)
      */

@@ -59,30 +59,30 @@ exports.getCustomMetadata = getCustomMetadata;
 /**************************************************************
  * THIS FILE IS GENERATED AND SHOULD NOT BE MANUALLY MODIFIED *
  **************************************************************/
-const index_js_1 = require("../utils/index.js");
+const index_1 = require("../utils/index");
 const bcs_1 = require("@mysten/sui/bcs");
-const vec_map = __importStar(require("./deps/sui/vec_map.js"));
-const object = __importStar(require("./deps/sui/object.js"));
+const vec_map = __importStar(require("./deps/sui/vec_map"));
+const object = __importStar(require("./deps/sui/object"));
 const $moduleName = '@local-pkg/pdw::memory';
-exports.MemoryCreated = new index_js_1.MoveStruct({ name: `${$moduleName}::MemoryCreated`, fields: {
+exports.MemoryCreated = new index_1.MoveStruct({ name: `${$moduleName}::MemoryCreated`, fields: {
         id: bcs_1.bcs.Address,
         owner: bcs_1.bcs.Address,
         category: bcs_1.bcs.string(),
         vector_id: bcs_1.bcs.u64()
     } });
-exports.MemoryIndexUpdated = new index_js_1.MoveStruct({ name: `${$moduleName}::MemoryIndexUpdated`, fields: {
+exports.MemoryIndexUpdated = new index_1.MoveStruct({ name: `${$moduleName}::MemoryIndexUpdated`, fields: {
         id: bcs_1.bcs.Address,
         owner: bcs_1.bcs.Address,
         version: bcs_1.bcs.u64(),
         index_blob_id: bcs_1.bcs.string(),
         graph_blob_id: bcs_1.bcs.string()
     } });
-exports.MemoryMetadataUpdated = new index_js_1.MoveStruct({ name: `${$moduleName}::MemoryMetadataUpdated`, fields: {
+exports.MemoryMetadataUpdated = new index_1.MoveStruct({ name: `${$moduleName}::MemoryMetadataUpdated`, fields: {
         memory_id: bcs_1.bcs.Address,
         metadata_blob_id: bcs_1.bcs.string(),
         embedding_dimension: bcs_1.bcs.u64()
     } });
-exports.MemoryMetadata = new index_js_1.MoveStruct({ name: `${$moduleName}::MemoryMetadata`, fields: {
+exports.MemoryMetadata = new index_1.MoveStruct({ name: `${$moduleName}::MemoryMetadata`, fields: {
         content_type: bcs_1.bcs.string(),
         content_size: bcs_1.bcs.u64(),
         content_hash: bcs_1.bcs.string(),
@@ -95,14 +95,14 @@ exports.MemoryMetadata = new index_js_1.MoveStruct({ name: `${$moduleName}::Memo
         updated_timestamp: bcs_1.bcs.u64(),
         custom_metadata: vec_map.VecMap(bcs_1.bcs.string(), bcs_1.bcs.string())
     } });
-exports.MemoryIndex = new index_js_1.MoveStruct({ name: `${$moduleName}::MemoryIndex`, fields: {
+exports.MemoryIndex = new index_1.MoveStruct({ name: `${$moduleName}::MemoryIndex`, fields: {
         id: object.UID,
         owner: bcs_1.bcs.Address,
         version: bcs_1.bcs.u64(),
         index_blob_id: bcs_1.bcs.string(),
         graph_blob_id: bcs_1.bcs.string()
     } });
-exports.Memory = new index_js_1.MoveStruct({ name: `${$moduleName}::Memory`, fields: {
+exports.Memory = new index_1.MoveStruct({ name: `${$moduleName}::Memory`, fields: {
         id: object.UID,
         owner: bcs_1.bcs.Address,
         category: bcs_1.bcs.string(),
@@ -122,7 +122,7 @@ function createMemoryIndex(options) {
         package: packageAddress,
         module: 'memory',
         function: 'create_memory_index',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Update an existing memory index with new blob IDs */
@@ -139,7 +139,7 @@ function updateMemoryIndex(options) {
         package: packageAddress,
         module: 'memory',
         function: 'update_memory_index',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Create metadata struct with embedding */
@@ -161,7 +161,7 @@ function createMemoryMetadata(options) {
         package: packageAddress,
         module: 'memory',
         function: 'create_memory_metadata',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Create a new memory record with rich metadata */
@@ -183,7 +183,7 @@ function createMemoryRecord(options) {
         package: packageAddress,
         module: 'memory',
         function: 'create_memory_record',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Update metadata for an existing memory */
@@ -199,7 +199,7 @@ function updateMemoryMetadata(options) {
         package: packageAddress,
         module: 'memory',
         function: 'update_memory_metadata',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Add custom metadata field */
@@ -215,7 +215,7 @@ function addCustomMetadata(options) {
         package: packageAddress,
         module: 'memory',
         function: 'add_custom_metadata',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Delete a memory record */
@@ -229,7 +229,7 @@ function deleteMemoryRecord(options) {
         package: packageAddress,
         module: 'memory',
         function: 'delete_memory_record',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getIndexBlobId(options) {
@@ -242,7 +242,7 @@ function getIndexBlobId(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_index_blob_id',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getGraphBlobId(options) {
@@ -255,7 +255,7 @@ function getGraphBlobId(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_graph_blob_id',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getVersion(options) {
@@ -268,7 +268,7 @@ function getVersion(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_version',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getMemoryBlobId(options) {
@@ -281,7 +281,7 @@ function getMemoryBlobId(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_memory_blob_id',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getMemoryVectorId(options) {
@@ -294,7 +294,7 @@ function getMemoryVectorId(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_memory_vector_id',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getMemoryCategory(options) {
@@ -307,7 +307,7 @@ function getMemoryCategory(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_memory_category',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getMetadata(options) {
@@ -320,7 +320,7 @@ function getMetadata(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_metadata',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getEmbeddingBlobId(options) {
@@ -333,7 +333,7 @@ function getEmbeddingBlobId(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_embedding_blob_id',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getContentType(options) {
@@ -346,7 +346,7 @@ function getContentType(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_content_type',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getContentSize(options) {
@@ -359,7 +359,7 @@ function getContentSize(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_content_size',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getTopic(options) {
@@ -372,7 +372,7 @@ function getTopic(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_topic',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getImportance(options) {
@@ -385,7 +385,7 @@ function getImportance(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_importance',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getCreatedTimestamp(options) {
@@ -398,7 +398,7 @@ function getCreatedTimestamp(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_created_timestamp',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getUpdatedTimestamp(options) {
@@ -411,7 +411,7 @@ function getUpdatedTimestamp(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_updated_timestamp',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 function getCustomMetadata(options) {
@@ -424,7 +424,7 @@ function getCustomMetadata(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_custom_metadata',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 //# sourceMappingURL=memory.js.map

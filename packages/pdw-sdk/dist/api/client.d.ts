@@ -3,7 +3,8 @@
  *
  * Handles HTTP communication with the NestJS backend API
  */
-import type { APIResponse, MemoryCreateOptions, MemorySearchOptions, MemorySearchResult, MemoryContext, MemoryContextOptions, ChatOptions, ChatSession, CreateSessionOptions, MemoryStatsResponse, BatchStats } from '../types';
+import type { APIResponse, MemoryCreateOptions, MemorySearchOptions, MemorySearchResult, MemoryContext, MemoryContextOptions, ChatOptions, ChatSession, CreateSessionOptions, MemoryStatsResponse } from '../types';
+import type { BatchStats } from '../core';
 export declare class PDWApiClient {
     private baseUrl;
     private headers;

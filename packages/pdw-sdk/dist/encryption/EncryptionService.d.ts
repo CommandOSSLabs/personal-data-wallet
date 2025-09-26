@@ -22,25 +22,26 @@ export interface AccessRevokeOptions {
 export declare class EncryptionService {
     private client;
     private config;
-    private sealClient;
+    private sealService;
     private suiClient;
     private packageId;
     private sessionKeyCache;
     constructor(client: ClientWithCoreApi, config: PDWConfig);
     /**
-     * Initialize SEAL client with key server configurations
+     * Initialize SEAL service with proper configuration
      */
-    private initializeSealClient;
+    private initializeSealService;
     /**
-     * Encrypt data using SEAL identity-based encryption
+     * Encrypt data using SEAL identity-based encryption via SealService
      */
     encrypt(data: Uint8Array | string, userAddress: string, metadata?: Record<string, string>): Promise<SealEncryptionResult>;
     /**
-     * Decrypt data using SEAL with session keys
+     * Decrypt data using SEAL with session keys via SealService
+     * Handles both new binary format (Uint8Array) and legacy base64 format
      */
     decrypt(options: SealDecryptionOptions): Promise<Uint8Array>;
     /**
-     * Create a new session key for a user
+     * Create a new session key for a user via SealService
      */
     createSessionKey(userAddress: string): Promise<SessionKey>;
     /**
@@ -122,11 +123,11 @@ export declare class EncryptionService {
      */
     verifyContentHash(data: Uint8Array, expectedHash: string): Promise<boolean>;
     /**
-     * Check if SEAL client is available
+     * Check if SEAL service is available
      */
     isAvailable(): boolean;
     /**
-     * Get SEAL client configuration info
+     * Get SEAL service configuration info
      */
     getClientInfo(): {
         isInitialized: boolean;

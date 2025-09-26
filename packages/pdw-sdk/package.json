@@ -52,6 +52,7 @@
     "@mysten/sui": "^1.38.0"
   },
   "dependencies": {
+    "@google/genai": "^1.20.0",
     "@google/generative-ai": "^0.21.0",
     "@mysten/bcs": "^1.8.0",
     "@mysten/codegen": "^0.5.0",
@@ -59,11 +60,12 @@
     "@mysten/utils": "^0.2.0",
     "@mysten/walrus": "^0.7.0",
     "hnswlib-node": "^1.4.2",
-    "sha3": "^2.1.4"
+    "sha3": "^2.1.4",
+    "undici": "^7.16.0"
   },
   "devDependencies": {
     "@types/dotenv": "^6.1.1",
-    "@types/jest": "^29.5.0",
+    "@types/jest": "^29.5.14",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",

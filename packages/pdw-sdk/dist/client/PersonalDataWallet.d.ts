@@ -7,10 +7,14 @@
 import type { ClientWithCoreApi, PDWConfig } from '../types';
 import { MemoryService } from '../memory/MemoryService';
 import { ChatService } from '../chat/ChatService';
-import { StorageService } from '../storage/StorageService';
-import { EncryptionService } from '../encryption/EncryptionService';
+import { StorageService } from '../services/StorageService';
+import { EncryptionService } from '../services/EncryptionService';
 import { TransactionService } from '../transactions/TransactionService';
 import { ViewService } from '../view/ViewService';
+import { MainWalletService } from '../wallet/MainWalletService';
+import { ContextWalletService } from '../wallet/ContextWalletService';
+import { PermissionService } from '../access/PermissionService';
+import { AggregationService } from '../aggregation/AggregationService';
 export interface PersonalDataWalletExtension {
     createMemory: MemoryService['createMemory'];
     searchMemories: MemoryService['searchMemories'];
@@ -47,6 +51,36 @@ export interface PersonalDataWalletExtension {
         getObjectType: ViewService['getObjectType'];
         findMemoryByContentHash: ViewService['findMemoryByContentHash'];
     };
+    wallet: {
+        getMainWallet: MainWalletService['getMainWallet'];
+        createMainWallet: MainWalletService['createMainWallet'];
+        deriveContextId: MainWalletService['deriveContextId'];
+        rotateKeys: MainWalletService['rotateKeys'];
+        ensureMainWallet: MainWalletService['ensureMainWallet'];
+    };
+    context: {
+        create: ContextWalletService['create'];
+        getContext: ContextWalletService['getContext'];
+        listUserContexts: ContextWalletService['listUserContexts'];
+        addData: ContextWalletService['addData'];
+        removeData: ContextWalletService['removeData'];
+        listData: ContextWalletService['listData'];
+        ensureContext: ContextWalletService['ensureContext'];
+    };
+    access: {
+        requestConsent: PermissionService['requestConsent'];
+        grantPermissions: PermissionService['grantPermissions'];
+        revokePermissions: PermissionService['revokePermissions'];
+        checkPermission: PermissionService['checkPermission'];
+        getGrantsByUser: PermissionService['getGrantsByUser'];
+        validateOAuthPermission: PermissionService['validateOAuthPermission'];
+    };
+    aggregate: {
+        query: AggregationService['query'];
+        queryWithScopes: AggregationService['queryWithScopes'];
+        search: AggregationService['search'];
+        getAggregatedStats: AggregationService['getAggregatedStats'];
+    };
     bcs: {
         Memory: () => any;
         MemoryIndex: () => any;
@@ -58,6 +92,10 @@ export interface PersonalDataWalletExtension {
     storage: StorageService;
     encryption: EncryptionService;
     viewService: ViewService;
+    mainWalletService: MainWalletService;
+    contextWalletService: ContextWalletService;
+    permissionService: PermissionService;
+    aggregationService: AggregationService;
     config: PDWConfig;
 }
 export declare class PersonalDataWallet {
@@ -106,10 +144,26 @@ export declare class PersonalDataWallet {
         getMemoryStats: (userAddress: string) => Promise<import("../view/ViewService").MemoryStats>;
         getChatSessions: (userAddress: string) => Promise<import("../types").ChatSessionsResponse>;
         getChatSession: (sessionId: string, userAddress: string) => Promise<import("../types").ChatSessionResponse>;
-        getStorageStats: () => import("../types").StorageStats;
-        listStoredItems: (filter?: import("../types").StorageFilter) => Promise<Array<{
+        getStorageStats: () => {
+            network: "testnet" | "mainnet";
+            useUploadRelay: boolean;
+            epochs: number;
+            hasEncryption: boolean;
+            hasBatching: boolean;
+            hasSearch: boolean;
+            indexedUsers: number;
+            totalIndexedMemories: number;
+            memoryIndexStats: {
+                totalUsers: number;
+                totalMemories: number;
+                hnswStats: import("../vector").BatchStats;
+                hasEmbeddingService: boolean;
+                hasStorageService: boolean;
+            } | undefined;
+        };
+        listStoredItems: (filter?: any) => Promise<Array<{
             blobId: string;
-            metadata: import("../types").StorageMetadata;
+            metadata: import("../services/StorageService").MemoryMetadata;
         }>>;
         getAccessPermissions: (userAddress: string, options?: {
             asGrantor?: boolean;
@@ -143,12 +197,75 @@ export declare class PersonalDataWallet {
         AccessGranted: any;
         AccessRevoked: any;
     };
+    get wallet(): {
+        getMainWallet: (userAddress: string) => Promise<import("..").MainWallet | null>;
+        createMainWallet: (options: import("..").CreateMainWalletOptions) => Promise<import("..").MainWallet>;
+        deriveContextId: (options: import("..").DeriveContextIdOptions) => Promise<string>;
+        rotateKeys: (options: import("..").RotateKeysOptions) => Promise<import("..").RotateKeysResult>;
+        ensureMainWallet: (userAddress: string) => Promise<import("..").MainWallet>;
+    };
+    get context(): {
+        create: (userAddress: string, options: import("..").CreateContextWalletOptions) => Promise<import("..").ContextWallet>;
+        getContext: (contextId: string) => Promise<import("..").ContextWallet | null>;
+        listUserContexts: (userAddress: string) => Promise<import("..").ContextWallet[]>;
+        addData: (contextId: string, data: {
+            content: string;
+            category?: string;
+            metadata?: Record<string, any>;
+        }) => Promise<string>;
+        removeData: (contextId: string, itemId: string) => Promise<boolean>;
+        listData: (contextId: string, filters?: {
+            category?: string;
+            limit?: number;
+            offset?: number;
+        }) => Promise<Array<{
+            id: string;
+            content: string;
+            category?: string;
+            metadata?: Record<string, any>;
+            createdAt: number;
+        }>>;
+        ensureContext: (userAddress: string, appId: string) => Promise<import("..").ContextWallet>;
+    };
+    get access(): {
+        requestConsent: (options: import("..").RequestConsentOptions) => Promise<import("..").ConsentRequest>;
+        grantPermissions: (userAddress: string, options: import("..").GrantPermissionsOptions) => Promise<import("..").AccessGrant>;
+        revokePermissions: (userAddress: string, options: import("..").RevokePermissionsOptions) => Promise<boolean>;
+        checkPermission: (appId: string, scope: import("..").PermissionScope, userAddress: string) => Promise<boolean>;
+        getGrantsByUser: (userAddress: string) => Promise<import("..").AccessGrant[]>;
+        validateOAuthPermission: (walletOwner: string, appId: string, requestedScope: string) => Promise<boolean>;
+    };
+    get aggregate(): {
+        query: (options: import("..").AggregatedQueryOptions) => Promise<import("../aggregation/AggregationService").AggregatedQueryResult>;
+        queryWithScopes: (userAddress: string, query: string, scopes: import("..").PermissionScope[]) => Promise<import("../aggregation/AggregationService").AggregatedQueryResult>;
+        search: (userAddress: string, searchQuery: string, options?: {
+            appIds?: string[];
+            categories?: string[];
+            limit?: number;
+            minPermissionScope?: import("..").PermissionScope;
+        }) => Promise<import("../aggregation/AggregationService").AggregatedQueryResult>;
+        getAggregatedStats: (userAddress: string, appIds: string[]) => Promise<{
+            totalContexts: number;
+            totalItems: number;
+            totalSize: number;
+            categoryCounts: Record<string, number>;
+            appBreakdown: Record<string, {
+                items: number;
+                size: number;
+                lastActivity: number;
+            }>;
+        }>;
+    };
     get memory(): MemoryService;
     get chat(): ChatService;
     get storage(): StorageService;
     get encryption(): EncryptionService;
     get config(): PDWConfig;
     get viewService(): ViewService;
+    get mainWalletService(): MainWalletService;
+    get contextWalletService(): ContextWalletService;
+    get permissionService(): PermissionService;
+    get aggregationService(): AggregationService;
     static asClientExtension(config?: Partial<PDWConfig>): {
         name: "pdw";
         register: (client: any) => PersonalDataWallet;

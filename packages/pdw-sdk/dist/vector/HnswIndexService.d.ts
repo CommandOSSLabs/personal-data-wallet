@@ -5,7 +5,7 @@
  * with intelligent batching, caching, and Walrus persistence for the PDW SDK.
  */
 import * as hnswlib from 'hnswlib-node';
-import { StorageService } from '../storage/StorageService';
+import { StorageService } from '../services/StorageService';
 import { HNSWIndexConfig, HNSWSearchResult, HNSWSearchOptions, BatchConfig, BatchStats } from '../embedding/types';
 /**
  * Local HNSW vector indexing service with batching and Walrus persistence

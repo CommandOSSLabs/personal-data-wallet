@@ -1,18 +1,18 @@
 /**
  * WalrusService - Advanced Decentralized Storage Operations
  *
- * Comprehensive Walrus integration with metadata-aware storage, blob management,
- * encryption support, and intelligent retrieval optimization with fallback mechanisms.
+ * Production-ready Walrus integration with official client, SEAL encryption,
+ * standardized tagging, and content verification following https://docs.wal.app/
  */
+import type { SealService } from '../security/SealService';
 export interface WalrusConfig {
     network?: 'testnet' | 'mainnet';
     adminAddress?: string;
     storageEpochs?: number;
     uploadRelayHost?: string;
-    enableLocalFallback?: boolean;
-    localStorageDir?: string;
     retryAttempts?: number;
     timeoutMs?: number;
+    sealService?: SealService;
 }
 export interface MemoryMetadata {
     contentType: string;
@@ -73,10 +73,8 @@ export declare class WalrusService {
     private cache;
     private pendingUploads;
     private stats;
-    private walrusAvailable;
-    private lastWalrusCheck;
-    private readonly WALRUS_CHECK_INTERVAL;
     private readonly CACHE_TTL_MS;
+    private sealService?;
     constructor(config?: Partial<WalrusConfig>);
     /**
      * Upload content with comprehensive metadata
@@ -137,7 +135,10 @@ export declare class WalrusService {
         limit?: number;
         offset?: number;
         sortBy?: 'date' | 'size' | 'importance';
-    }): Promise<BlobInfo[]>;
+    }): Promise<{
+        blobs: BlobInfo[];
+        totalCount: number;
+    }>;
     /**
      * Delete blob (mark as deleted locally)
      */
@@ -163,18 +164,14 @@ export declare class WalrusService {
         oldestEntry: Date | null;
         newestEntry: Date | null;
     };
-    private initializeLocalStorage;
     private createMetadataWithEmbedding;
     private generateContentHash;
     private generateEncryptionKey;
     private xorEncrypt;
     private xorDecrypt;
     private uploadToWalrus;
-    private storeLocally;
+    private storeInWalrus;
     private retrieveFromWalrus;
-    private retrieveLocally;
-    private checkLocalStorage;
-    private deleteLocally;
     private findDuplicateContent;
     private cacheContent;
     private isCacheValid;

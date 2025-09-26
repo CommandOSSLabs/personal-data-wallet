@@ -4,7 +4,7 @@
  * Orchestrates Walrus storage operations with intelligent batching,
  * encryption management, and seamless integration with memory processing.
  */
-import { WalrusService } from './WalrusService';
+import { WalrusStorageService } from './WalrusStorageService';
 /**
  * Unified storage manager coordinating multiple storage providers
  */
@@ -40,9 +40,8 @@ export class StorageManager {
             retentionPolicyDays: config.retentionPolicyDays || 365
         };
         // Initialize Walrus service
-        this.walrusService = new WalrusService({
-            network: this.config.walrusConfig.network,
-            enableLocalFallback: true
+        this.walrusService = new WalrusStorageService({
+            network: this.config.walrusConfig.network
         });
     }
     // ==================== MEMORY STORAGE OPERATIONS ====================
@@ -244,14 +243,14 @@ export class StorageManager {
      */
     async listUserMemories(userId, options = {}) {
         try {
-            const blobs = await this.walrusService.listUserBlobs(userId, {
+            const blobResult = await this.walrusService.listUserBlobs(userId, {
                 category: options.category,
                 limit: options.limit,
                 offset: options.offset,
                 sortBy: options.sortBy
             });
             const memories = [];
-            for (const blob of blobs) {
+            for (const blob of blobResult.blobs) {
                 try {
                     const result = await this.retrieveMemory(blob.blobId, {
                         includeMetadata: options.includeMetadata

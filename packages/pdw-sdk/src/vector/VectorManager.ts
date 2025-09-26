@@ -7,7 +7,7 @@
 
 import { EmbeddingService, EmbeddingOptions, EmbeddingResult, BatchEmbeddingResult } from '../embedding/EmbeddingService';
 import { HnswIndexService } from './HnswIndexService';
-import { StorageService } from '../storage/StorageService';
+import { StorageService } from '../services/StorageService';
 import {
   VectorEmbedding,
   EmbeddingConfig,

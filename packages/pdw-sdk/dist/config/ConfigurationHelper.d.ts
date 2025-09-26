@@ -48,6 +48,7 @@ export interface EnvironmentConfig {
  * Configuration helper with environment variable support
  */
 export declare class ConfigurationHelper {
+    constructor();
     /**
      * Get Gemini API key from various sources
      */
@@ -79,6 +80,23 @@ export declare class ConfigurationHelper {
         decryptionTimeout: number;
         verifyServers: boolean;
         enableAudit: boolean;
+        network: string;
+        retryAttempts: number;
+    };
+    /**
+     * Instance method for getSealConfig (for backwards compatibility)
+     */
+    getSealConfig(): {
+        keyServerUrl?: string;
+        keyServerObjectId?: string;
+        sessionTTL: number;
+        enableBatch: boolean;
+        batchSize: number;
+        decryptionTimeout: number;
+        verifyServers: boolean;
+        enableAudit: boolean;
+        network: string;
+        retryAttempts: number;
     };
     /**
      * Load configuration from environment variables
@@ -104,6 +122,14 @@ export declare class ConfigurationHelper {
      * Generate example .env file content
      */
     static generateEnvTemplate(): string;
+    /**
+     * Generate SEAL-specific environment template
+     */
+    static generateSealEnvTemplate(): string;
+    /**
+     * Instance method for generateSealEnvTemplate (for backwards compatibility)
+     */
+    generateSealEnvTemplate(): string;
     private static parseBooleanEnv;
     private static maskApiKey;
     private static maskPrivateKey;

@@ -20,9 +20,9 @@
  * assert!(&table1 != &table2);
  * ```
  */
-import { MoveStruct } from '../../../utils/index.js';
+import { MoveStruct } from '../../../utils/index';
 import { bcs } from '@mysten/sui/bcs';
-import * as object from './object.js';
+import * as object from './object';
 const $moduleName = '0x2::table';
 export const Table = new MoveStruct({ name: `${$moduleName}::Table`, fields: {
         /** the ID of this table */

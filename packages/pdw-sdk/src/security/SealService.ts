@@ -7,7 +7,14 @@
 
 import { SuiClient } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
-import { fromHEX } from '@mysten/sui/utils';
+import { fromHex, toHex } from '@mysten/sui/utils';
+import { SealClient, SessionKey, EncryptedObject } from '@mysten/seal';
+import type { 
+  SealClientOptions,
+  EncryptOptions,
+  DecryptOptions,
+  KeyServerConfig
+} from '@mysten/seal';
 
 // SEAL SDK types and interfaces
 interface SealConfig {
@@ -54,39 +61,15 @@ interface PerformanceMetric {
  * SEAL Service - Production Implementation
  */
 export class SealService {
-  private sealClient: any = null;
-  private sessionKey: any = null;
+  private sealClient: SealClient | null = null;
+  private sessionKey: SessionKey | null = null;
   private config: SealConfig;
   private performanceMetrics: PerformanceMetric[] = [];
   private activeSessions: Map<string, any> = new Map();
 
-  // SEAL package components (lazy loaded)
-  private SealClient: any = null;
-  private SessionKey: any = null;
-  private EncryptedObject: any = null;
-  private getAllowlistedKeyServers: any = null;
-
   constructor(config: SealConfig) {
     this.config = config;
-    this.initializeSealSDK();
-  }
-
-  /**
-   * Initialize SEAL SDK components
-   */
-  private initializeSealSDK(): void {
-    try {
-      const sealModule = require('@mysten/seal');
-      this.SealClient = sealModule.SealClient || sealModule.default?.SealClient;
-      this.SessionKey = sealModule.SessionKey || sealModule.default?.SessionKey;
-      this.EncryptedObject = sealModule.EncryptedObject || sealModule.default?.EncryptedObject;
-      this.getAllowlistedKeyServers = sealModule.getAllowlistedKeyServers || sealModule.default?.getAllowlistedKeyServers;
-
-      console.log('✅ SEAL SDK components loaded successfully');
-    } catch (error) {
-      console.warn('⚠️ SEAL SDK not available:', error);
-      throw new Error('SEAL SDK is required for production use');
-    }
+    console.log('✅ SEAL SDK components loaded successfully');
   }
 
   /**
@@ -96,21 +79,19 @@ export class SealService {
     const metric = this.startMetric('seal_client_init');
 
     try {
-      if (!this.SealClient) {
-        throw new Error('SealClient not available');
-      }
-
       // Configure server configs from testnet servers
-      const serverConfigs = this.config.keyServerObjectIds.map((objectId, index) => ({
+      const serverConfigs: KeyServerConfig[] = this.config.keyServerObjectIds.map((objectId, index) => ({
         objectId,
         weight: 1
       }));
 
-      this.sealClient = new this.SealClient({
+      const sealClientOptions: SealClientOptions = {
         suiClient: this.config.suiClient,
         serverConfigs,
         verifyKeyServers: this.config.network === 'mainnet' // Only verify on mainnet
-      });
+      };
+
+      this.sealClient = new SealClient(sealClientOptions);
 
       this.completeMetric(metric, true, { serverCount: serverConfigs.length });
       console.log('✅ SEAL client initialized with', serverConfigs.length, 'servers');
@@ -124,17 +105,13 @@ export class SealService {
   /**
    * Create and manage session key
    */
-  async createSession(config: SessionConfig, signature?: Uint8Array): Promise<any> {
+  async createSession(config: SessionConfig, signature?: Uint8Array | string): Promise<any> {
     const metric = this.startMetric('session_creation');
 
     try {
-      if (!this.SessionKey) {
-        throw new Error('SessionKey not available');
-      }
-
-      const sessionKey = await this.SessionKey.create({
+      const sessionKey = await SessionKey.create({
         address: config.address,
-        packageId: fromHEX(config.packageId),
+        packageId: config.packageId,
         ttlMin: config.ttlMin,
         suiClient: this.config.suiClient
       });
@@ -143,7 +120,9 @@ export class SealService {
 
       // In production, signature would come from wallet
       if (signature) {
-        sessionKey.setPersonalMessageSignature(signature);
+        // Convert Uint8Array to hex string if needed
+        const signatureString = typeof signature === 'string' ? signature : toHex(signature);
+        await sessionKey.setPersonalMessageSignature(signatureString);
       }
 
       // Store session for management
@@ -179,6 +158,10 @@ export class SealService {
         await this.initializeClient();
       }
 
+      if (!this.sealClient) {
+        throw new Error('Failed to initialize SEAL client');
+      }
+
       const threshold = options.threshold || this.config.threshold;
 
       // Validate threshold against available servers
@@ -188,8 +171,8 @@ export class SealService {
 
       const result = await this.sealClient.encrypt({
         threshold,
-        packageId: fromHEX(this.config.packageId),
-        id: fromHEX(options.id),
+        packageId: this.config.packageId,
+        id: options.id,
         data: options.data
       });
 
@@ -229,15 +212,54 @@ export class SealService {
         await this.initializeClient();
       }
 
-      const result = await this.sealClient.decrypt({
-        data: options.encryptedObject,
-        sessionKey: options.sessionKey,
-        txBytes: options.txBytes
+      if (!this.sealClient) {
+        throw new Error('Failed to initialize SEAL client');
+      }
+
+      // Add detailed debugging for SEAL decryption
+      console.log('🔍 SEAL decrypt parameters:');
+      console.log(`   - Encrypted data type: ${typeof options.encryptedObject}`);
+      console.log(`   - Encrypted data length: ${options.encryptedObject.length}`);
+      console.log(`   - Session key type: ${typeof options.sessionKey}`);
+      console.log(`   - Session key constructor: ${options.sessionKey?.constructor?.name}`);
+      console.log(`   - Transaction bytes type: ${typeof options.txBytes}`);
+      console.log(`   - Transaction bytes length: ${options.txBytes.length}`);
+      
+      // Check if session key has expected methods
+      if (options.sessionKey) {
+        console.log(`   - Session key methods: ${Object.getOwnPropertyNames(Object.getPrototypeOf(options.sessionKey)).join(', ')}`);
+      }
+
+      // Try SEAL decryption with error boundary
+      let result;
+      try {
+        console.log('🔍 Attempting SEAL client decrypt...');
+        result = await this.sealClient.decrypt({
+          data: options.encryptedObject,
+          sessionKey: options.sessionKey,
+          txBytes: options.txBytes
+        });
+        console.log('🔍 SEAL decrypt completed without throwing');
+      } catch (innerError) {
+        console.log('🔍 SEAL decrypt threw an error:', innerError);
+        throw innerError;
+      }
+
+      console.log(`🔍 SEAL decrypt result:`, {
+        result,
+        resultType: typeof result,
+        resultLength: result ? result.length : 'undefined',
+        hasResult: !!result,
+        isUint8Array: result instanceof Uint8Array
       });
+
+      if (!result) {
+        throw new Error('SEAL decrypt returned undefined/null result');
+      }
 
       this.completeMetric(metric, true, {
         encryptedSize: options.encryptedObject.length,
-        decryptedSize: result.length
+        decryptedSize: result ? result.length : 0
       });
 
       return result;
@@ -245,7 +267,15 @@ export class SealService {
     } catch (error) {
       this.completeMetric(metric, false, undefined, error);
 
-      // Enhanced error handling for decryption
+      // Enhanced error handling for decryption with detailed logging
+      console.log('🚨 SEAL decrypt error details:', {
+        error,
+        errorType: typeof error,
+        errorConstructor: error?.constructor?.name,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : 'No stack trace'
+      });
+
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (errorMessage.includes('access')) {
         throw new Error(`Access denied for decryption: ${errorMessage}`);
@@ -261,18 +291,28 @@ export class SealService {
   /**
    * Create transaction for seal_approve
    */
-  async createSealApproveTransaction(id: string, additionalArgs: any[] = []): Promise<Uint8Array> {
+  async createSealApproveTransaction(id: string, userAddress: string, accessRegistry?: string): Promise<Uint8Array> {
     const metric = this.startMetric('transaction_creation');
 
     try {
       const tx = new Transaction();
+      
+      // Use the deployed AccessRegistry ID from environment or parameter
+      const registryId = accessRegistry || process.env.ACCESS_REGISTRY_ID || "0x8088cc36468b53f210696f1c6b1a4de1b1666dd36a7c36f92c394ff1d342f6dd";
+      
+      // CRITICAL FIX: Match SEAL-compliant Move function signature
+      // entry fun seal_approve(id: vector<u8>, registry: &AccessRegistry, clock: &Clock, ctx: &TxContext)
       tx.moveCall({
-        target: `${this.config.packageId}::memory::seal_approve`,
+        target: `${this.config.packageId}::seal_access_control::seal_approve`,
         arguments: [
-          tx.pure.vector("u8", fromHEX(id)),
-          ...additionalArgs
+          tx.pure.vector("u8", fromHex(id)), // FIXED: Use fromHex instead of text encoding
+          tx.object(registryId), // AccessRegistry reference
+          tx.object('0x6') // Clock object (system clock)
         ]
       });
+
+      // Set the sender for the transaction
+      tx.setSender(userAddress);
 
       const txBytes = await tx.build({ 
         client: this.config.suiClient, 
@@ -282,7 +322,8 @@ export class SealService {
       this.completeMetric(metric, true, { 
         id,
         txSize: txBytes.length,
-        argsCount: additionalArgs.length 
+        registryId,
+        clockId: '0x6'
       });
 
       return txBytes;
@@ -301,11 +342,7 @@ export class SealService {
     const metric = this.startMetric('object_parsing');
 
     try {
-      if (!this.EncryptedObject) {
-        throw new Error('EncryptedObject parser not available');
-      }
-
-      const parsed = this.EncryptedObject.parse(encryptedBytes);
+      const parsed = EncryptedObject.parse(encryptedBytes);
 
       this.completeMetric(metric, true, {
         version: parsed.version,

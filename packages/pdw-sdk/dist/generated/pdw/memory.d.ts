@@ -1,7 +1,7 @@
 /**************************************************************
  * THIS FILE IS GENERATED AND SHOULD NOT BE MANUALLY MODIFIED *
  **************************************************************/
-import { MoveStruct, type RawTransactionArgument } from '../utils/index.js';
+import { MoveStruct, type RawTransactionArgument } from '../utils/index';
 import { type Transaction } from '@mysten/sui/transactions';
 export declare const MemoryCreated: MoveStruct<{
     id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;

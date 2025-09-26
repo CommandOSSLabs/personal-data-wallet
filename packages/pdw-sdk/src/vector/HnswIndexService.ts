@@ -8,7 +8,7 @@
 import * as hnswlib from 'hnswlib-node';
 import * as fs from 'fs';
 import * as path from 'path';
-import { StorageService } from '../storage/StorageService';
+import { StorageService, type MemoryMetadata } from '../services/StorageService';
 import { 
   HNSWIndexConfig, 
   HNSWSearchResult, 
@@ -469,15 +469,22 @@ export class HnswIndexService {
       const serialized = fs.readFileSync(tempFilePath);
 
       // Upload to Walrus via StorageService
-      const result = await this.storageService.upload(new Uint8Array(serialized), {
-        signer: undefined, // TODO: Get signer from context
-        epochs: 12,
-        tags: {
+      const metadata: MemoryMetadata = {
+        contentType: 'application/hnsw-index',
+        contentSize: serialized.length,
+        contentHash: '', // TODO: Calculate hash
+        category: 'vector-index',
+        topic: 'hnsw',
+        importance: 8,
+        embeddingDimension: 384, // TODO: Store dimension in config
+        createdTimestamp: Date.now(),
+        customMetadata: {
           'user-address': userAddress,
-          'content-type': 'application/hnsw-index',
           'version': '1.0'
         }
-      });
+      };
+
+      const result = await this.storageService.upload(new Uint8Array(serialized), metadata);
 
       return result.blobId;
     } finally {

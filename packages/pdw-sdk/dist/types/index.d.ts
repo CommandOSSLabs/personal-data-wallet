@@ -373,11 +373,6 @@ export interface MemoryStatsResponse {
     totalSize: number;
     lastUpdated: string;
 }
-export interface BatchStats {
-    pendingBatches: number;
-    processedToday: number;
-    averageProcessingTime: number;
-}
 export interface ClientWithCoreApi {
     core: {
         getObject: (objectId: string) => Promise<any>;
@@ -411,12 +406,13 @@ export interface DecryptionOptions {
     signedTxBytes?: Uint8Array;
 }
 export interface SealEncryptionResult {
-    encryptedData: string;
+    encryptedContent: Uint8Array;
     backupKey: string;
     contentHash: string;
 }
 export interface SealDecryptionOptions {
-    encryptedData: string;
+    encryptedContent?: Uint8Array;
+    encryptedData?: string;
     userAddress: string;
     sessionKey?: any;
     signedTxBytes?: Uint8Array;

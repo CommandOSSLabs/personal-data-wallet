@@ -35,7 +35,7 @@ export { EmbeddingService } from './embedding';
 export { VectorManager, HnswIndexService } from './vector';
 export { BatchManager, BatchingService, MemoryProcessingCache } from './batch';
 export { GraphService, KnowledgeGraphManager } from './graph';
-export { WalrusService, StorageManager } from './storage';
+export { WalrusStorageService, StorageManager } from './storage';
 export { SuiService, BlockchainManager } from './blockchain';
 
 // Memory retrieval, analytics, and decryption
@@ -337,6 +337,29 @@ export default {
   QuickStartConfigs,
   SDK
 };
+
+// Wallet architecture components
+export { MainWalletService } from './wallet/MainWalletService';
+export { ContextWalletService } from './wallet/ContextWalletService';
+export { PermissionService } from './access/PermissionService';
+export { AggregationService } from './aggregation/AggregationService';
+export type {
+  MainWallet,
+  ContextWallet,
+  ConsentRequest,
+  AccessGrant,
+  CreateMainWalletOptions,
+  CreateContextWalletOptions,
+  DeriveContextIdOptions,
+  RotateKeysOptions,
+  RotateKeysResult,
+  PermissionScope,
+  RequestConsentOptions,
+  GrantPermissionsOptions,
+  RevokePermissionsOptions,
+  AggregatedQueryOptions,
+  PermissionScopes
+} from './types/wallet';
 
 // Legacy version for compatibility
 export const VERSION = '1.0.0';

@@ -17,6 +17,7 @@ module.exports = {
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],
   testTimeout: 60000, // 60 seconds for SEAL operations
   verbose: true,
+  silent: false, // Show console.log output
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1'
   }

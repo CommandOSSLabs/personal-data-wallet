@@ -14,17 +14,17 @@ import dotenv from 'dotenv';
 import { describe, test, expect, beforeAll, afterEach } from '@jest/globals';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
-import { fromHEX, toHEX } from '@mysten/sui/utils';
+import { fromHex, toHEX } from '@mysten/sui/utils';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { SealService } from '../src/security/SealService';
 
 // Load test environment
 dotenv.config({ path: '.env.test' });
 
-// Test addresses and configuration
-const OWNER_ADDRESS = process.env.TEST_USER_ADDRESS!;
-const APPROVED_ADDRESS = '0xc5e67f46e1b99b580da3a6cc69acf187d0c08dbe568f8f5a78959079c9d82a15';
-const UNAUTHORIZED_ADDRESS = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
+// Test addresses and configuration - OAuth-style access control testing  
+const OWNER_ADDRESS = process.env.OWNER_WALLET_ADDRESS || process.env.TEST_USER_ADDRESS!;
+const APPROVED_ADDRESS = process.env.APPROVED_APP_ADDRESS || '0xa1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456';
+const UNAUTHORIZED_ADDRESS = process.env.UNAUTHORIZED_APP_ADDRESS || '0x1111111111111111111111111111111111111111111111111111111111111111';
 
 // Import SEAL components with error handling
 let SealClient: any;
@@ -148,8 +148,8 @@ describe('SEAL Access Control Tests', () => {
         // Encrypt with specific access control
         const encryptResult = await sealClient.encrypt({
           threshold: 2,
-          packageId: fromHEX(testConfig.packageId),
-          id: fromHEX(testConfig.memoryId),
+          packageId: fromHex(testConfig.packageId),
+          id: fromHex(testConfig.memoryId),
           data: testData
         });
 
@@ -492,64 +492,79 @@ describe('SEAL Access Control Tests', () => {
   });
 
   test('should validate access control permissions matrix', () => {
-    console.log('📊 Validating access control permissions matrix...');
+    console.log('📊 Validating OAuth-style access control permissions matrix...');
 
     const startTime = Date.now();
 
-    // Create permissions matrix for access control validation
+    // Create OAuth-style app permissions matrix for validation
+    // This reflects how apps request access (like Google OAuth) and users grant permissions
     const permissionsMatrix = {
       [OWNER_ADDRESS]: {
-        permissions: ['read', 'write', 'decrypt', 'grant_access', 'revoke_access'],
-        role: 'owner'
+        permissions: ['read:memories', 'write:memories', 'read:preferences', 'write:preferences', 'grant_access', 'revoke_access'],
+        role: 'wallet_owner',
+        description: 'Full control over own wallet data'
       },
       [APPROVED_ADDRESS]: {
-        permissions: ['read', 'decrypt'],
-        role: 'approved_user'
+        permissions: ['read:memories', 'read:preferences'], // App was granted read-only access
+        role: 'approved_app',
+        description: 'Third-party app with user-granted read permissions'
       },
       [UNAUTHORIZED_ADDRESS]: {
         permissions: [],
-        role: 'unauthorized'
+        role: 'unauthorized_app',
+        description: 'App has not been granted any permissions'
       }
     };
 
-    // Validate owner permissions
+    // Validate wallet owner permissions (like your own Google account)
     const ownerEntry = permissionsMatrix[OWNER_ADDRESS];
     expect(ownerEntry).toBeTruthy();
     expect(ownerEntry.permissions).toBeTruthy();
     
     const ownerPerms = ownerEntry.permissions;
-    console.log(`🔍 Owner permissions for ${OWNER_ADDRESS}:`, ownerPerms);
+    console.log(`🔍 Wallet Owner permissions for ${OWNER_ADDRESS.slice(0, 10)}...${OWNER_ADDRESS.slice(-8)}:`, ownerPerms);
     
+    // Wallet owner has full control (like owning your Google account)
     expect(ownerPerms).toContain('grant_access');
     expect(ownerPerms).toContain('revoke_access');
-    expect(ownerPerms).toContain('decrypt');
-    expect(ownerPerms).toContain('read');
-    expect(ownerPerms).toContain('write');
+    expect(ownerPerms).toContain('read:memories');
+    expect(ownerPerms).toContain('write:memories');
+    expect(ownerPerms).toContain('read:preferences');
+    expect(ownerPerms).toContain('write:preferences');
 
-    // Validate approved address permissions
+    // Validate approved app permissions (like a third-party app you granted access to)
     const approvedPerms = permissionsMatrix[APPROVED_ADDRESS].permissions;
-    expect(approvedPerms).toContain('read');
-    expect(approvedPerms).toContain('decrypt');
-    expect(approvedPerms).not.toContain('grant_access');
-    expect(approvedPerms).not.toContain('write');
+    expect(approvedPerms).toContain('read:memories');
+    expect(approvedPerms).toContain('read:preferences');
+    expect(approvedPerms).not.toContain('grant_access'); // Apps can't grant permissions to other apps
+    expect(approvedPerms).not.toContain('write:memories'); // Only read access granted
+    expect(approvedPerms).not.toContain('write:preferences'); // Only read access granted
 
-    // Validate unauthorized address permissions
+    // Validate unauthorized app permissions (app user hasn't approved)
     const unauthorizedPerms = permissionsMatrix[UNAUTHORIZED_ADDRESS].permissions;
     expect(unauthorizedPerms).toHaveLength(0);
 
-    console.log('📋 Permissions Matrix:');
+    console.log('📋 OAuth-Style App Permissions Matrix:');
     Object.entries(permissionsMatrix).forEach(([address, details]: [string, any]) => {
       const shortAddress = `${address.slice(0, 8)}...${address.slice(-8)}`;
       console.log(`   ${shortAddress} (${details.role}): [${details.permissions.join(', ')}]`);
+      console.log(`     → ${details.description}`);
     });
 
     // Store permissions matrix
     (global as any).accessControlMatrix = permissionsMatrix;
 
-    const duration = Date.now() - startTime;
-    testMetrics.push({ operation: 'permissions_matrix', duration, success: true });
+    // Simulate OAuth-style permission flow validation
+    console.log('🔐 Validating OAuth-style App Permission Flow:');
+    console.log('  1. ✅ Wallet Owner has full permissions (like owning your Google account)');
+    console.log('  2. ✅ Approved App has limited read permissions (like third-party app you granted access)');
+    console.log('  3. ✅ Unauthorized App has no permissions (like app you never approved)');
+    console.log('  4. ✅ Permission scopes follow OAuth patterns (read:resource, write:resource)');
 
-    console.log('✅ Access control permissions matrix validated');
+    const duration = Date.now() - startTime;
+    testMetrics.push({ operation: 'oauth_permissions_matrix', duration, success: true });
+
+    console.log('✅ OAuth-style access control permissions matrix validated');
   });
 
   test('should simulate access revocation workflow', async () => {

@@ -1,12 +1,21 @@
 /**
  * Storage Module
  * 
- * Comprehensive decentralized storage operations with Walrus integration,
- * intelligent batching, encryption support, and fallback mechanisms.
+ * PRODUCTION: Uses services/StorageService.ts with writeBlobFlow pattern
+ * LEGACY: Old storage services remain for compatibility during transition
  */
 
-export { WalrusService } from './WalrusService';
+// PRODUCTION - Use services/StorageService.ts instead
+export { StorageService as LegacyStorageService } from './StorageService';
+
+// LEGACY SERVICES - Will be deprecated once transition complete
+export { WalrusStorageService } from './WalrusStorageService';
 export { StorageManager } from './StorageManager';
+// WalrusTestAdapter is disabled due to API incompatibility with new StorageService
+// export { WalrusTestAdapter } from './WalrusTestAdapter';
+
+// Export production service from services directory
+export { StorageService } from '../services/StorageService';
 
 export type {
   WalrusConfig,
@@ -15,7 +24,7 @@ export type {
   WalrusRetrievalResult,
   BlobInfo,
   WalrusStats
-} from './WalrusService';
+} from './WalrusStorageService';
 
 export type {
   StorageManagerConfig,
@@ -25,3 +34,10 @@ export type {
   StorageBatchResult,
   StorageStats
 } from './StorageManager';
+
+// Export production types
+export type {
+  StorageServiceConfig,
+  BlobUploadOptions,
+  FileUploadOptions
+} from '../services/StorageService';

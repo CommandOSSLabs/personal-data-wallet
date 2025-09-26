@@ -5,7 +5,7 @@
  * encryption management, and seamless integration with memory processing.
  */
 
-import { WalrusService, WalrusUploadResult, WalrusRetrievalResult, MemoryMetadata } from './WalrusService';
+import { WalrusStorageService, WalrusUploadResult, WalrusRetrievalResult, MemoryMetadata } from './WalrusStorageService';
 import { ProcessedMemory } from '../embedding/types';
 
 export interface StorageManagerConfig {
@@ -72,7 +72,7 @@ export interface StorageStats {
  * Unified storage manager coordinating multiple storage providers
  */
 export class StorageManager {
-  private walrusService: WalrusService;
+  private walrusService: WalrusStorageService;
   private pendingOperations = new Map<string, Promise<StorageResult>>();
   private batchQueue: StorageBatchOperation[] = [];
   private batchTimer?: NodeJS.Timeout;
@@ -109,9 +109,8 @@ export class StorageManager {
     };
 
     // Initialize Walrus service
-    this.walrusService = new WalrusService({
-      network: this.config.walrusConfig.network,
-      enableLocalFallback: true
+    this.walrusService = new WalrusStorageService({
+      network: this.config.walrusConfig.network
     });
   }
 
@@ -400,7 +399,7 @@ export class StorageManager {
     } = {}
   ) {
     try {
-      const blobs = await this.walrusService.listUserBlobs(userId, {
+      const blobResult = await this.walrusService.listUserBlobs(userId, {
         category: options.category,
         limit: options.limit,
         offset: options.offset,
@@ -409,7 +408,7 @@ export class StorageManager {
 
       const memories = [];
       
-      for (const blob of blobs) {
+      for (const blob of blobResult.blobs) {
         try {
           const result = await this.retrieveMemory(blob.blobId, {
             includeMetadata: options.includeMetadata

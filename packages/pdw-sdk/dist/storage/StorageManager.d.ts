@@ -4,7 +4,7 @@
  * Orchestrates Walrus storage operations with intelligent batching,
  * encryption management, and seamless integration with memory processing.
  */
-import { MemoryMetadata } from './WalrusService';
+import { MemoryMetadata } from './WalrusStorageService';
 import { ProcessedMemory } from '../embedding/types';
 export interface StorageManagerConfig {
     walrusConfig?: {
@@ -145,7 +145,7 @@ export declare class StorageManager {
         memory: ProcessedMemory;
         blobId: string;
         metadata: MemoryMetadata | null;
-        blobInfo: import("./WalrusService").BlobInfo;
+        blobInfo: import("./WalrusStorageService").BlobInfo;
     }[]>;
     /**
      * Delete stored memory
@@ -155,12 +155,12 @@ export declare class StorageManager {
      * Get storage analytics
      */
     getStorageAnalytics(): {
-        walrusService: import("./WalrusService").WalrusStats;
+        walrusService: import("./WalrusStorageService").WalrusStats;
         cache: {
             size: number;
-            totalSizeBytes: number;
-            oldestEntry: Date | null;
-            newestEntry: Date | null;
+            maxSize: number;
+            hitRate: number;
+            entries: number;
         };
         batchQueue: {
             pending: number;

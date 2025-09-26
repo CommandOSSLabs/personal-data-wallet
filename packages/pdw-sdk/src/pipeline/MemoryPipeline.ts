@@ -9,7 +9,7 @@
 
 import { EmbeddingService } from '../embedding/EmbeddingService';
 import { VectorManager } from '../vector/VectorManager';
-import { StorageService } from '../storage/StorageService';
+import { StorageService } from '../services/StorageService';
 import { BatchManager } from '../batch/BatchManager';
 import { KnowledgeGraphManager } from '../graph/KnowledgeGraphManager';
 import { StorageManager } from '../storage/StorageManager';

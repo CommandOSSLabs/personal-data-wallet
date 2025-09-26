@@ -45,21 +45,21 @@ exports.cleanupExpiredPermission = cleanupExpiredPermission;
 /**************************************************************
  * THIS FILE IS GENERATED AND SHOULD NOT BE MANUALLY MODIFIED *
  **************************************************************/
-const index_js_1 = require("../utils/index.js");
+const index_1 = require("../utils/index");
 const bcs_1 = require("@mysten/sui/bcs");
-const object = __importStar(require("./deps/sui/object.js"));
-const table = __importStar(require("./deps/sui/table.js"));
+const object = __importStar(require("./deps/sui/object"));
+const table = __importStar(require("./deps/sui/table"));
 const $moduleName = '@local-pkg/pdw::seal_access_control';
-exports.RegistryCreated = new index_js_1.MoveStruct({ name: `${$moduleName}::RegistryCreated`, fields: {
+exports.RegistryCreated = new index_1.MoveStruct({ name: `${$moduleName}::RegistryCreated`, fields: {
         registry_id: bcs_1.bcs.Address,
         creator: bcs_1.bcs.Address
     } });
-exports.ContentRegistered = new index_js_1.MoveStruct({ name: `${$moduleName}::ContentRegistered`, fields: {
+exports.ContentRegistered = new index_1.MoveStruct({ name: `${$moduleName}::ContentRegistered`, fields: {
         content_id: bcs_1.bcs.string(),
         owner: bcs_1.bcs.Address,
         timestamp: bcs_1.bcs.u64()
     } });
-exports.AccessChanged = new index_js_1.MoveStruct({ name: `${$moduleName}::AccessChanged`, fields: {
+exports.AccessChanged = new index_1.MoveStruct({ name: `${$moduleName}::AccessChanged`, fields: {
         content_id: bcs_1.bcs.string(),
         recipient: bcs_1.bcs.Address,
         access_level: bcs_1.bcs.string(),
@@ -67,20 +67,20 @@ exports.AccessChanged = new index_js_1.MoveStruct({ name: `${$moduleName}::Acces
         expires_at: bcs_1.bcs.u64(),
         granted_by: bcs_1.bcs.Address
     } });
-exports.AccessRegistry = new index_js_1.MoveStruct({ name: `${$moduleName}::AccessRegistry`, fields: {
+exports.AccessRegistry = new index_1.MoveStruct({ name: `${$moduleName}::AccessRegistry`, fields: {
         id: object.UID,
         /** Maps content_id -> owner address */
         owners: table.Table,
         /** Maps (content_id, user_address) -> AccessPermission */
         permissions: table.Table
     } });
-exports.AccessPermission = new index_js_1.MoveStruct({ name: `${$moduleName}::AccessPermission`, fields: {
+exports.AccessPermission = new index_1.MoveStruct({ name: `${$moduleName}::AccessPermission`, fields: {
         access_level: bcs_1.bcs.string(),
         granted_at: bcs_1.bcs.u64(),
         expires_at: bcs_1.bcs.u64(),
         granted_by: bcs_1.bcs.Address
     } });
-exports.AccessLog = new index_js_1.MoveStruct({ name: `${$moduleName}::AccessLog`, fields: {
+exports.AccessLog = new index_1.MoveStruct({ name: `${$moduleName}::AccessLog`, fields: {
         id: object.UID,
         content_id: bcs_1.bcs.string(),
         requester: bcs_1.bcs.Address,
@@ -105,7 +105,7 @@ function sealApprove(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'seal_approve',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /**
@@ -128,7 +128,7 @@ function registerContent(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'register_content',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Grant access to another user */
@@ -147,7 +147,7 @@ function grantAccess(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'grant_access',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Revoke access from a user */
@@ -163,7 +163,7 @@ function revokeAccess(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'revoke_access',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Check if a user has access (for off-chain queries) */
@@ -180,7 +180,7 @@ function checkAccess(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'check_access',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Get permission details */
@@ -196,7 +196,7 @@ function getPermission(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'get_permission',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Log access attempt (can be called by Seal integration) */
@@ -213,7 +213,7 @@ function logAccess(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'log_access',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /**
@@ -233,7 +233,7 @@ function cleanupExpiredPermission(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'cleanup_expired_permission',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: (0, index_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
     });
 }
 //# sourceMappingURL=seal_access_control.js.map

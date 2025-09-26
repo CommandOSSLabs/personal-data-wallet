@@ -14,9 +14,9 @@ import type {
   ChatOptions,
   ChatSession,
   CreateSessionOptions,
-  MemoryStatsResponse,
-  BatchStats
+  MemoryStatsResponse
 } from '../types';
+import type { BatchStats } from '../core';
 
 export class PDWApiClient {
   private baseUrl: string;

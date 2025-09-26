@@ -13,7 +13,7 @@ import dotenv from 'dotenv';
 import { describe, test, expect, beforeAll, afterEach } from '@jest/globals';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
-import { fromHEX } from '@mysten/sui/utils';
+import { fromHex } from '@mysten/sui/utils';
 
 // Load test environment
 dotenv.config({ path: '.env.test' });
@@ -128,7 +128,7 @@ describe('SEAL Production Implementation Tests', () => {
       // Create session key (mock implementation since we need wallet signature)
       sessionKey = await SessionKey.create({
         address: testConfig.userAddress,
-        packageId: fromHEX(testConfig.packageId),
+        packageId: fromHex(testConfig.packageId),
         ttlMin: 10, // 10 minute TTL
         suiClient
       });
@@ -177,8 +177,8 @@ describe('SEAL Production Implementation Tests', () => {
     try {
       const encryptResult = await sealClient.encrypt({
         threshold: 2,
-        packageId: fromHEX(testConfig.packageId),
-        id: fromHEX('deadbeef'), // Test ID
+        packageId: fromHex(testConfig.packageId),
+        id: fromHex('deadbeef'), // Test ID
         data: testData
       });
 
@@ -268,7 +268,7 @@ describe('SEAL Production Implementation Tests', () => {
       tx.moveCall({
         target: `${testConfig.packageId}::memory::seal_approve`,
         arguments: [
-          tx.pure.vector("u8", fromHEX('deadbeef'))
+          tx.pure.vector("u8", fromHex('deadbeef'))
         ]
       });
 
@@ -314,7 +314,7 @@ describe('SEAL Production Implementation Tests', () => {
         await sealClient.encrypt({
           threshold: 2,
           packageId: new Uint8Array(32).fill(0xFF), // Invalid package ID
-          id: fromHEX('deadbeef'),
+          id: fromHex('deadbeef'),
           data: new TextEncoder().encode('test')
         });
       } catch (error) {
@@ -328,8 +328,8 @@ describe('SEAL Production Implementation Tests', () => {
       try {
         await sealClient.encrypt({
           threshold: 10, // Higher than available servers
-          packageId: fromHEX(testConfig.packageId),
-          id: fromHEX('deadbeef'),
+          packageId: fromHex(testConfig.packageId),
+          id: fromHex('deadbeef'),
           data: new TextEncoder().encode('test')
         });
       } catch (error) {

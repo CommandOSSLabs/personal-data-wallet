@@ -5,6 +5,7 @@
  * entity/relationship extraction, graph traversal, and intelligent updates.
  */
 import { EmbeddingService } from '../embedding/EmbeddingService';
+import { type GeminiConfig } from '../services/GeminiAIService';
 export interface Entity {
     id: string;
     label: string;
@@ -62,12 +63,16 @@ export interface GraphConfig {
     maxHops?: number;
     enableEmbeddings?: boolean;
     deduplicationThreshold?: number;
+    geminiApiKey?: string;
+    geminiConfig?: Partial<GeminiConfig>;
+    useMockAI?: boolean;
 }
 /**
  * Advanced knowledge graph service with AI extraction and intelligent management
  */
 export declare class GraphService {
     private embeddingService?;
+    private geminiAI?;
     private readonly config;
     private graphs;
     private extractionStats;
@@ -160,6 +165,30 @@ export declare class GraphService {
     private generateRelationshipId;
     private updateExtractionStats;
     private delay;
+    /**
+     * Test AI service connectivity
+     */
+    testAIConnection(): Promise<{
+        connected: boolean;
+        usingMock: boolean;
+        service: string;
+    }>;
+    /**
+     * Get service configuration (without sensitive data)
+     */
+    getConfig(): Omit<Required<GraphConfig>, 'geminiApiKey'> & {
+        aiConfigured: boolean;
+    };
+    /**
+     * Get extraction statistics
+     */
+    getExtractionStats(): {
+        totalExtractions: number;
+        averageEntities: number;
+        averageRelationships: number;
+        averageConfidence: number;
+        processingTime: number;
+    };
 }
 export default GraphService;
 //# sourceMappingURL=GraphService.d.ts.map

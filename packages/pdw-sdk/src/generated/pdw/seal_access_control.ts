@@ -1,11 +1,11 @@
 /**************************************************************
  * THIS FILE IS GENERATED AND SHOULD NOT BE MANUALLY MODIFIED *
  **************************************************************/
-import { MoveStruct, normalizeMoveArguments, type RawTransactionArgument } from '../utils/index.js';
+import { MoveStruct, normalizeMoveArguments, type RawTransactionArgument } from '../utils/index';
 import { bcs } from '@mysten/sui/bcs';
 import { type Transaction } from '@mysten/sui/transactions';
-import * as object from './deps/sui/object.js';
-import * as table from './deps/sui/table.js';
+import * as object from './deps/sui/object';
+import * as table from './deps/sui/table';
 const $moduleName = '@local-pkg/pdw::seal_access_control';
 export const RegistryCreated = new MoveStruct({ name: `${$moduleName}::RegistryCreated`, fields: {
         registry_id: bcs.Address,

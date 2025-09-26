@@ -418,11 +418,7 @@ export interface MemoryStatsResponse {
   lastUpdated: string;
 }
 
-export interface BatchStats {
-  pendingBatches: number;
-  processedToday: number;
-  averageProcessingTime: number;
-}
+// BatchStats moved to core/index.ts to avoid duplication
 
 // Client extension types
 export interface ClientWithCoreApi {
@@ -466,13 +462,14 @@ export interface DecryptionOptions {
 
 // SEAL-specific encryption types
 export interface SealEncryptionResult {
-  encryptedData: string;
+  encryptedContent: Uint8Array;  // Changed from encryptedData: string to preserve binary format
   backupKey: string;
   contentHash: string;
 }
 
 export interface SealDecryptionOptions {
-  encryptedData: string;
+  encryptedContent?: Uint8Array;    // New binary format (preferred)
+  encryptedData?: string;           // Legacy base64 format (deprecated)
   userAddress: string;
   sessionKey?: any; // SessionKey from @mysten/seal
   signedTxBytes?: Uint8Array;

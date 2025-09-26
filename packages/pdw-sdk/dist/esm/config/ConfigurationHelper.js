@@ -8,6 +8,9 @@
  * Configuration helper with environment variable support
  */
 export class ConfigurationHelper {
+    constructor() {
+        // Instance constructor for backwards compatibility
+    }
     /**
      * Get Gemini API key from various sources
      */
@@ -57,15 +60,23 @@ export class ConfigurationHelper {
      */
     static getSealConfig() {
         return {
-            keyServerUrl: process.env.SEAL_KEY_SERVER_URL,
+            keyServerUrl: process.env.SEAL_KEY_SERVER_URL || 'https://testnet.seal.mysten.app',
             keyServerObjectId: process.env.SEAL_KEY_SERVER_OBJECT_ID,
             sessionTTL: process.env.SEAL_SESSION_TTL ? parseInt(process.env.SEAL_SESSION_TTL) : 60,
             enableBatch: process.env.SEAL_ENABLE_BATCH === 'true',
             batchSize: process.env.SEAL_BATCH_SIZE ? parseInt(process.env.SEAL_BATCH_SIZE) : 10,
             decryptionTimeout: process.env.SEAL_DECRYPTION_TIMEOUT ? parseInt(process.env.SEAL_DECRYPTION_TIMEOUT) : 30000,
             verifyServers: process.env.SEAL_VERIFY_SERVERS !== 'false', // Default true
-            enableAudit: process.env.SEAL_ENABLE_AUDIT === 'true'
+            enableAudit: process.env.SEAL_ENABLE_AUDIT === 'true',
+            network: process.env.SEAL_NETWORK || 'testnet',
+            retryAttempts: process.env.SEAL_RETRY_ATTEMPTS ? parseInt(process.env.SEAL_RETRY_ATTEMPTS) : 3
         };
+    }
+    /**
+     * Instance method for getSealConfig (for backwards compatibility)
+     */
+    getSealConfig() {
+        return ConfigurationHelper.getSealConfig();
     }
     /**
      * Load configuration from environment variables
@@ -186,6 +197,44 @@ PDW_ENABLE_MONITORING=true
 # 🔧 Advanced Settings (Optional)
 EMBEDDING_MODEL=text-embedding-004
 `;
+    }
+    /**
+     * Generate SEAL-specific environment template
+     */
+    static generateSealEnvTemplate() {
+        return `# SEAL Encryption Configuration for Personal Data Wallet SDK
+
+# 🔑 SEAL Key Server Configuration
+SEAL_KEY_SERVER_URL=https://testnet.seal.mysten.app
+SEAL_NETWORK=testnet
+
+# 🔧 SEAL Performance Settings
+SEAL_BATCH_SIZE=10
+SEAL_RETRY_ATTEMPTS=3
+SEAL_DECRYPTION_TIMEOUT=30000
+SEAL_SESSION_TTL=60
+
+# 🛡️ SEAL Security Settings
+SEAL_VERIFY_SERVERS=true
+SEAL_ENABLE_AUDIT=false
+SEAL_ENABLE_BATCH=true
+
+# 📦 Deployed Contract Configuration
+SUI_PACKAGE_ID=0x067706fc08339b715dab0383bd853b04d06ef6dff3a642c5e7056222da038bde
+SUI_NETWORK=testnet
+
+# 🔑 Testnet Key Servers (Official Mysten Labs)
+SEAL_KEY_SERVER_1_URL=https://seal-key-server-testnet-1.mystenlabs.com
+SEAL_KEY_SERVER_1_OBJECT=0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75
+SEAL_KEY_SERVER_2_URL=https://seal-key-server-testnet-2.mystenlabs.com
+SEAL_KEY_SERVER_2_OBJECT=0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8
+`;
+    }
+    /**
+     * Instance method for generateSealEnvTemplate (for backwards compatibility)
+     */
+    generateSealEnvTemplate() {
+        return ConfigurationHelper.generateSealEnvTemplate();
     }
     // Private helper methods
     static parseBooleanEnv(key, defaultValue) {

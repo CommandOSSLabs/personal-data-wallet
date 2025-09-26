@@ -16,7 +16,7 @@
  * @author Personal Data Wallet Team
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.VERSION = exports.SDK = exports.QuickStartConfigs = exports.SDK_NAME = exports.SDK_VERSION = exports.Config = exports.ConfigurationHelper = exports.MemoryDecryptionPipeline = exports.MemoryRetrievalService = exports.BlockchainManager = exports.SuiService = exports.StorageManager = exports.WalrusService = exports.KnowledgeGraphManager = exports.GraphService = exports.MemoryProcessingCache = exports.BatchingService = exports.BatchManager = exports.HnswIndexService = exports.VectorManager = exports.EmbeddingService = exports.PipelineManager = exports.MemoryPipeline = void 0;
+exports.VERSION = exports.AggregationService = exports.PermissionService = exports.ContextWalletService = exports.MainWalletService = exports.SDK = exports.QuickStartConfigs = exports.SDK_NAME = exports.SDK_VERSION = exports.Config = exports.ConfigurationHelper = exports.MemoryDecryptionPipeline = exports.MemoryRetrievalService = exports.BlockchainManager = exports.SuiService = exports.StorageManager = exports.WalrusStorageService = exports.KnowledgeGraphManager = exports.GraphService = exports.MemoryProcessingCache = exports.BatchingService = exports.BatchManager = exports.HnswIndexService = exports.VectorManager = exports.EmbeddingService = exports.PipelineManager = exports.MemoryPipeline = void 0;
 exports.createQuickStartPipeline = createQuickStartPipeline;
 exports.createPipelineManager = createPipelineManager;
 // Core pipeline - the main entry point
@@ -40,7 +40,7 @@ var graph_1 = require("./graph");
 Object.defineProperty(exports, "GraphService", { enumerable: true, get: function () { return graph_1.GraphService; } });
 Object.defineProperty(exports, "KnowledgeGraphManager", { enumerable: true, get: function () { return graph_1.KnowledgeGraphManager; } });
 var storage_1 = require("./storage");
-Object.defineProperty(exports, "WalrusService", { enumerable: true, get: function () { return storage_1.WalrusService; } });
+Object.defineProperty(exports, "WalrusStorageService", { enumerable: true, get: function () { return storage_1.WalrusStorageService; } });
 Object.defineProperty(exports, "StorageManager", { enumerable: true, get: function () { return storage_1.StorageManager; } });
 var blockchain_1 = require("./blockchain");
 Object.defineProperty(exports, "SuiService", { enumerable: true, get: function () { return blockchain_1.SuiService; } });
@@ -265,6 +265,15 @@ exports.default = {
     QuickStartConfigs: exports.QuickStartConfigs,
     SDK: exports.SDK
 };
+// Wallet architecture components
+var MainWalletService_1 = require("./wallet/MainWalletService");
+Object.defineProperty(exports, "MainWalletService", { enumerable: true, get: function () { return MainWalletService_1.MainWalletService; } });
+var ContextWalletService_1 = require("./wallet/ContextWalletService");
+Object.defineProperty(exports, "ContextWalletService", { enumerable: true, get: function () { return ContextWalletService_1.ContextWalletService; } });
+var PermissionService_1 = require("./access/PermissionService");
+Object.defineProperty(exports, "PermissionService", { enumerable: true, get: function () { return PermissionService_1.PermissionService; } });
+var AggregationService_1 = require("./aggregation/AggregationService");
+Object.defineProperty(exports, "AggregationService", { enumerable: true, get: function () { return AggregationService_1.AggregationService; } });
 // Legacy version for compatibility
 exports.VERSION = '1.0.0';
 //# sourceMappingURL=index.js.map

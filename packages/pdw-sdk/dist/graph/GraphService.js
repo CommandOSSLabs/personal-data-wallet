@@ -7,6 +7,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GraphService = void 0;
+const GeminiAIService_1 = require("../services/GeminiAIService");
 /**
  * Advanced knowledge graph service with AI extraction and intelligent management
  */
@@ -25,9 +26,26 @@ class GraphService {
             confidenceThreshold: config.confidenceThreshold || 0.7,
             maxHops: config.maxHops || 3,
             enableEmbeddings: config.enableEmbeddings !== false,
-            deduplicationThreshold: config.deduplicationThreshold || 0.85
+            deduplicationThreshold: config.deduplicationThreshold || 0.85,
+            geminiApiKey: config.geminiApiKey || process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || '',
+            geminiConfig: config.geminiConfig || {},
+            useMockAI: config.useMockAI || false
         };
         this.embeddingService = embeddingService;
+        // Initialize Gemini AI service if API key is provided and not using mock
+        if (this.config.geminiApiKey && !this.config.useMockAI) {
+            try {
+                this.geminiAI = new GeminiAIService_1.GeminiAIService({
+                    apiKey: this.config.geminiApiKey,
+                    model: this.config.extractionModel,
+                    ...this.config.geminiConfig
+                });
+            }
+            catch (error) {
+                console.warn('Failed to initialize Gemini AI service, falling back to mock:', error);
+                this.config.useMockAI = true;
+            }
+        }
     }
     // ==================== GRAPH CREATION & MANAGEMENT ====================
     /**
@@ -70,25 +88,58 @@ class GraphService {
     async extractEntitiesAndRelationships(content, memoryId, options = {}) {
         const startTime = Date.now();
         try {
-            const prompt = this.buildExtractionPrompt(content);
-            // Use embedding service for AI generation if available
-            let response;
-            if (this.embeddingService) {
-                // TODO: Add AI generation method to EmbeddingService
-                response = await this.mockGeminiResponse(content);
+            // Use real Gemini AI if available, otherwise fall back to mock
+            let entities = [];
+            let relationships = [];
+            if (this.geminiAI && !this.config.useMockAI) {
+                // Use real Gemini AI service
+                const aiResult = await this.geminiAI.extractEntitiesAndRelationships({
+                    content,
+                    confidenceThreshold: options.confidenceThreshold || this.config.confidenceThreshold
+                });
+                // Convert AI service format to GraphService format
+                entities = aiResult.entities.map(e => ({
+                    id: e.id,
+                    label: e.label,
+                    type: e.type,
+                    confidence: e.confidence,
+                    properties: e.properties,
+                    sourceMemoryIds: [memoryId],
+                    createdAt: new Date(),
+                    lastUpdated: new Date()
+                }));
+                relationships = aiResult.relationships.map(r => ({
+                    id: this.generateRelationshipId(r),
+                    source: r.source,
+                    target: r.target,
+                    label: r.label,
+                    type: r.type,
+                    confidence: r.confidence,
+                    sourceMemoryIds: [memoryId],
+                    createdAt: new Date(),
+                    lastUpdated: new Date()
+                }));
             }
             else {
-                response = await this.mockGeminiResponse(content);
+                // Fall back to mock implementation
+                console.warn('Using mock AI extraction - configure Gemini API key for real AI processing');
+                const response = await this.mockGeminiResponse(content);
+                const extracted = this.parseExtractionResponse(response, memoryId);
+                entities = extracted.entities;
+                relationships = extracted.relationships;
             }
-            const extracted = this.parseExtractionResponse(response, memoryId);
             const processingTime = Date.now() - startTime;
+            // Filter by confidence threshold
+            const confidenceThreshold = options.confidenceThreshold || this.config.confidenceThreshold;
+            entities = entities.filter(e => (e.confidence || 0) >= confidenceThreshold);
+            relationships = relationships.filter(r => (r.confidence || 0) >= confidenceThreshold);
             // Calculate overall confidence
-            const confidence = this.calculateExtractionConfidence(extracted.entities, extracted.relationships);
+            const confidence = this.calculateExtractionConfidence(entities, relationships);
             // Update statistics
-            this.updateExtractionStats(extracted.entities, extracted.relationships, confidence, processingTime);
+            this.updateExtractionStats(entities, relationships, confidence, processingTime);
             return {
-                entities: extracted.entities,
-                relationships: extracted.relationships,
+                entities,
+                relationships,
                 confidence,
                 processingTimeMs: processingTime,
                 extractedFromMemory: memoryId
@@ -553,6 +604,44 @@ JSON:`;
     }
     delay(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    // ==================== SERVICE MANAGEMENT ====================
+    /**
+     * Test AI service connectivity
+     */
+    async testAIConnection() {
+        if (this.config.useMockAI || !this.geminiAI) {
+            return { connected: false, usingMock: true, service: 'mock' };
+        }
+        try {
+            const connected = await this.geminiAI.testConnection();
+            return { connected, usingMock: false, service: 'gemini' };
+        }
+        catch (error) {
+            console.error('AI connection test failed:', error);
+            return { connected: false, usingMock: false, service: 'gemini' };
+        }
+    }
+    /**
+     * Get service configuration (without sensitive data)
+     */
+    getConfig() {
+        return {
+            extractionModel: this.config.extractionModel,
+            confidenceThreshold: this.config.confidenceThreshold,
+            maxHops: this.config.maxHops,
+            enableEmbeddings: this.config.enableEmbeddings,
+            deduplicationThreshold: this.config.deduplicationThreshold,
+            geminiConfig: this.config.geminiConfig,
+            useMockAI: this.config.useMockAI,
+            aiConfigured: !!this.config.geminiApiKey && !this.config.useMockAI
+        };
+    }
+    /**
+     * Get extraction statistics
+     */
+    getExtractionStats() {
+        return { ...this.extractionStats };
     }
 }
 exports.GraphService = GraphService;
