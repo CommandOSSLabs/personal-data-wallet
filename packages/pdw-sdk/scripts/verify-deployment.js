@@ -3,12 +3,12 @@
  * SEAL Deployment Verification Script
  * 
  * Comprehensive test of SEAL functionality with your deployed contract
- * Package ID: 0x067706fc08339b715dab0383bd853b04d06ef6dff3a642c5e7056222da038bde
+ * Package ID: 0x0c04c42c4320ecb0b0483d9e530c50eb256d9fa7ca1b5571deb0f947831bde1f
  */
 
 require('dotenv').config({ path: '.env.test' });
 
-const DEPLOYED_PACKAGE_ID = '0x067706fc08339b715dab0383bd853b04d06ef6dff3a642c5e7056222da038bde';
+const DEPLOYED_PACKAGE_ID = '0x0c04c42c4320ecb0b0483d9e530c50eb256d9fa7ca1b5571deb0f947831bde1f';
 const MYSTEN_SEAL_TESTNET = 'https://testnet.seal.mysten.app';
 
 async function verifyDeployment() {

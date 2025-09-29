@@ -95,8 +95,8 @@ const client = new SealClient({
 ```typescript
 const { encryptedObject: encryptedBytes, key: backupKey } = await client.encrypt({
   threshold: 2,
-  packageId: fromHEX(packageId),
-  id: fromHEX(id),
+  packageId: fromHex(packageId),
+  id: fromHex(id),
   data,
 });
 // IMPORTANT: Store backupKey securely - it can decrypt the data independently
@@ -122,7 +122,7 @@ const tx = new Transaction();
 tx.moveCall({
     target: `${packageId}::${moduleName}::seal_approve`,
     arguments: [
-        tx.pure.vector("u8", fromHEX(id)),
+        tx.pure.vector("u8", fromHex(id)),
         // Other arguments based on your policy
     ]
 });

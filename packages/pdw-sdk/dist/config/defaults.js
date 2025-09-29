@@ -10,7 +10,7 @@ exports.createProductionConfig = createProductionConfig;
 exports.createTestnetConfig = createTestnetConfig;
 function createDefaultConfig() {
     return {
-        packageId: '0x0', // Will be updated with actual deployed package ID
+        packageId: '0x0c04c42c4320ecb0b0483d9e530c50eb256d9fa7ca1b5571deb0f947831bde1f', // Updated with deployed testnet package ID
         apiUrl: 'http://localhost:3000/api',
         encryptionConfig: {
             enabled: true,

@@ -1,9 +1,5 @@
 module pdw::memory {
-    use sui::object;
-    // use sui::tx_context;
-    use sui::transfer;
     use std::string::{Self, String};
-    use std::vector;
     use sui::vec_map::{Self, VecMap};
 
     // Events

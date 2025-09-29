@@ -1,6 +1,4 @@
 module pdw::seal_access_control {
-    use sui::object;
-    use sui::tx_context;
     use sui::table::{Self, Table};
     use sui::clock::{Self, Clock};
     use sui::event;
@@ -99,43 +97,62 @@ module pdw::seal_access_control {
 
     // ========== Public Functions for Seal Integration ==========
     
-    /// Main function called by Seal SDK for access approval
-    /// This is the critical function that Seal key servers will evaluate
-    public fun seal_approve(
+    /// SEAL-compliant access approval function
+    /// Must be entry function that aborts on access denial (per SEAL requirements)
+    /// Key ID format: [package_id][content_id] for this implementation
+    entry fun seal_approve(
         id: vector<u8>,
-        access_type: vector<u8>,
-        timestamp: u64,
         registry: &AccessRegistry,
+        clock: &Clock,
         ctx: &TxContext
-    ): bool {
+    ) {
         let requester = tx_context::sender(ctx);
-        let content_id = string::utf8(id);
-        let access = string::utf8(access_type);
         
-        // Check if requester is owner
+        // Parse the key ID to extract content identifier
+        // The id comes as raw address bytes from SEAL (fromHex), convert to address string
+        // Address bytes are 32 bytes long, convert to hex string with 0x prefix
+        assert!(id.length() == 32, EInvalidTimestamp); // Address must be 32 bytes
+        
+        let mut hex_string = vector::empty<u8>();
+        vector::push_back(&mut hex_string, 48); // '0'
+        vector::push_back(&mut hex_string, 120); // 'x'
+        
+        let mut i = 0;
+        while (i < 32) {
+            let byte = *vector::borrow(&id, i);
+            let high = byte / 16;
+            let low = byte % 16;
+            // Convert to hex chars: 0-9 = 48-57, a-f = 97-102
+            vector::push_back(&mut hex_string, if (high < 10) { 48 + high } else { 87 + high });
+            vector::push_back(&mut hex_string, if (low < 10) { 48 + low } else { 87 + low });
+            i = i + 1;
+        };
+        
+        let content_id = string::utf8(hex_string);
+        
+        // Check if requester is the content owner (always has full access)
         if (table::contains(&registry.owners, content_id)) {
             let owner = *table::borrow(&registry.owners, content_id);
             if (owner == requester) {
-                return true // Owner always has access
+                return // Owner always has access - function succeeds
             };
             
-            // Check if requester has been granted access
+            // Check if the app has been granted permission by the user (OAuth-style)
             let key = build_permission_key(content_id, requester);
             if (table::contains(&registry.permissions, key)) {
                 let permission = table::borrow(&registry.permissions, key);
                 
-                // Check if permission is still valid
-                if (permission.expires_at > timestamp) {
-                    // Check access level
-                    if (permission.access_level == access || 
-                        permission.access_level == string::utf8(b"write")) {
-                        return true
-                    }
+                // Check if permission is still valid (not expired)
+                let current_time = clock::timestamp_ms(clock);
+                if (permission.expires_at > current_time) {
+                    // Grant access for valid permission
+                    return
                 }
             }
         };
         
-        false
+        // If we reach here, access is denied - abort per SEAL requirements
+        abort ENoAccess
     }
 
     // ========== Content Registration ==========
