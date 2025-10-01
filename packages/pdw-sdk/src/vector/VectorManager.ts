@@ -5,7 +5,7 @@
  * embedding generation and HNSW indexing with smart caching.
  */
 
-import { EmbeddingService, EmbeddingOptions, EmbeddingResult, BatchEmbeddingResult } from '../embedding/EmbeddingService';
+import { EmbeddingService, EmbeddingOptions, EmbeddingResult, BatchEmbeddingResult } from '../services/EmbeddingService';
 import { HnswIndexService } from './HnswIndexService';
 import { StorageService } from '../services/StorageService';
 import {

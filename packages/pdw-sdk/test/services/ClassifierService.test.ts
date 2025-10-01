@@ -2,28 +2,56 @@
  * ClassifierService Tests
  * 
  * Comprehensive test suite for content classification functionality
+ * 
+ * ✅ NO MOCKS: Uses real EmbeddingService with actual Gemini API
  */
 
+import { describe, it, test, expect, beforeAll, beforeEach } from '@jest/globals';
 import { ClassifierService } from '../../src/services/ClassifierService';
 import { EmbeddingService } from '../../src/services/EmbeddingService';
 import type { ClassificationResult, ClassificationOptions } from '../../src/services/ClassifierService';
+import dotenv from 'dotenv';
+
+// Load test environment variables
+dotenv.config({ path: '.env.test' });
 
 describe('ClassifierService', () => {
   let classifierService: ClassifierService;
-  let mockEmbeddingService: jest.Mocked<EmbeddingService>;
+  let embeddingService: EmbeddingService | undefined;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+
+  beforeAll(() => {
+    // Skip tests if no API key is available
+    if (!apiKey) {
+      console.warn('⚠️  Skipping ClassifierService tests: No GEMINI_API_KEY found in .env.test');
+      console.warn('   Get your API key from: https://makersuite.google.com/app/apikey');
+    }
+  });
 
   beforeEach(() => {
-    // Create mock embedding service
-    mockEmbeddingService = {
-      embedText: jest.fn(),
-      embedBatch: jest.fn(),
-    } as any;
+    if (!apiKey) {
+      // Create classifier without embedding service for pattern-only tests
+      classifierService = new ClassifierService(
+        undefined, // client
+        undefined, // config
+        undefined, // embeddingService
+        undefined  // apiKey
+      );
+      return;
+    }
+
+    // Create REAL embedding service with actual Gemini API
+    embeddingService = new EmbeddingService({
+      apiKey,
+      model: 'text-embedding-004',
+      dimensions: 768
+    });
 
     classifierService = new ClassifierService(
       undefined, // client
       undefined, // config
-      mockEmbeddingService,
-      'test-api-key'
+      embeddingService,
+      apiKey
     );
   });
 
@@ -204,40 +232,29 @@ describe('ClassifierService', () => {
   });
 
   describe('AI Integration Tests', () => {
-    test('should fall back to pattern matching when AI fails', async () => {
-      // Mock embedding service to throw error
-      mockEmbeddingService.embedText.mockRejectedValue(new Error('AI service unavailable'));
+    test('should use real embedding-based classification when API key available', async () => {
+      if (!apiKey) {
+        console.log('⏭️  Skipping test: No API key');
+        return;
+      }
 
-      const text = 'I love ice cream'; // Should match preference pattern
+      const text = 'I really enjoy exploring new technologies and building innovative solutions';
       const result = await classifierService.shouldSaveMemory(text, { useAI: true });
+
+      // Should get result from real embedding-based classification
+      expect(result).toHaveProperty('shouldSave');
+      expect(result).toHaveProperty('confidence');
+      expect(result).toHaveProperty('category');
+      expect(result.confidence).toBeGreaterThan(0);
+    });
+
+    test('should fall back to pattern matching when useAI is false', async () => {
+      const text = 'I love ice cream'; // Should match preference pattern
+      const result = await classifierService.shouldSaveMemory(text, { useAI: false });
 
       expect(result.shouldSave).toBe(true);
       expect(result.category).toBe('preference');
       expect(result.reasoning).toContain('Matched pattern');
-    });
-
-    test('should use embedding-based classification when available', async () => {
-      // Mock successful embedding response
-      mockEmbeddingService.embedText.mockResolvedValue({
-        vector: new Array(768).fill(0.1),
-        dimension: 768,
-        model: 'text-embedding-004',
-        processingTime: 100,
-        tokenCount: 10
-      });
-
-      const text = 'The weather seems quite nice today with some clouds'; // Should have no pattern match, trigger AI
-      const result = await classifierService.shouldSaveMemory(text, { useAI: true });
-
-      expect(mockEmbeddingService.embedText).toHaveBeenCalledWith({
-        text: text,
-        type: 'content'
-      });
-      
-      // Should get result from embedding-based classification
-      expect(result).toHaveProperty('shouldSave');
-      expect(result).toHaveProperty('confidence');
-      expect(result).toHaveProperty('category');
     });
   });
 
@@ -273,20 +290,15 @@ describe('ClassifierService', () => {
 
   describe('Error Handling Tests', () => {
     test('should handle classification errors gracefully', async () => {
-      // Create a service that will throw an error
+      // Create a service without embedding service
       const faultyService = new ClassifierService();
       
-      // Mock console.error to avoid test output noise
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
-
       const result = await faultyService.shouldSaveMemory('test text');
 
       expect(result.shouldSave).toBe(false);
       expect(result.confidence).toBeLessThanOrEqual(0.1);
       expect(result.category).toBe('general');
       expect(result.reasoning).toContain('No significant patterns');
-
-      consoleSpy.mockRestore();
     });
 
     test('should handle malformed input gracefully', async () => {

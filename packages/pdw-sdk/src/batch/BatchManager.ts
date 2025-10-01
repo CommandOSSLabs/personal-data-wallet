@@ -8,7 +8,7 @@
 import { EventEmitter } from 'events';
 import { BatchingService, BatchProcessor, BatchItem } from './BatchingService';
 import { MemoryProcessingCache } from './MemoryProcessingCache';
-import { EmbeddingService } from '../embedding/EmbeddingService';
+import { EmbeddingService } from '../services/EmbeddingService';
 import { HnswIndexService } from '../vector/HnswIndexService';
 import { 
   Memory, 

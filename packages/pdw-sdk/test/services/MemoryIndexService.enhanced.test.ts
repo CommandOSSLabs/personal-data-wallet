@@ -9,9 +9,8 @@
  */
 
 import { MemoryIndexService, type MemorySearchQuery } from '../../src/services/MemoryIndexService';
-import { StorageService } from '../../src/services/StorageService';
-import { EmbeddingService } from '../../src/embedding/EmbeddingService';
-import type { MemoryMetadata } from '../../src/types/memory';
+import { StorageService, type MemoryMetadata } from '../../src/services/StorageService';
+import { EmbeddingService } from '../../src/services/EmbeddingService';
 
 // Mock storage service for testing
 const mockStorageService = {

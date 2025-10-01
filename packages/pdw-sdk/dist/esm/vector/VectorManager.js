@@ -4,7 +4,7 @@
  * Provides a unified interface for vector operations combining
  * embedding generation and HNSW indexing with smart caching.
  */
-import { EmbeddingService } from '../embedding/EmbeddingService';
+import { EmbeddingService } from '../services/EmbeddingService';
 import { HnswIndexService } from './HnswIndexService';
 /**
  * Unified vector operations manager

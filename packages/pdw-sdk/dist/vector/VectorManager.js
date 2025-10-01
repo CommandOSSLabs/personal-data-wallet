@@ -7,7 +7,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.VectorManager = void 0;
-const EmbeddingService_1 = require("../embedding/EmbeddingService");
+const EmbeddingService_1 = require("../services/EmbeddingService");
 const HnswIndexService_1 = require("./HnswIndexService");
 /**
  * Unified vector operations manager

@@ -94,7 +94,7 @@ describe('SEAL Testnet Integration', () => {
 
     // Validate package ID format
     expect(testConfig.packageId).toMatch(/^0x[a-fA-F0-9]{64}$/);
-    expect(testConfig.packageId).toBe('0x067706fc08339b715dab0383bd853b04d06ef6dff3a642c5e7056222da038bde');
+    expect(testConfig.packageId).toBe('0x5bab30565143ff73b8945d2141cdf996fd901b9b2c68d6e9303bc265dab169fa');
 
     console.log(`📦 Deployed Package ID: ${testConfig.packageId}`);
     console.log('✅ Move contract validation passed');

@@ -18,6 +18,8 @@ class ContextWalletService {
         this.suiClient = config.suiClient;
         this.packageId = config.packageId;
         this.mainWalletService = config.mainWalletService;
+        this.storageService = config.storageService;
+        this.encryptionService = config.encryptionService;
     }
     /**
      * Create a new context wallet for an app
@@ -145,9 +147,106 @@ class ContextWalletService {
         if (!context) {
             throw new Error(`Context not found: ${contextId}`);
         }
-        // TODO: Implement actual data retrieval from Walrus
-        // For now, return empty array
-        return [];
+        if (!this.storageService) {
+            console.warn('StorageService not configured, returning empty data');
+            return [];
+        }
+        try {
+            // Query Sui blockchain for memory objects with this context
+            const response = await this.suiClient.getOwnedObjects({
+                owner: context.owner,
+                filter: {
+                    StructType: `${this.packageId}::memory::MemoryRecord`
+                },
+                options: {
+                    showContent: true,
+                    showType: true
+                }
+            });
+            const dataItems = [];
+            for (const item of response.data) {
+                if (!item.data?.content || item.data.content.dataType !== 'moveObject') {
+                    continue;
+                }
+                const fields = item.data.content.fields;
+                const blobId = fields.blob_id;
+                if (!blobId || blobId === 'temp_blob_id') {
+                    continue;
+                }
+                try {
+                    // Retrieve blob from Walrus
+                    const blobContent = await this.storageService.getBlob(blobId);
+                    // Check if blob is SEAL-encrypted
+                    let decryptedContent;
+                    // Try to parse as JSON to check for encrypted format
+                    try {
+                        const textDecoder = new TextDecoder();
+                        const blobText = textDecoder.decode(blobContent);
+                        const parsed = JSON.parse(blobText);
+                        // Check if this is a SEAL encrypted object
+                        if (parsed.encrypted === true || parsed.encryptionType === 'seal') {
+                            if (!this.encryptionService) {
+                                console.warn(`Blob ${blobId} is encrypted but EncryptionService not configured`);
+                                continue;
+                            }
+                            // Decrypt with SEAL using context's app ID
+                            // Note: In real implementation, userAddress and sessionKey should be provided
+                            const decrypted = await this.encryptionService.decrypt({
+                                encryptedData: parsed,
+                                userAddress: context.owner, // Use context owner's address
+                                appId: context.appId, // Use context's app identity for permission validation
+                                // sessionKey would need to be provided by caller in real implementation
+                            });
+                            decryptedContent = typeof decrypted === 'string' ? decrypted : JSON.stringify(decrypted);
+                        }
+                        else {
+                            // Not encrypted, use as-is
+                            decryptedContent = blobText;
+                        }
+                    }
+                    catch (parseError) {
+                        // Not JSON or not encrypted, treat as plain text
+                        const textDecoder = new TextDecoder();
+                        decryptedContent = textDecoder.decode(blobContent);
+                    }
+                    // Parse final content
+                    let parsedContent;
+                    try {
+                        parsedContent = JSON.parse(decryptedContent);
+                    }
+                    catch {
+                        parsedContent = { content: decryptedContent };
+                    }
+                    // Filter by category if specified
+                    if (filters?.category && parsedContent.category !== filters.category) {
+                        continue;
+                    }
+                    dataItems.push({
+                        id: item.data.objectId,
+                        content: parsedContent.content || decryptedContent,
+                        category: parsedContent.category || fields.category,
+                        metadata: parsedContent.metadata || {},
+                        createdAt: parseInt(fields.created_at || '0')
+                    });
+                }
+                catch (error) {
+                    console.error(`Failed to retrieve/decrypt blob ${blobId}:`, error);
+                    // Continue with other items
+                }
+            }
+            // Apply pagination
+            const offset = filters?.offset || 0;
+            const limit = filters?.limit;
+            let paginatedItems = dataItems.slice(offset);
+            if (limit) {
+                paginatedItems = paginatedItems.slice(0, limit);
+            }
+            return paginatedItems;
+        }
+        catch (error) {
+            console.error('Error listing context data:', error);
+            throw new Error(`Failed to list data for context ${contextId}: ${error}`);
+        }
     }
     /**
      * Get context wallet for a specific app and user

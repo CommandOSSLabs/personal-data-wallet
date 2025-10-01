@@ -10,6 +10,8 @@
 import { SuiClient } from '@mysten/sui/client';
 import { ContextWallet, CreateContextWalletOptions } from '../types/wallet';
 import { MainWalletService } from './MainWalletService.js';
+import { StorageService } from '../services/StorageService.js';
+import { EncryptionService } from '../encryption/EncryptionService.js';
 /**
  * Configuration for ContextWalletService
  */
@@ -20,6 +22,10 @@ export interface ContextWalletServiceConfig {
     packageId: string;
     /** MainWalletService instance for identity management */
     mainWalletService: MainWalletService;
+    /** StorageService for Walrus blob retrieval */
+    storageService?: StorageService;
+    /** EncryptionService for SEAL decryption */
+    encryptionService?: EncryptionService;
 }
 /**
  * ContextWalletService handles app-scoped data containers
@@ -28,6 +34,8 @@ export declare class ContextWalletService {
     private suiClient;
     private packageId;
     private mainWalletService;
+    private storageService?;
+    private encryptionService?;
     constructor(config: ContextWalletServiceConfig);
     /**
      * Create a new context wallet for an app

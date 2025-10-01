@@ -6,7 +6,7 @@
  *
  * Provides comprehensive error handling, rollback capabilities, and monitoring.
  */
-import { EmbeddingService } from '../embedding/EmbeddingService';
+import { EmbeddingService } from '../services/EmbeddingService';
 import { VectorManager } from '../vector/VectorManager';
 import { BatchManager } from '../batch/BatchManager';
 import { KnowledgeGraphManager } from '../graph/KnowledgeGraphManager';

@@ -12,7 +12,7 @@ import { ConfigurationHelper } from '../src/config/ConfigurationHelper';
 dotenv.config({ path: '.env.test' });
 
 describe('SEAL Connectivity Test', () => {
-  const DEPLOYED_PACKAGE_ID = '0x067706fc08339b715dab0383bd853b04d06ef6dff3a642c5e7056222da038bde';
+  const DEPLOYED_PACKAGE_ID = '0x5bab30565143ff73b8945d2141cdf996fd901b9b2c68d6e9303bc265dab169fa';
   const EXPECTED_SEAL_SERVERS = [
     'https://seal-key-server-testnet-1.mystenlabs.com',
     'https://seal-key-server-testnet-2.mystenlabs.com'

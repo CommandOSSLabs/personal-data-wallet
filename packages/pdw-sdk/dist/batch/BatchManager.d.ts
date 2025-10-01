@@ -5,7 +5,7 @@
  * and Walrus operations through intelligent batching and caching.
  */
 import { EventEmitter } from 'events';
-import { EmbeddingService } from '../embedding/EmbeddingService';
+import { EmbeddingService } from '../services/EmbeddingService';
 import { HnswIndexService } from '../vector/HnswIndexService';
 import { Memory, BatchStats } from '../embedding/types';
 export interface BatchManagerConfig {

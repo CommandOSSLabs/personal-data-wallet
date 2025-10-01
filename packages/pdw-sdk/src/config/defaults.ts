@@ -10,7 +10,7 @@ export function createDefaultConfig(): PDWConfig {
   return {
     // Default deployed package ID (testnet)
   // Updated: October 1, 2025 - Cross-context permission system
-  packageId: '0xb8455076db9e8d6577d94541ec1a81a8dcfdef2b374134e30985eef4d7312f67',
+  packageId: '0x5bab30565143ff73b8945d2141cdf996fd901b9b2c68d6e9303bc265dab169fa',
     apiUrl: 'http://localhost:3000/api',
     encryptionConfig: {
       enabled: true,

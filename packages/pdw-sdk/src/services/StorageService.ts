@@ -27,7 +27,7 @@ import type { SealService } from '../security/SealService';
 import type { BatchService } from './BatchService';
 import { PDWConfig } from '../core';
 import { MemoryIndexService } from './MemoryIndexService';
-import { EmbeddingService, type EmbeddingOptions } from '../embedding/EmbeddingService';
+import { EmbeddingService, type EmbeddingOptions } from './EmbeddingService';
 import { GraphService, type KnowledgeGraph, type Entity, type Relationship, type GraphExtractionResult } from '../graph/GraphService';
 
 // Use Web Crypto API for both browser and Node.js environments

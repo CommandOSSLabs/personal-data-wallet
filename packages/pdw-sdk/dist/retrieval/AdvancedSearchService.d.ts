@@ -10,7 +10,7 @@
  * - Custom scoring algorithms
  */
 import { UnifiedMemoryQuery, UnifiedMemoryResult } from './MemoryRetrievalService';
-import { EmbeddingService } from '../embedding/EmbeddingService';
+import { EmbeddingService } from '../services/EmbeddingService';
 import { KnowledgeGraphManager } from '../graph/KnowledgeGraphManager';
 export interface SearchFilter {
     type: 'category' | 'dateRange' | 'importance' | 'tags' | 'contentType' | 'similarity' | 'custom';

@@ -11,7 +11,7 @@
  * Enhanced from basic wrapper to sophisticated vector search engine
  * matching backend's performance while maintaining browser compatibility.
  */
-import { EmbeddingService } from '../embedding/EmbeddingService';
+import { EmbeddingService } from './EmbeddingService';
 import { StorageService, type MemoryMetadata } from './StorageService';
 export interface MemoryIndexEntry {
     memoryId: string;

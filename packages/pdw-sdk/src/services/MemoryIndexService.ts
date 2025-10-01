@@ -13,7 +13,7 @@
  */
 
 import { HnswIndexService } from '../vector/HnswIndexService';
-import { EmbeddingService } from '../embedding/EmbeddingService';
+import { EmbeddingService } from './EmbeddingService';
 import { StorageService, type MemoryMetadata } from './StorageService';
 import { 
   HNSWSearchResult, 

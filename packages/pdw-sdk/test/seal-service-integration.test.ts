@@ -143,7 +143,7 @@ describe('SEAL Service Integration', () => {
     console.log('📝 Testing transaction creation...');
 
     try {
-      const txBytes = await sealService.createSealApproveTransaction('deadbeef01');
+      const txBytes = await sealService.createSealApproveTransaction('deadbeef01', testConfig.userAddress);
       
       expect(txBytes).toBeInstanceOf(Uint8Array);
       expect(txBytes.length).toBeGreaterThan(0);
@@ -204,7 +204,7 @@ describe('SEAL Service Integration', () => {
     if (encryptedData) {
       try {
         const sessionKey = sealService.getActiveSession(testConfig.userAddress);
-        const txBytes = await sealService.createSealApproveTransaction('deadbeef02');
+        const txBytes = await sealService.createSealApproveTransaction('deadbeef02', testConfig.userAddress);
 
         const decrypted = await sealService.decryptData({
           encryptedObject: encryptedData.encryptedObject,

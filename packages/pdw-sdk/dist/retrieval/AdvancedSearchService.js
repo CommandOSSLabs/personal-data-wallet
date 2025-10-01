@@ -12,7 +12,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AdvancedSearchService = void 0;
-const EmbeddingService_1 = require("../embedding/EmbeddingService");
+const EmbeddingService_1 = require("../services/EmbeddingService");
 const KnowledgeGraphManager_1 = require("../graph/KnowledgeGraphManager");
 /**
  * Advanced Search Service with sophisticated filtering and analysis

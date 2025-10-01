@@ -163,7 +163,7 @@ export class BlockchainManager {
 
       const result = await this.suiService.createMemoryRecord(
         userId,
-        memory.category,
+        memory.category || 'general',
         memory.vectorId || 0,
         memory.blobId || '',
         blockchainMetadata,
@@ -187,7 +187,7 @@ export class BlockchainManager {
           blockchainRecordId: result.objectId || '',
           vectorId: memory.vectorId || 0,
           blobId: memory.blobId || '',
-          category: memory.category,
+          category: memory.category || 'general',
           createdAt: new Date(),
           transactionDigest: result.digest,
           version: 1
@@ -578,13 +578,13 @@ export class BlockchainManager {
       contentType: 'text/plain',
       contentSize: memory.content ? memory.content.length : 0,
       contentHash: this.generateContentHash(memory.content),
-      category: memory.category,
-      topic: memory.metadata?.topic || `Memory about ${memory.category}`,
+      category: memory.category || 'general',
+      topic: memory.metadata?.topic || `Memory about ${memory.category || 'general'}`,
       importance: memory.metadata?.importance || 5,
       embeddingBlobId: memory.blobId || '',
       embeddingDimension: memory.embedding ? memory.embedding.length : 768,
-      createdTimestamp: memory.createdAt.getTime(),
-      updatedTimestamp: memory.processedAt?.getTime() || memory.createdAt.getTime(),
+      createdTimestamp: memory.createdAt?.getTime() || Date.now(),
+      updatedTimestamp: memory.processedAt?.getTime() || memory.createdAt?.getTime() || Date.now(),
       customMetadata: {
         memoryId: memory.id,
         embeddingModel: memory.embeddingModel || 'gemini',

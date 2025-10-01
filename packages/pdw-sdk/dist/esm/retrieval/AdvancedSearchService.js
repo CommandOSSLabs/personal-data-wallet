@@ -9,7 +9,7 @@
  * - Search aggregations and analytics
  * - Custom scoring algorithms
  */
-import { EmbeddingService } from '../embedding/EmbeddingService';
+import { EmbeddingService } from '../services/EmbeddingService';
 import { KnowledgeGraphManager } from '../graph/KnowledgeGraphManager';
 /**
  * Advanced Search Service with sophisticated filtering and analysis

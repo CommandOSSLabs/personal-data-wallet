@@ -10,7 +10,7 @@
  */
 
 import { MemoryIndexService, type MemorySearchQuery, type MemorySearchResult } from './MemoryIndexService';
-import { EmbeddingService } from '../embedding/EmbeddingService';
+import { EmbeddingService } from './EmbeddingService';
 import { StorageService } from './StorageService';
 import { GraphService, type KnowledgeGraph } from '../graph/GraphService';
 

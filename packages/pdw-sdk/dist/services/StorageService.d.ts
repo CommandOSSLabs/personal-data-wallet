@@ -23,7 +23,7 @@ import type { SealService } from '../security/SealService';
 import type { BatchService } from './BatchService';
 import { PDWConfig } from '../core';
 import { MemoryIndexService } from './MemoryIndexService';
-import { EmbeddingService } from '../embedding/EmbeddingService';
+import { EmbeddingService } from './EmbeddingService';
 import { GraphService, type KnowledgeGraph, type GraphExtractionResult } from '../graph/GraphService';
 export interface StorageServiceConfig extends PDWConfig {
     suiClient?: SuiClient;

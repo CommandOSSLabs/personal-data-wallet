@@ -9,7 +9,7 @@
  * components to provide unified query capabilities.
  */
 import { MemoryIndexService, type MemorySearchResult } from './MemoryIndexService';
-import { EmbeddingService } from '../embedding/EmbeddingService';
+import { EmbeddingService } from './EmbeddingService';
 import { StorageService } from './StorageService';
 import { GraphService } from '../graph/GraphService';
 export interface AdvancedMemoryQuery {

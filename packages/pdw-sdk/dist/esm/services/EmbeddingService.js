@@ -28,13 +28,19 @@ export class EmbeddingService {
         this.model = config.model || 'text-embedding-004';
         this.dimensions = config.dimensions || 768;
         this.maxRequestsPerMinute = config.requestsPerMinute || 1500; // Gemini rate limit
-        console.log(`✅ EmbeddingService initialized with model: ${this.model}`);
+        if (process.env.NODE_ENV === 'development') {
+            console.log(`✅ EmbeddingService initialized with model: ${this.model}`);
+        }
     }
     /**
      * Generate embedding for a single text
      */
     async embedText(options) {
         const startTime = Date.now();
+        // Validate input
+        if (!options.text || typeof options.text !== 'string' || options.text.trim().length === 0) {
+            throw new Error('Invalid or empty text provided for embedding');
+        }
         await this.checkRateLimit();
         try {
             const embeddingModel = this.genAI.getGenerativeModel({
@@ -47,7 +53,7 @@ export class EmbeddingService {
                 throw new Error('Empty embedding vector received from Gemini API');
             }
             // Ensure vector has expected dimensions
-            if (vector.length !== this.dimensions) {
+            if (vector.length !== this.dimensions && process.env.NODE_ENV === 'development') {
                 console.warn(`Expected ${this.dimensions} dimensions, got ${vector.length}`);
             }
             return {
@@ -82,7 +88,9 @@ export class EmbeddingService {
                 }
                 catch (error) {
                     failedCount++;
-                    console.warn(`Failed to embed text: ${text.substring(0, 100)}...`);
+                    if (process.env.NODE_ENV === 'development') {
+                        console.warn(`Failed to embed text: ${text.substring(0, 100)}...`);
+                    }
                     // Return zero vector as fallback
                     return new Array(this.dimensions).fill(0);
                 }
@@ -195,7 +203,9 @@ export class EmbeddingService {
         if (this.requestCount >= this.maxRequestsPerMinute) {
             const waitTime = 60000 - (Date.now() - this.lastReset);
             if (waitTime > 0) {
-                console.warn(`Rate limit reached, waiting ${waitTime}ms`);
+                if (process.env.NODE_ENV === 'development') {
+                    console.warn(`Rate limit reached, waiting ${waitTime}ms`);
+                }
                 await this.delay(waitTime);
                 this.resetRateLimit();
             }

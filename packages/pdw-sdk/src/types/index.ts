@@ -11,6 +11,10 @@ export interface PDWConfig {
   packageId?: string;
   /** Backend API URL for hybrid operations */
   apiUrl?: string;
+  /** Access Registry ID for OAuth-style permission management */
+  accessRegistryId?: string;
+  /** Wallet Registry ID for wallet tracking */
+  walletRegistryId?: string;
   /** Default encryption options */
   encryptionConfig?: EncryptionConfig;
   /** Storage configuration */
@@ -471,6 +475,7 @@ export interface SealDecryptionOptions {
   encryptedContent?: Uint8Array;    // New binary format (preferred)
   encryptedData?: string;           // Legacy base64 format (deprecated)
   userAddress: string;
+  appId?: string;                   // Application ID for OAuth-style permission validation
   sessionKey?: any; // SessionKey from @mysten/seal
   signedTxBytes?: Uint8Array;
 }

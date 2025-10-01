@@ -69,7 +69,7 @@ describe('SEAL Deployment Integration Tests', () => {
     });
 
     test('should validate deployed package configuration', () => {
-      expect(testConfig.packageId).toBe('0x067706fc08339b715dab0383bd853b04d06ef6dff3a642c5e7056222da038bde');
+      expect(testConfig.packageId).toBe('0x5bab30565143ff73b8945d2141cdf996fd901b9b2c68d6e9303bc265dab169fa');
       expect(testConfig.network).toBe('testnet');
       expect(testConfig.keyServerUrls.length).toBe(2);
       expect(testConfig.keyServerObjectIds.length).toBe(2);
@@ -167,7 +167,7 @@ describe('SEAL Deployment Integration Tests', () => {
 
     test('should validate deployment environment configuration', () => {
       const expectedConfig = {
-        packageId: '0x067706fc08339b715dab0383bd853b04d06ef6dff3a642c5e7056222da038bde',
+        packageId: '0x5bab30565143ff73b8945d2141cdf996fd901b9b2c68d6e9303bc265dab169fa',
         keyServer1: 'https://seal-key-server-testnet-1.mystenlabs.com',
         keyServer2: 'https://seal-key-server-testnet-2.mystenlabs.com',
         objectId1: '0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75',

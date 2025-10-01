@@ -5,7 +5,7 @@
  * provides intelligent graph queries, and manages graph persistence.
  */
 import { GraphService, KnowledgeGraph, Entity, Relationship, GraphExtractionResult } from './GraphService';
-import { ProcessedMemory } from '../embedding/types';
+import { Memory, ProcessedMemory } from '../embedding/types';
 export interface GraphMemoryMapping {
     memoryId: string;
     entityIds: string[];
@@ -75,11 +75,19 @@ export declare class KnowledgeGraphManager {
     /**
      * Process memory and update knowledge graph
      */
-    processMemoryForGraph(memory: ProcessedMemory, userId: string, options?: {
+    processMemoryForGraph(memory: ProcessedMemory, userIdParam?: string, options?: {
         forceReprocess?: boolean;
         skipCache?: boolean;
         confidenceThreshold?: number;
     }): Promise<GraphUpdateResult>;
+    /**
+     * Process multiple memories for graph updates (alias for compatibility)
+     */
+    processBatchMemoriesForGraph(userId: string, memories: Memory[], options?: {
+        batchSize?: number;
+        delayMs?: number;
+        onProgress?: (completed: number, total: number) => void;
+    }): Promise<GraphUpdateResult[]>;
     /**
      * Process multiple memories for graph updates
      */
@@ -119,6 +127,26 @@ export declare class KnowledgeGraphManager {
      * Clear user's knowledge graph
      */
     clearUserGraph(userId: string): void;
+    /**
+     * Record a memory mapping (public method for tests)
+     */
+    recordMemoryMapping(mapping: GraphMemoryMapping): void;
+    /**
+     * Get memory mappings by memory ID (public method for tests)
+     */
+    getMemoryMappings(memoryId: string): GraphMemoryMapping[];
+    /**
+     * Get statistics for a specific user's graph
+     */
+    getGraphStatistics(userId: string): {
+        totalEntities: number;
+        totalRelationships: number;
+        sourceMemoriesCount: number;
+        entityTypeDistribution: Record<string, number>;
+        relationshipTypeDistribution: Record<string, number>;
+        averageEntityConfidence: number;
+        averageRelationshipConfidence: number;
+    };
     /**
      * Get comprehensive statistics
      */

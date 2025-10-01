@@ -12,6 +12,9 @@ export { VectorService } from './VectorService';
 export { MemoryIndexService } from './MemoryIndexService';
 export { QueryService } from './QueryService';
 export { ClassifierService } from './ClassifierService';
+// Cross-Context Permission Services (OAuth-style app permissions)
+export { CrossContextPermissionService } from './CrossContextPermissionService';
+export { WalletManagementService } from './WalletManagementService';
 // Graph Services (Knowledge Graph and Entity Management)
 export { GraphService, KnowledgeGraphManager } from '../graph';
 // AI Services

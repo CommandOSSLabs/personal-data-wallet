@@ -8,6 +8,7 @@ import { SessionKey } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import { fromHex, toHex } from '@mysten/sui/utils';
 import { SealService } from '../security/SealService';
+import { CrossContextPermissionService } from '../services/CrossContextPermissionService';
 export class EncryptionService {
     constructor(client, config) {
         this.client = client;
@@ -16,6 +17,11 @@ export class EncryptionService {
         this.suiClient = client.client || client;
         this.packageId = config.packageId || '';
         this.sealService = this.initializeSealService();
+        // Initialize permission service for OAuth-style access control
+        this.permissionService = new CrossContextPermissionService({
+            packageId: this.packageId,
+            accessRegistryId: config.accessRegistryId || ''
+        }, this.suiClient);
     }
     /**
      * Initialize SEAL service with proper configuration
@@ -76,9 +82,14 @@ export class EncryptionService {
     /**
      * Decrypt data using SEAL with session keys via SealService
      * Handles both new binary format (Uint8Array) and legacy base64 format
+     * Now includes app_id for OAuth-style permission validation
      */
     async decrypt(options) {
         try {
+            // Validate app_id is provided for OAuth-style access control
+            if (!options.appId) {
+                console.warn('No app_id provided for decryption - OAuth permission check will be skipped');
+            }
             // Get or create session key
             let activeSessionKey = options.sessionKey;
             if (!activeSessionKey) {
@@ -87,7 +98,9 @@ export class EncryptionService {
             // Build access transaction if not provided
             let txBytes = options.signedTxBytes;
             if (!txBytes) {
-                const tx = await this.buildAccessTransaction(options.userAddress, 'read');
+                const tx = options.appId
+                    ? await this.buildAccessTransactionWithAppId(options.userAddress, options.appId, 'read')
+                    : await this.buildAccessTransaction(options.userAddress, 'read');
                 txBytes = await tx.build({ client: this.suiClient });
             }
             // ✅ CRITICAL: Handle both binary and legacy formats
@@ -179,19 +192,38 @@ export class EncryptionService {
     }
     // ==================== ACCESS CONTROL TRANSACTIONS ====================
     /**
-     * Build access approval transaction for SEAL key servers
+     * Build access approval transaction for SEAL key servers (LEGACY)
+     *
+     * @deprecated Use buildAccessTransactionWithAppId instead for OAuth-style permissions
      */
     async buildAccessTransaction(userAddress, accessType = 'read') {
+        console.warn('buildAccessTransaction is deprecated - use buildAccessTransactionWithAppId for OAuth-style permissions');
         const tx = new Transaction();
         tx.moveCall({
             target: `${this.packageId}::seal_access_control::seal_approve`,
             arguments: [
-                tx.pure.vector('u8', Array.from(fromHex(userAddress))),
-                tx.pure.string(accessType),
-                tx.pure.u64(Date.now()),
+                tx.pure.vector('u8', Array.from(fromHex(userAddress.replace('0x', '')))),
+                tx.pure.string(''), // Empty app_id for legacy compatibility
+                tx.object(this.config.accessRegistryId || ''),
+                tx.object('0x6'), // Clock object
             ],
         });
         return tx;
+    }
+    /**
+     * Build access approval transaction with app_id for OAuth-style permissions
+     * Uses CrossContextPermissionService for proper permission validation
+     *
+     * @param userAddress - User's wallet address (used as SEAL identity)
+     * @param appId - Requesting application identifier
+     * @param accessType - Access level (read/write)
+     * @returns Transaction for SEAL key server approval
+     */
+    async buildAccessTransactionWithAppId(userAddress, appId, accessType = 'read') {
+        // Convert user address to bytes for SEAL identity
+        const identityBytes = fromHex(userAddress.replace('0x', ''));
+        // Use CrossContextPermissionService to build seal_approve with app_id
+        return this.permissionService.buildSealApproveTransaction(identityBytes, appId);
     }
     /**
      * Build transaction to grant access to another user

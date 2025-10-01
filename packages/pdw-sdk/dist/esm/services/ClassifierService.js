@@ -117,8 +117,10 @@ export class ClassifierService {
                     }
                 }
                 catch (aiError) {
-                    const errorMessage = aiError instanceof Error ? aiError.message : String(aiError);
-                    console.warn('AI classification failed, falling back to pattern-only result:', errorMessage);
+                    if (process.env.NODE_ENV === 'development') {
+                        const errorMessage = aiError instanceof Error ? aiError.message : String(aiError);
+                        console.warn('AI classification failed, falling back to pattern-only result:', errorMessage);
+                    }
                 }
             }
             // Step 3: Return pattern result even if below threshold
@@ -139,7 +141,9 @@ export class ClassifierService {
             };
         }
         catch (error) {
-            console.error('Error in classification:', error);
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Error in classification:', error);
+            }
             const errorMessage = error instanceof Error ? error.message : String(error);
             return {
                 shouldSave: false,
@@ -227,7 +231,9 @@ export class ClassifierService {
             }
             catch (error) {
                 // Skip invalid patterns
-                console.warn(`Pattern matching error for pattern ${pattern}:`, error);
+                if (process.env.NODE_ENV === 'development') {
+                    console.warn(`Pattern matching error for pattern ${pattern}:`, error);
+                }
             }
         }
         return {

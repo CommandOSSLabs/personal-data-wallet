@@ -3,28 +3,23 @@
  *
  * Provides AI-powered text analysis capabilities using Google's Gemini API
  * for entity extraction, relationship identification, and content analysis.
+ *
+ * Using @google/genai (the actively maintained SDK, not the deprecated @google/generative-ai)
  */
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 /**
  * Google Gemini AI service for advanced text analysis and knowledge extraction
  */
 export class GeminiAIService {
     constructor(config) {
         this.config = {
-            model: config.model || 'gemini-1.5-flash',
+            model: config.model || 'gemini-2.5-flash',
             temperature: config.temperature || 0.1,
             maxTokens: config.maxTokens || 4096,
             timeout: config.timeout || 30000,
             ...config
         };
-        this.genAI = new GoogleGenerativeAI(this.config.apiKey);
-        this.model = this.genAI.getGenerativeModel({
-            model: this.config.model,
-            generationConfig: {
-                temperature: this.config.temperature,
-                maxOutputTokens: this.config.maxTokens,
-            }
-        });
+        this.genAI = new GoogleGenAI({ apiKey: this.config.apiKey });
     }
     /**
      * Extract entities and relationships from text using Gemini AI
@@ -32,10 +27,25 @@ export class GeminiAIService {
     async extractEntitiesAndRelationships(request) {
         const startTime = Date.now();
         try {
+            // Validate input: return empty result for empty/whitespace-only content
+            const trimmedContent = request.content?.trim();
+            if (!trimmedContent || trimmedContent.length === 0) {
+                return {
+                    entities: [],
+                    relationships: [],
+                    processingTimeMs: Date.now() - startTime
+                };
+            }
             const prompt = this.buildExtractionPrompt(request.content, request.context);
-            const result = await this.model.generateContent(prompt);
-            const response = await result.response;
-            const text = response.text();
+            const result = await this.genAI.models.generateContent({
+                model: this.config.model,
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                config: {
+                    temperature: this.config.temperature,
+                    maxOutputTokens: this.config.maxTokens,
+                }
+            });
+            const text = result.text || '';
             const parsed = this.parseExtractionResponse(text);
             const processingTimeMs = Date.now() - startTime;
             return {
@@ -88,9 +98,15 @@ Analyze the following text and provide a JSON response with:
 TEXT: ${content}
 
 JSON:`;
-            const result = await this.model.generateContent(prompt);
-            const response = await result.response;
-            const text = response.text();
+            const result = await this.genAI.models.generateContent({
+                model: this.config.model,
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                config: {
+                    temperature: this.config.temperature,
+                    maxOutputTokens: this.config.maxTokens,
+                }
+            });
+            const text = result.text || '';
             return this.parseAnalysisResponse(text);
         }
         catch (error) {
@@ -180,8 +196,11 @@ JSON:`;
             return { entities, relationships };
         }
         catch (error) {
-            console.error('Failed to parse Gemini response:', error);
-            console.error('Raw response:', response);
+            // Only log detailed errors in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Failed to parse Gemini response:', error);
+                console.error('Raw response:', response);
+            }
             return { entities: [], relationships: [] };
         }
     }
@@ -224,10 +243,11 @@ JSON:`;
      */
     async testConnection() {
         try {
-            const result = await this.model.generateContent('Test connection. Respond with "OK".');
-            const response = await result.response;
-            const text = response.text();
-            return text.includes('OK');
+            const result = await this.genAI.models.generateContent({
+                model: this.config.model,
+                contents: [{ role: 'user', parts: [{ text: 'Test connection. Respond with "OK".' }] }]
+            });
+            return (result.text || '').includes('OK');
         }
         catch {
             return false;

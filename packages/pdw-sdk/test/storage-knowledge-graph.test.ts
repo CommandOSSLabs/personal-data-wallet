@@ -16,7 +16,7 @@ import * as path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '../.env.test') });
 
 import { StorageService } from '../src/services/StorageService';
-import { EmbeddingService } from '../src/embedding/EmbeddingService';
+import { EmbeddingService } from '../src/services/EmbeddingService';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { fromHex } from '@mysten/sui/utils';

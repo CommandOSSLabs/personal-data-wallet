@@ -8,6 +8,10 @@ export interface PDWConfig {
     packageId?: string;
     /** Backend API URL for hybrid operations */
     apiUrl?: string;
+    /** Access Registry ID for OAuth-style permission management */
+    accessRegistryId?: string;
+    /** Wallet Registry ID for wallet tracking */
+    walletRegistryId?: string;
     /** Default encryption options */
     encryptionConfig?: EncryptionConfig;
     /** Storage configuration */
@@ -414,6 +418,7 @@ export interface SealDecryptionOptions {
     encryptedContent?: Uint8Array;
     encryptedData?: string;
     userAddress: string;
+    appId?: string;
     sessionKey?: any;
     signedTxBytes?: Uint8Array;
 }

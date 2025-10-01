@@ -3,6 +3,8 @@
  *
  * Provides AI-powered text analysis capabilities using Google's Gemini API
  * for entity extraction, relationship identification, and content analysis.
+ *
+ * Using @google/genai (the actively maintained SDK, not the deprecated @google/generative-ai)
  */
 export interface GeminiConfig {
     apiKey: string;
@@ -38,7 +40,6 @@ export interface EntityExtractionResponse {
  */
 export declare class GeminiAIService {
     private genAI;
-    private model;
     private readonly config;
     constructor(config: GeminiConfig);
     /**

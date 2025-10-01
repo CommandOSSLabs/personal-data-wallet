@@ -26,6 +26,7 @@ export declare class EncryptionService {
     private suiClient;
     private packageId;
     private sessionKeyCache;
+    private permissionService;
     constructor(client: ClientWithCoreApi, config: PDWConfig);
     /**
      * Initialize SEAL service with proper configuration
@@ -38,6 +39,7 @@ export declare class EncryptionService {
     /**
      * Decrypt data using SEAL with session keys via SealService
      * Handles both new binary format (Uint8Array) and legacy base64 format
+     * Now includes app_id for OAuth-style permission validation
      */
     decrypt(options: SealDecryptionOptions): Promise<Uint8Array>;
     /**
@@ -57,9 +59,21 @@ export declare class EncryptionService {
      */
     importSessionKey(exportedKey: string, userAddress?: string): Promise<SessionKey>;
     /**
-     * Build access approval transaction for SEAL key servers
+     * Build access approval transaction for SEAL key servers (LEGACY)
+     *
+     * @deprecated Use buildAccessTransactionWithAppId instead for OAuth-style permissions
      */
     buildAccessTransaction(userAddress: string, accessType?: 'read' | 'write'): Promise<Transaction>;
+    /**
+     * Build access approval transaction with app_id for OAuth-style permissions
+     * Uses CrossContextPermissionService for proper permission validation
+     *
+     * @param userAddress - User's wallet address (used as SEAL identity)
+     * @param appId - Requesting application identifier
+     * @param accessType - Access level (read/write)
+     * @returns Transaction for SEAL key server approval
+     */
+    buildAccessTransactionWithAppId(userAddress: string, appId: string, accessType?: 'read' | 'write'): Promise<Transaction>;
     /**
      * Build transaction to grant access to another user
      */

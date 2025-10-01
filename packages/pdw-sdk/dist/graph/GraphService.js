@@ -184,12 +184,15 @@ class GraphService {
         try {
             const updatedGraph = { ...graph };
             const now = new Date();
+            // Filter out null/undefined entities
+            const validNewEntities = newEntities.filter(e => e != null && e.id && e.label);
+            const validNewRelationships = newRelationships.filter(r => r != null && r.source && r.target && r.label);
             // Track existing entities for deduplication
             const existingEntities = new Map(graph.entities.map(e => [e.id, e]));
             // Process entities with intelligent merging
             const processedEntities = [...graph.entities];
             const addedEntityIds = new Set();
-            for (const newEntity of newEntities) {
+            for (const newEntity of validNewEntities) {
                 const existing = existingEntities.get(newEntity.id);
                 if (existing) {
                     // Merge with existing entity
@@ -224,7 +227,7 @@ class GraphService {
             const processedRelationships = [...graph.relationships];
             const relationshipKey = (r) => `${r.source}|${r.target}|${r.label}`;
             const existingRelationshipKeys = new Set(graph.relationships.map(relationshipKey));
-            for (const newRel of newRelationships) {
+            for (const newRel of validNewRelationships) {
                 const key = relationshipKey(newRel);
                 if (!existingRelationshipKeys.has(key)) {
                     // Verify entities exist
@@ -273,7 +276,10 @@ class GraphService {
             return updatedGraph;
         }
         catch (error) {
-            console.error('Error adding to graph:', error);
+            // Only log detailed errors in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Error adding to graph:', error);
+            }
             return graph; // Return original graph on error
         }
     }
@@ -345,6 +351,14 @@ class GraphService {
      */
     queryGraph(graph, query) {
         try {
+            // Handle null/undefined graph
+            if (!graph || !graph.entities || !graph.relationships) {
+                return {
+                    entities: [],
+                    relationships: [],
+                    totalResults: 0
+                };
+            }
             let entities = graph.entities;
             let relationships = graph.relationships;
             // Filter by entity types
@@ -375,7 +389,10 @@ class GraphService {
             };
         }
         catch (error) {
-            console.error('Error querying graph:', error);
+            // Only log detailed errors in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Error querying graph:', error);
+            }
             return {
                 entities: [],
                 relationships: [],

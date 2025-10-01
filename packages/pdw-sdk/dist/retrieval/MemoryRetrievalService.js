@@ -17,7 +17,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MemoryRetrievalService = void 0;
-const EmbeddingService_1 = require("../embedding/EmbeddingService");
+const EmbeddingService_1 = require("../services/EmbeddingService");
 const VectorManager_1 = require("../vector/VectorManager");
 const KnowledgeGraphManager_1 = require("../graph/KnowledgeGraphManager");
 const StorageManager_1 = require("../storage/StorageManager");

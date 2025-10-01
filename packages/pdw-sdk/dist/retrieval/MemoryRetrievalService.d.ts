@@ -14,7 +14,7 @@
  * - 🔄 Real-time memory streaming
  * - 📤 Export and backup capabilities
  */
-import { EmbeddingService } from '../embedding/EmbeddingService';
+import { EmbeddingService } from '../services/EmbeddingService';
 import { VectorManager } from '../vector/VectorManager';
 import { KnowledgeGraphManager } from '../graph/KnowledgeGraphManager';
 import { StorageManager } from '../storage/StorageManager';

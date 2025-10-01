@@ -142,10 +142,12 @@ export interface GraphExtractionResult {
 export interface Memory {
   id: string;
   content: string;
-  category: string;
-  createdAt: Date;
+  category?: string;
+  createdAt?: Date;
   userId?: string;
   metadata?: Record<string, any>;
+  tags?: string[];
+  embeddings?: number[];
 }
 
 export interface ProcessedMemory extends Memory {

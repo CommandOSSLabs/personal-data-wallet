@@ -4,7 +4,7 @@
  * Ports sophisticated knowledge graph logic from the backend with AI-powered
  * entity/relationship extraction, graph traversal, and intelligent updates.
  */
-import { EmbeddingService } from '../embedding/EmbeddingService';
+import { EmbeddingService } from '../services/EmbeddingService';
 import { type GeminiConfig } from '../services/GeminiAIService';
 export interface Entity {
     id: string;

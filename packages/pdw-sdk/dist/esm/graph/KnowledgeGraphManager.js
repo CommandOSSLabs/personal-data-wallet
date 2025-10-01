@@ -26,10 +26,23 @@ export class KnowledgeGraphManager {
     /**
      * Process memory and update knowledge graph
      */
-    async processMemoryForGraph(memory, userId, options = {}) {
+    async processMemoryForGraph(memory, userIdParam, options = {}) {
         const startTime = Date.now();
         this.stats.totalUpdates++;
         try {
+            // Extract userId from memory or use provided parameter
+            const userId = userIdParam || memory.userId;
+            if (!userId) {
+                return {
+                    success: false,
+                    entitiesAdded: 0,
+                    relationshipsAdded: 0,
+                    entitiesUpdated: 0,
+                    relationshipsUpdated: 0,
+                    processingTimeMs: Date.now() - startTime,
+                    error: 'No userId provided'
+                };
+            }
             // Check if already processed
             if (!options.forceReprocess && this.isMemoryProcessed(userId, memory.id)) {
                 return {
@@ -43,9 +56,21 @@ export class KnowledgeGraphManager {
             }
             // Extract entities and relationships from memory content
             const extractionResult = await this.graphService.extractEntitiesAndRelationships(memory.content, memory.id, { confidenceThreshold: options.confidenceThreshold });
+            // Check if extraction returned valid result
+            if (!extractionResult) {
+                return {
+                    success: false,
+                    entitiesAdded: 0,
+                    relationshipsAdded: 0,
+                    entitiesUpdated: 0,
+                    relationshipsUpdated: 0,
+                    processingTimeMs: Date.now() - startTime,
+                    error: 'Extraction returned no result'
+                };
+            }
             // Skip if extraction failed or confidence too low
             const minConfidence = options.confidenceThreshold || 0.3;
-            if (extractionResult.confidence < minConfidence) {
+            if ((extractionResult.confidence || 0) < minConfidence) {
                 console.log(`Skipping memory ${memory.id} due to low confidence: ${extractionResult.confidence}`);
                 return {
                     success: false,
@@ -98,7 +123,9 @@ export class KnowledgeGraphManager {
             };
         }
         catch (error) {
-            console.error('Error processing memory for graph:', error);
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Error processing memory for graph:', error);
+            }
             this.stats.failedUpdates++;
             return {
                 success: false,
@@ -110,6 +137,19 @@ export class KnowledgeGraphManager {
                 error: error.message
             };
         }
+    }
+    /**
+     * Process multiple memories for graph updates (alias for compatibility)
+     */
+    async processBatchMemoriesForGraph(userId, memories, options = {}) {
+        // Convert Memory to ProcessedMemory
+        const processedMemories = memories.map(m => ({
+            ...m,
+            userId: m.userId || userId,
+            category: m.category || 'general',
+            createdAt: m.createdAt || m.metadata?.createdAt || new Date()
+        }));
+        return this.processMemoriesForGraphBatch(processedMemories, userId, options);
     }
     /**
      * Process multiple memories for graph updates
@@ -211,7 +251,9 @@ export class KnowledgeGraphManager {
             };
         }
         catch (error) {
-            console.error('Error searching graph:', error);
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Error searching graph:', error);
+            }
             return {
                 entities: [],
                 relationships: [],
@@ -258,7 +300,9 @@ export class KnowledgeGraphManager {
             };
         }
         catch (error) {
-            console.error('Error finding related memories:', error);
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Error finding related memories:', error);
+            }
             return { memories: [], connectedEntities: [], pathways: [] };
         }
     }
@@ -282,7 +326,9 @@ export class KnowledgeGraphManager {
             return null;
         }
         catch (error) {
-            console.error('Error getting user graph:', error);
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Error getting user graph:', error);
+            }
             return null;
         }
     }
@@ -300,6 +346,72 @@ export class KnowledgeGraphManager {
         this.graphCache.delete(userId);
         this.memoryMappings.delete(userId);
         // Note: GraphService doesn't have a clear method, but we clear our caches
+    }
+    /**
+     * Record a memory mapping (public method for tests)
+     */
+    recordMemoryMapping(mapping) {
+        // Extract userId from first part of memoryId or use a default
+        // Assuming memoryId format doesn't include userId, store all in a global list
+        const globalKey = '__all__';
+        const mappings = this.memoryMappings.get(globalKey) || [];
+        mappings.push(mapping);
+        this.memoryMappings.set(globalKey, mappings);
+    }
+    /**
+     * Get memory mappings by memory ID (public method for tests)
+     */
+    getMemoryMappings(memoryId) {
+        // Search all mappings for this memory ID
+        const allMappings = [];
+        for (const mappings of this.memoryMappings.values()) {
+            allMappings.push(...mappings.filter(m => m.memoryId === memoryId));
+        }
+        return allMappings;
+    }
+    /**
+     * Get statistics for a specific user's graph
+     */
+    getGraphStatistics(userId) {
+        const graph = this.graphService.getUserGraph(userId);
+        if (!graph) {
+            return {
+                totalEntities: 0,
+                totalRelationships: 0,
+                sourceMemoriesCount: 0,
+                entityTypeDistribution: {},
+                relationshipTypeDistribution: {},
+                averageEntityConfidence: 0,
+                averageRelationshipConfidence: 0
+            };
+        }
+        // Entity type distribution
+        const entityTypeDistribution = {};
+        graph.entities.forEach(entity => {
+            entityTypeDistribution[entity.type] = (entityTypeDistribution[entity.type] || 0) + 1;
+        });
+        // Relationship type distribution
+        const relationshipTypeDistribution = {};
+        graph.relationships.forEach(rel => {
+            const type = rel.type || rel.label;
+            relationshipTypeDistribution[type] = (relationshipTypeDistribution[type] || 0) + 1;
+        });
+        // Average confidences
+        const avgEntityConfidence = graph.entities.length > 0
+            ? graph.entities.reduce((sum, e) => sum + (e.confidence || 0), 0) / graph.entities.length
+            : 0;
+        const avgRelationshipConfidence = graph.relationships.length > 0
+            ? graph.relationships.reduce((sum, r) => sum + (r.confidence || 0), 0) / graph.relationships.length
+            : 0;
+        return {
+            totalEntities: graph.entities.length,
+            totalRelationships: graph.relationships.length,
+            sourceMemoriesCount: graph.metadata.sourceMemories?.length || 0,
+            entityTypeDistribution,
+            relationshipTypeDistribution,
+            averageEntityConfidence: avgEntityConfidence,
+            averageRelationshipConfidence: avgRelationshipConfidence
+        };
     }
     /**
      * Get comprehensive statistics
