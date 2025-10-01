@@ -5,7 +5,9 @@
  */
 export function createDefaultConfig() {
     return {
-        packageId: '0x0c04c42c4320ecb0b0483d9e530c50eb256d9fa7ca1b5571deb0f947831bde1f', // Updated with deployed testnet package ID
+        // Default deployed package ID (testnet)
+        // Updated: October 1, 2025 - Cross-context permission system
+        packageId: '0xb8455076db9e8d6577d94541ec1a81a8dcfdef2b374134e30985eef4d7312f67',
         apiUrl: 'http://localhost:3000/api',
         encryptionConfig: {
             enabled: true,
