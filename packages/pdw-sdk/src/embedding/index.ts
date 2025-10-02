@@ -5,7 +5,7 @@
  * batch processing, rate limiting, and comprehensive error handling.
  */
 
-export { EmbeddingService } from './EmbeddingService';
+export { EmbeddingService } from '../services/EmbeddingService';
 
 export type {
   VectorEmbedding,
