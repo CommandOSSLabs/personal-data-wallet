@@ -1,11 +1,12 @@
 /**
  * Enhanced MemoryIndexService Tests
  * 
- * Testing the new browser-compatible HNSW functionality including:
- * - Advanced semantic search with O(log N) performance
- * - Vector clustering and diversity filtering
- * - Intelligent relevance scoring with multiple factors
- * - Browser-compatible HNSW implementation
+ * Testing native HNSW functionality via HnswIndexService including:
+ * - Advanced semantic search with O(log N) performance using hnswlib-node
+ * - Intelligent batching and caching for optimal performance
+ * - Walrus persistence integration
+ * - Metadata filtering and intelligent relevance scoring
+ * - Native C++ HNSW implementation (10-100x faster than pure JS)
  */
 
 import { MemoryIndexService, type MemorySearchQuery } from '../../src/services/MemoryIndexService';
@@ -24,7 +25,7 @@ const mockEmbeddingService = {
   embedText: jest.fn()
 } as unknown as EmbeddingService;
 
-describe('Enhanced MemoryIndexService - Browser-Compatible HNSW', () => {
+describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
   let memoryIndexService: MemoryIndexService;
   const testUserAddress = '0xc5e67f46e1b99b580da3a6cc69acf187d0c08dbe568f8f5a78959079c9d82a15';
 

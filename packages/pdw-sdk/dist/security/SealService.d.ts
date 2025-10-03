@@ -5,6 +5,7 @@
  * session management, and performance analytics integration.
  */
 import { SuiClient } from '@mysten/sui/client';
+import { Transaction } from '@mysten/sui/transactions';
 interface SealConfig {
     suiClient: SuiClient;
     packageId: string;
@@ -70,9 +71,23 @@ export declare class SealService {
      */
     decryptData(options: DecryptionOptions): Promise<Uint8Array>;
     /**
-     * Create transaction for seal_approve
+     * Create transaction for seal_approve (legacy - without app_id)
+     * @deprecated Use createSealApproveTransactionWithAppId for OAuth-style permissions
      */
     createSealApproveTransaction(id: string, userAddress: string, accessRegistry?: string): Promise<Uint8Array>;
+    /**
+     * Create transaction for seal_approve with app_id (OAuth-style permissions)
+     *
+     * This method builds a SEAL approval transaction that includes the requesting
+     * application identifier, enabling OAuth-style permission validation where apps
+     * must be explicitly granted access by users.
+     *
+     * @param contentId - Content identifier (identity bytes)
+     * @param appId - Requesting application identifier
+     * @param accessRegistry - Optional custom access registry ID
+     * @returns Transaction object for SEAL approval
+     */
+    buildSealApproveTransactionWithAppId(contentId: Uint8Array, appId: string, accessRegistry?: string): Transaction;
     /**
      * Parse encrypted object structure
      */

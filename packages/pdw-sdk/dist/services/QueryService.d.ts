@@ -96,6 +96,16 @@ export declare class QueryService {
     private graphService?;
     constructor(memoryIndexService?: MemoryIndexService, embeddingService?: EmbeddingService, storageService?: StorageService, graphService?: GraphService);
     /**
+     * Get QueryService statistics including EmbeddingService stats
+     */
+    getStats(): {
+        memoryIndexAvailable: boolean;
+        embeddingServiceAvailable: boolean;
+        storageAvailable: boolean;
+        graphServiceAvailable: boolean;
+        embeddingStats?: ReturnType<EmbeddingService['getStats']>;
+    };
+    /**
      * Initialize services (can be called after construction)
      */
     initialize(memoryIndexService: MemoryIndexService, embeddingService: EmbeddingService, storageService?: StorageService, graphService?: GraphService): void;
@@ -141,6 +151,18 @@ export declare class QueryService {
      * Execute analytical queries for insights
      */
     analyzeMemories(query: AnalyticalQuery): Promise<any>;
+    /**
+     * Calculate similarity between two vectors using EmbeddingService
+     */
+    private calculateSimilarity;
+    /**
+     * Find most similar memories to a query using EmbeddingService
+     */
+    private findSimilarMemories;
+    /**
+     * Batch generate embeddings for multiple texts using EmbeddingService
+     */
+    private batchEmbedTexts;
     private postProcessResults;
     private deduplicateResults;
     private rerankSemanticResults;

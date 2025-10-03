@@ -2,17 +2,22 @@
 /// 
 /// This module provides core wallet identity management including:
 /// - Main wallet creation and management
-/// - App-specific context wallet creation
-/// - Context ID derivation for app isolation
+/// - App-specific context wallet creation via dynamic fields
+/// - Deterministic context ID derivation for app isolation
+/// - Cross-context permissions (read-only, no delete)
 module pdw::wallet {
     use sui::event;
     use std::string::{Self, String};
     use sui::hash;
     use sui::bcs;
+    use sui::dynamic_object_field;
 
     /// Error constants
     const EInvalidAppId: u64 = 1;
     const EWalletAlreadyExists: u64 = 2;
+    const EContextNotFound: u64 = 3;
+    const ENotOwner: u64 = 4;
+    const EContextAlreadyExists: u64 = 5;
 
     /// Main wallet identity for users
     /// Each user should have exactly one MainWallet
@@ -26,10 +31,12 @@ module pdw::wallet {
 
     /// App-specific context wallet
     /// Users can have multiple ContextWallets for different apps
+    /// Stored as dynamic fields on MainWallet for easy lookup
     public struct ContextWallet has key, store {
         id: UID,
         app_id: String,
         owner: address,
+        context_id: vector<u8>,  // Deterministic derived ID
         main_wallet_id: address,
         policy_ref: Option<String>,
         created_at: u64,
@@ -52,9 +59,18 @@ module pdw::wallet {
     public struct ContextWalletCreated has copy, drop {
         wallet_id: address,
         app_id: String,
+        context_id: vector<u8>,
         owner: address,
         main_wallet_id: address,
         created_at: u64,
+    }
+
+    public struct ContextWalletAccessed has copy, drop {
+        context_id: vector<u8>,
+        app_id: String,
+        accessed_by: address,
+        operation: String,  // "read", "write"
+        timestamp: u64,
     }
 
     /// Initialize the wallet registry (called once during package deployment)
@@ -94,57 +110,119 @@ module pdw::wallet {
         wallet
     }
 
-    /// Create a context wallet for a specific app
+    /// Create a context wallet for a specific app (stores as dynamic field)
+    /// This can be called by 3rd party apps to create their context
     /// Links to the user's main wallet for identity verification
-    public fun create_context_wallet(
-        main_wallet: &MainWallet,
+    public entry fun create_context_wallet(
+        main_wallet: &mut MainWallet,
         app_id: String,
         ctx: &mut TxContext
-    ): ContextWallet {
+    ) {
         // Validate app_id is not empty
         assert!(!string::is_empty(&app_id), EInvalidAppId);
         
         let owner = tx_context::sender(ctx);
+        
+        // Verify the caller owns the main wallet
+        assert!(main_wallet.owner == owner, ENotOwner);
+        
+        // Check if context already exists
+        assert!(
+            !dynamic_object_field::exists_(&main_wallet.id, app_id),
+            EContextAlreadyExists
+        );
+        
+        // Derive deterministic context ID
+        let context_id = compute_context_id(main_wallet, app_id);
+        
         let wallet_id = object::new(ctx);
         let wallet_address = object::uid_to_address(&wallet_id);
         
-        // Verify the caller owns the main wallet
-        assert!(main_wallet.owner == owner, EWalletAlreadyExists);
+        // Create context wallet with default permissions (read:own, write:own)
+        let mut permissions = vector::empty<String>();
+        vector::push_back(&mut permissions, string::utf8(b"read:own"));
+        vector::push_back(&mut permissions, string::utf8(b"write:own"));
         
         let context_wallet = ContextWallet {
             id: wallet_id,
-            app_id: app_id,
+            app_id,
+            context_id,
             owner,
             main_wallet_id: object::uid_to_address(&main_wallet.id),
             policy_ref: std::option::none(),
             created_at: tx_context::epoch(ctx),
-            permissions: vector::empty(),
+            permissions,
         };
 
         // Emit event
         event::emit(ContextWalletCreated {
             wallet_id: wallet_address,
             app_id: context_wallet.app_id,
+            context_id: context_wallet.context_id,
             owner,
             main_wallet_id: context_wallet.main_wallet_id,
             created_at: tx_context::epoch(ctx),
         });
 
-        context_wallet
+        // Store as dynamic field using app_id as key
+        dynamic_object_field::add(&mut main_wallet.id, app_id, context_wallet);
+    }
+    
+    /// Get context wallet by app_id (returns reference)
+    public fun get_context_wallet(
+        main_wallet: &MainWallet,
+        app_id: String
+    ): &ContextWallet {
+        assert!(
+            dynamic_object_field::exists_(&main_wallet.id, app_id),
+            EContextNotFound
+        );
+        dynamic_object_field::borrow(&main_wallet.id, app_id)
+    }
+    
+    /// Get mutable context wallet by app_id (for updates)
+    public fun get_context_wallet_mut(
+        main_wallet: &mut MainWallet,
+        app_id: String,
+        ctx: &TxContext
+    ): &mut ContextWallet {
+        // Verify caller owns the main wallet
+        assert!(main_wallet.owner == tx_context::sender(ctx), ENotOwner);
+        
+        assert!(
+            dynamic_object_field::exists_(&main_wallet.id, app_id),
+            EContextNotFound
+        );
+        dynamic_object_field::borrow_mut(&mut main_wallet.id, app_id)
+    }
+    
+    /// Check if context wallet exists for app
+    public fun context_exists(
+        main_wallet: &MainWallet,
+        app_id: String
+    ): bool {
+        dynamic_object_field::exists_(&main_wallet.id, app_id)
     }
 
     /// Derive a deterministic context ID for app isolation
-    /// Uses: hash(owner_address || app_id || context_salt)
+    /// Uses: keccak256(owner_address || app_id || context_salt)
+    /// Returns the hash bytes (not an address, used as identifier)
     public fun derive_context_id(
         main_wallet: &MainWallet,
         app_id: String
-    ): address {
+    ): vector<u8> {
+        compute_context_id(main_wallet, app_id)
+    }
+    
+    /// Internal: Compute context ID hash
+    fun compute_context_id(
+        main_wallet: &MainWallet,
+        app_id: String
+    ): vector<u8> {
         let mut data = bcs::to_bytes(&main_wallet.owner);
         vector::append(&mut data, bcs::to_bytes(&app_id));
         vector::append(&mut data, main_wallet.context_salt);
-        
-        let hash_bytes = hash::keccak256(&data);
-        sui::address::from_bytes(hash_bytes)
+        hash::keccak256(&data)
     }
 
     /// Update policy reference for a context wallet
@@ -190,14 +268,20 @@ module pdw::wallet {
     }
 
     /// Get context wallet details
-    public fun get_context_wallet_info(wallet: &ContextWallet): (address, String, address, address, u64) {
+    public fun get_context_wallet_info(wallet: &ContextWallet): (address, String, vector<u8>, address, address, u64) {
         (
             object::uid_to_address(&wallet.id),
             wallet.app_id,
+            wallet.context_id,
             wallet.owner,
             wallet.main_wallet_id,
             wallet.created_at
         )
+    }
+    
+    /// Get context ID from context wallet
+    public fun get_context_id(wallet: &ContextWallet): vector<u8> {
+        wallet.context_id
     }
 
     /// Check if context wallet has specific permission
@@ -220,6 +304,22 @@ module pdw::wallet {
         wallet.context_salt
     }
 
+    /// Log context access (for audit trail)
+    /// Can be called by apps when they access context data
+    public fun log_context_access(
+        context_wallet: &ContextWallet,
+        operation: String,
+        ctx: &TxContext
+    ) {
+        event::emit(ContextWalletAccessed {
+            context_id: context_wallet.context_id,
+            app_id: context_wallet.app_id,
+            accessed_by: tx_context::sender(ctx),
+            operation,
+            timestamp: tx_context::epoch(ctx),
+        });
+    }
+
     // === Test Functions (only available in test builds) ===
     #[test_only]
     public fun test_create_main_wallet_for_testing(ctx: &mut TxContext): MainWallet {
@@ -228,10 +328,18 @@ module pdw::wallet {
 
     #[test_only]
     public fun test_create_context_wallet_for_testing(
-        main_wallet: &MainWallet,
+        main_wallet: &mut MainWallet,
         app_id: String,
         ctx: &mut TxContext
-    ): ContextWallet {
+    ) {
         create_context_wallet(main_wallet, app_id, ctx)
+    }
+    
+    #[test_only]
+    public fun test_get_context_wallet(
+        main_wallet: &MainWallet,
+        app_id: String
+    ): &ContextWallet {
+        get_context_wallet(main_wallet, app_id)
     }
 }

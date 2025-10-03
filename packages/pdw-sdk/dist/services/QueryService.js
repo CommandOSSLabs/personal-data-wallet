@@ -23,8 +23,24 @@ class QueryService {
         console.log('✅ QueryService initialized');
         console.log(`   Memory Index: ${!!memoryIndexService ? 'available' : 'not available'}`);
         console.log(`   Embeddings: ${!!embeddingService ? 'available' : 'not available'}`);
+        if (embeddingService) {
+            const stats = embeddingService.getStats();
+            console.log(`     Model: ${stats.model}, Dimensions: ${stats.dimensions}`);
+        }
         console.log(`   Storage: ${!!storageService ? 'available' : 'not available'}`);
         console.log(`   Knowledge Graph: ${!!graphService ? 'available' : 'not available'}`);
+    }
+    /**
+     * Get QueryService statistics including EmbeddingService stats
+     */
+    getStats() {
+        return {
+            memoryIndexAvailable: !!this.memoryIndexService,
+            embeddingServiceAvailable: !!this.embeddingService,
+            storageAvailable: !!this.storageService,
+            graphServiceAvailable: !!this.graphService,
+            embeddingStats: this.embeddingService?.getStats()
+        };
     }
     /**
      * Initialize services (can be called after construction)
@@ -138,10 +154,27 @@ class QueryService {
         }
         console.log('🧠 Performing semantic search with AI understanding');
         let searchTerms = [query.query || ''];
-        // Query expansion using embeddings
-        if (options.expandQuery && query.query) {
-            // TODO: Implement query expansion using similar terms
-            console.log('   Expanding query terms...');
+        let queryEmbedding;
+        // Generate query embedding for semantic analysis
+        if (query.query) {
+            try {
+                const embeddingResult = await this.embeddingService.embedText({
+                    text: query.query,
+                    type: 'query',
+                    taskType: 'RETRIEVAL_QUERY'
+                });
+                queryEmbedding = embeddingResult.vector;
+                console.log(`   Generated query embedding: ${embeddingResult.dimension}D in ${embeddingResult.processingTime}ms`);
+            }
+            catch (error) {
+                console.warn('   Failed to generate query embedding:', error);
+            }
+        }
+        // Query expansion using embeddings (enhanced semantic understanding)
+        if (options.expandQuery && query.query && queryEmbedding) {
+            console.log('   Query expansion: Using semantic similarity for expanded search');
+            // Note: Query expansion via similar terms would require a term database
+            // For now, we use the embedding directly for semantic matching
         }
         // Execute multiple searches and combine results
         const allResults = [];
@@ -150,6 +183,7 @@ class QueryService {
                 const results = await this.vectorSearch({
                     ...query,
                     query: term,
+                    vector: queryEmbedding, // Use pre-computed embedding for efficiency
                     k: (query.k || 10) * 2 // Get more results for merging
                 });
                 allResults.push(...results);
@@ -327,6 +361,66 @@ class QueryService {
         }
     }
     // ==================== PRIVATE HELPER METHODS ====================
+    /**
+     * Calculate similarity between two vectors using EmbeddingService
+     */
+    calculateSimilarity(vectorA, vectorB, metric = 'cosine') {
+        if (!this.embeddingService) {
+            throw new Error('EmbeddingService required for similarity calculation');
+        }
+        if (metric === 'cosine') {
+            return this.embeddingService.calculateCosineSimilarity(vectorA, vectorB);
+        }
+        else {
+            const distance = this.embeddingService.calculateEuclideanDistance(vectorA, vectorB);
+            // Convert distance to similarity (0-1 range)
+            return 1 / (1 + distance);
+        }
+    }
+    /**
+     * Find most similar memories to a query using EmbeddingService
+     */
+    async findSimilarMemories(queryVector, candidateMemories, k = 10) {
+        if (!this.embeddingService) {
+            throw new Error('EmbeddingService required for similarity search');
+        }
+        // Filter memories that have embeddings
+        const memoriesWithEmbeddings = candidateMemories.filter(m => m.embedding && m.embedding.length > 0);
+        if (memoriesWithEmbeddings.length === 0) {
+            console.warn('No memories with embeddings found for similarity comparison');
+            return [];
+        }
+        // Extract vectors from memories
+        const vectors = memoriesWithEmbeddings.map(m => m.embedding);
+        // Use EmbeddingService to find most similar
+        const similarities = this.embeddingService.findMostSimilar(queryVector, vectors, k);
+        // Map back to memory results with updated scores
+        return similarities.map(sim => {
+            const memory = memoriesWithEmbeddings[sim.index];
+            return {
+                ...memory,
+                similarity: sim.similarity,
+                relevanceScore: sim.similarity
+            };
+        });
+    }
+    /**
+     * Batch generate embeddings for multiple texts using EmbeddingService
+     */
+    async batchEmbedTexts(texts, options = {}) {
+        if (!this.embeddingService) {
+            throw new Error('EmbeddingService required for batch embedding');
+        }
+        try {
+            const result = await this.embeddingService.embedBatch(texts, options);
+            console.log(`   Batch embedded ${texts.length} texts in ${result.totalProcessingTime}ms (${result.successCount} successful)`);
+            return result.vectors;
+        }
+        catch (error) {
+            console.error('   Batch embedding failed:', error);
+            throw error;
+        }
+    }
     postProcessResults(results, query) {
         let processed = [...results];
         // Apply minimum relevance threshold

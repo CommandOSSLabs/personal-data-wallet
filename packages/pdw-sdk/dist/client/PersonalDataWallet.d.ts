@@ -205,7 +205,7 @@ export declare class PersonalDataWallet {
         ensureMainWallet: (userAddress: string) => Promise<import("..").MainWallet>;
     };
     get context(): {
-        create: (userAddress: string, options: import("..").CreateContextWalletOptions) => Promise<import("..").ContextWallet>;
+        create: (userAddress: string, options: import("..").CreateContextWalletOptions, signer: any) => Promise<import("..").ContextWallet>;
         getContext: (contextId: string) => Promise<import("..").ContextWallet | null>;
         listUserContexts: (userAddress: string) => Promise<import("..").ContextWallet[]>;
         addData: (contextId: string, data: {
@@ -225,7 +225,7 @@ export declare class PersonalDataWallet {
             metadata?: Record<string, any>;
             createdAt: number;
         }>>;
-        ensureContext: (userAddress: string, appId: string) => Promise<import("..").ContextWallet>;
+        ensureContext: (userAddress: string, appId: string, signer: any) => Promise<import("..").ContextWallet>;
     };
     get access(): {
         requestConsent: (options: import("..").RequestConsentOptions) => Promise<import("..").ConsentRequest>;

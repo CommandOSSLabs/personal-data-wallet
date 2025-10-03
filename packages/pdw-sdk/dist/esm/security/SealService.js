@@ -202,7 +202,8 @@ export class SealService {
         }
     }
     /**
-     * Create transaction for seal_approve
+     * Create transaction for seal_approve (legacy - without app_id)
+     * @deprecated Use createSealApproveTransactionWithAppId for OAuth-style permissions
      */
     async createSealApproveTransaction(id, userAddress, accessRegistry) {
         const metric = this.startMetric('transaction_creation');
@@ -238,6 +239,49 @@ export class SealService {
             this.completeMetric(metric, false, undefined, error);
             const errorMessage = error instanceof Error ? error.message : String(error);
             throw new Error(`Failed to create transaction: ${errorMessage}`);
+        }
+    }
+    /**
+     * Create transaction for seal_approve with app_id (OAuth-style permissions)
+     *
+     * This method builds a SEAL approval transaction that includes the requesting
+     * application identifier, enabling OAuth-style permission validation where apps
+     * must be explicitly granted access by users.
+     *
+     * @param contentId - Content identifier (identity bytes)
+     * @param appId - Requesting application identifier
+     * @param accessRegistry - Optional custom access registry ID
+     * @returns Transaction object for SEAL approval
+     */
+    buildSealApproveTransactionWithAppId(contentId, appId, accessRegistry) {
+        const metric = this.startMetric('transaction_creation_with_app_id');
+        try {
+            const tx = new Transaction();
+            // Use the deployed AccessRegistry ID from environment or parameter
+            const registryId = accessRegistry || process.env.ACCESS_REGISTRY_ID || "0x8088cc36468b53f210696f1c6b1a4de1b1666dd36a7c36f92c394ff1d342f6dd";
+            // OAuth-style seal_approve with app_id parameter
+            // entry fun seal_approve(id: vector<u8>, app_id: String, registry: &AccessRegistry, clock: &Clock, ctx: &TxContext)
+            tx.moveCall({
+                target: `${this.config.packageId}::seal_access_control::seal_approve`,
+                arguments: [
+                    tx.pure.vector('u8', Array.from(contentId)), // Content identifier
+                    tx.pure.string(appId), // Requesting app identifier (OAuth-style)
+                    tx.object(registryId), // AccessRegistry reference
+                    tx.object('0x6') // Clock object (system clock)
+                ]
+            });
+            this.completeMetric(metric, true, {
+                appId,
+                contentIdLength: contentId.length,
+                registryId,
+                clockId: '0x6'
+            });
+            return tx;
+        }
+        catch (error) {
+            this.completeMetric(metric, false, undefined, error);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to create transaction with app_id: ${errorMessage}`);
         }
     }
     /**

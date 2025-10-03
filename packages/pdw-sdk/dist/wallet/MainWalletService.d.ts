@@ -8,7 +8,7 @@
  * - On-chain wallet registry integration
  */
 import { SuiClient } from '@mysten/sui/client';
-import { MainWallet, CreateMainWalletOptions, DeriveContextIdOptions, RotateKeysOptions, RotateKeysResult } from '../types/wallet';
+import { MainWallet, CreateMainWalletOptions, DeriveContextIdOptions, RotateKeysOptions, RotateKeysResult, DerivedContext } from '../types/wallet';
 /**
  * Configuration for MainWalletService
  */
@@ -40,9 +40,23 @@ export declare class MainWalletService {
     /**
      * Derive a deterministic context ID for app isolation
      * @param options - Derivation options
-     * @returns Deterministic context ID
+     * @returns Deterministic context ID (hash only, for backward compatibility)
      */
     deriveContextId(options: DeriveContextIdOptions): Promise<string>;
+    /**
+     * Get full context information (deterministic ID + object address if exists)
+     * @param userAddress - User's Sui address
+     * @param appId - Application identifier
+     * @returns DerivedContext with contextId and optional objectAddress
+     */
+    getContextInfo(userAddress: string, appId: string): Promise<DerivedContext>;
+    /**
+     * Check if a context wallet exists on-chain
+     * @param userAddress - User's Sui address
+     * @param appId - Application identifier
+     * @returns True if context wallet exists as dynamic field
+     */
+    contextExists(userAddress: string, appId: string): Promise<boolean>;
     /**
      * Rotate SEAL session and backup keys for a user
      * @param options - Rotation options

@@ -55,14 +55,22 @@ export class ContextWalletService {
   }
 
   /**
-   * Create a new context wallet for an app
+   * Create a new context wallet for an app (stored as dynamic field on MainWallet)
    * @param userAddress - User's Sui address
    * @param options - Context creation options
+   * @param signer - Transaction signer
    * @returns Created ContextWallet metadata
    */
-  async create(userAddress: string, options: CreateContextWalletOptions): Promise<ContextWallet> {
+  async create(
+    userAddress: string, 
+    options: CreateContextWalletOptions,
+    signer: any
+  ): Promise<ContextWallet> {
     // Ensure main wallet exists
-    await this.mainWalletService.ensureMainWallet(userAddress);
+    const mainWallet = await this.mainWalletService.getMainWallet(userAddress);
+    if (!mainWallet) {
+      throw new Error('Main wallet not found - create one first');
+    }
 
     // Derive context ID
     const contextId = await this.mainWalletService.deriveContextId({
@@ -70,28 +78,123 @@ export class ContextWalletService {
       appId: options.appId
     });
 
-    // TODO: Create actual on-chain context wallet once wallet.move is deployed
-    // For now, return simulated context wallet
+    // Build transaction to create context wallet as dynamic field
+    const tx = new Transaction();
+    
+    tx.moveCall({
+      target: `${this.packageId}::wallet::create_context_wallet`,
+      arguments: [
+        tx.object(mainWallet.walletId), // mutable main wallet
+        tx.pure.string(options.appId),
+      ],
+    });
+
+    // Execute transaction
+    const result = await this.suiClient.signAndExecuteTransaction({
+      transaction: tx,
+      signer,
+      options: {
+        showEffects: true,
+        showEvents: true,
+        showObjectChanges: true,
+      },
+    });
+
+    if (result.effects?.status?.status !== 'success') {
+      throw new Error(`Failed to create context wallet: ${result.effects?.status?.error}`);
+    }
+
+    // Extract created object ID from events
+    const createdEvent = result.events?.find(
+      (event: any) => event.type.includes('::wallet::ContextWalletCreated')
+    );
+
+    const eventData = createdEvent?.parsedJson as any;
+    const objectId = eventData?.wallet_id || '';
+
     const contextWallet: ContextWallet = {
-      id: contextId,
+      id: objectId,
       appId: options.appId,
+      contextId,
       owner: userAddress,
+      mainWalletId: mainWallet.walletId,
       policyRef: options.policyRef,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      permissions: ['read:own', 'write:own'], // Default permissions
     };
 
     return contextWallet;
   }
 
   /**
-   * Get context wallet by ID
+   * Get context wallet by app ID (fetches from dynamic field)
+   * @param userAddress - User's Sui address
+   * @param appId - Application identifier
+   * @returns ContextWallet metadata or null if not found
+   */
+  async getContextForApp(
+    userAddress: string,
+    appId: string
+  ): Promise<ContextWallet | null> {
+    try {
+      // Get main wallet
+      const mainWallet = await this.mainWalletService.getMainWallet(userAddress);
+      if (!mainWallet) {
+        return null;
+      }
+
+      // Fetch context wallet as dynamic field
+      const response = await this.suiClient.getDynamicFieldObject({
+        parentId: mainWallet.walletId,
+        name: {
+          type: '0x1::string::String',
+          value: appId
+        }
+      });
+
+      if (!response.data || !response.data.content) {
+        return null;
+      }
+
+      const content = response.data.content as any;
+      if (content.dataType !== 'moveObject') {
+        return null;
+      }
+
+      const fields = content.fields.value?.fields || content.fields;
+
+      // Derive context ID for consistency
+      const contextId = await this.mainWalletService.deriveContextId({
+        userAddress,
+        appId
+      });
+
+      return {
+        id: response.data.objectId,
+        appId: fields.app_id || appId,
+        contextId: contextId,
+        owner: userAddress,
+        mainWalletId: mainWallet.walletId,
+        policyRef: fields.policy_ref || undefined,
+        createdAt: parseInt(fields.created_at || '0'),
+        permissions: fields.permissions || ['read:own', 'write:own'],
+      };
+    } catch (error) {
+      console.error('Error fetching context wallet:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get context wallet by ID (deprecated - use getContextForApp)
    * @param contextId - Context wallet ID
    * @returns ContextWallet metadata or null if not found
    */
   async getContext(contextId: string): Promise<ContextWallet | null> {
     try {
-      // TODO: Implement actual blockchain query once wallet.move is deployed
-      // For now, return null as we don't have the Move contract deployed yet
+      // This is deprecated since we now store as dynamic fields
+      // Would need to know the app_id to fetch properly
+      console.warn('getContext(contextId) is deprecated, use getContextForApp(userAddress, appId) instead');
       return null;
     } catch (error) {
       console.error('Error fetching context wallet:', error);
@@ -100,41 +203,36 @@ export class ContextWalletService {
   }
 
   /**
-   * List all context wallets for a user
+   * List all context wallets for a user (from dynamic fields on MainWallet)
    * @param userAddress - User's Sui address
    * @returns Array of ContextWallet metadata
    */
   async listUserContexts(userAddress: string): Promise<ContextWallet[]> {
     try {
-      // Query for user's context wallets
-      const response = await this.suiClient.getOwnedObjects({
-        owner: userAddress,
-        filter: {
-          StructType: `${this.packageId}::wallet::ContextWallet`
-        },
-        options: {
-          showContent: true,
-          showType: true
-        }
+      // Get main wallet first
+      const mainWallet = await this.mainWalletService.getMainWallet(userAddress);
+      if (!mainWallet) {
+        return [];
+      }
+
+      // Query dynamic fields on main wallet
+      const response = await this.suiClient.getDynamicFields({
+        parentId: mainWallet.walletId,
       });
 
-      // Parse context wallets from response
       const contexts: ContextWallet[] = [];
       
-      for (const item of response.data) {
-        if (!item.data?.content || item.data.content.dataType !== 'moveObject') {
+      for (const field of response.data) {
+        if (field.name.type !== '0x1::string::String') {
           continue;
         }
 
-        const fields = item.data.content.fields as any;
+        const appId = field.name.value as string;
+        const contextWallet = await this.getContextForApp(userAddress, appId);
         
-        contexts.push({
-          id: item.data.objectId,
-          appId: fields.app_id || '',
-          owner: userAddress,
-          policyRef: fields.policy_ref,
-          createdAt: parseInt(fields.created_at || '0')
-        });
+        if (contextWallet) {
+          contexts.push(contextWallet);
+        }
       }
 
       return contexts;
@@ -332,35 +430,24 @@ export class ContextWalletService {
   }
 
   /**
-   * Get context wallet for a specific app and user
-   * @param userAddress - User's Sui address
-   * @param appId - Application ID
-   * @returns ContextWallet metadata or null if not found
-   */
-  async getContextForApp(userAddress: string, appId: string): Promise<ContextWallet | null> {
-    // Derive the expected context ID
-    const contextId = await this.mainWalletService.deriveContextId({
-      userAddress,
-      appId
-    });
-
-    return await this.getContext(contextId);
-  }
-
-  /**
    * Ensure context wallet exists for an app, create if not found
    * @param userAddress - User's Sui address
    * @param appId - Application ID
+   * @param signer - Transaction signer for creation
    * @returns Existing or newly created ContextWallet
    */
-  async ensureContext(userAddress: string, appId: string): Promise<ContextWallet> {
+  async ensureContext(
+    userAddress: string,
+    appId: string,
+    signer: any
+  ): Promise<ContextWallet> {
     const existing = await this.getContextForApp(userAddress, appId);
     if (existing) {
       return existing;
     }
 
     // Create new context wallet
-    return await this.create(userAddress, { appId });
+    return await this.create(userAddress, { appId }, signer);
   }
 
   /**

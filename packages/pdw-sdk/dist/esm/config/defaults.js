@@ -5,9 +5,8 @@
  */
 export function createDefaultConfig() {
     return {
-        // Default deployed package ID (testnet)
-        // Updated: October 1, 2025 - Cross-context permission system
-        packageId: '0x5bab30565143ff73b8945d2141cdf996fd901b9b2c68d6e9303bc265dab169fa',
+        // Updated October 3, 2025 - Dynamic Fields Implementation
+        packageId: '0x6dc2fe501926b17f441e46c3ac121ad0924da3aa7c5bc78781ddd7df1080694a',
         apiUrl: 'http://localhost:3000/api',
         encryptionConfig: {
             enabled: true,

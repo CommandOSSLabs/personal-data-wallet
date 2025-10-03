@@ -15,11 +15,7 @@
 import { HnswIndexService } from '../vector/HnswIndexService';
 import { EmbeddingService } from './EmbeddingService';
 import { StorageService, type MemoryMetadata } from './StorageService';
-import { 
-  HNSWSearchResult, 
-  HNSWSearchOptions,
-  VectorSearchResult
-} from '../embedding/types';
+import type { HNSWSearchOptions } from '../embedding/types';
 
 export interface MemoryIndexEntry {
   memoryId: string;
@@ -74,6 +70,7 @@ export interface MemorySearchResult {
   relevanceScore: number;
   content?: string | Uint8Array;
   extractedAt?: Date;
+  embedding?: number[]; // Optional embedding vector for advanced similarity operations
   clusterInfo?: {
     clusterId: number;
     clusterCenter: number[];
@@ -81,360 +78,9 @@ export interface MemorySearchResult {
   };
 }
 
-// ==================== BROWSER-COMPATIBLE HNSW IMPLEMENTATION ====================
-
-interface HNSWNode {
-  id: number;
-  vector: number[];
-  level: number;
-  connections: Map<number, Set<number>>; // level -> connected node IDs
-  metadata?: any;
-}
-
-interface HNSWLayer {
-  nodes: Map<number, HNSWNode>;
-  maxConnections: number;
-}
-
-interface BrowserHNSWIndex {
-  dimension: number;
-  maxElements: number;
-  efConstruction: number;
-  efSearch: number;
-  m: number; // max connections at level 0
-  mL: number; // level generation factor
-  layers: HNSWLayer[];
-  entryPoint?: number;
-  size: number;
-  spaceType: 'cosine' | 'euclidean' | 'manhattan';
-}
-
-interface ClusterInfo {
-  id: number;
-  center: number[];
-  members: Set<number>;
-  cohesion: number; // intra-cluster similarity
-  size: number;
-}
-
-interface VectorClusterResult {
-  clusters: ClusterInfo[];
-  assignments: Map<number, number>; // vectorId -> clusterId
-  silhouetteScore: number; // clustering quality metric
-  inertia: number; // within-cluster sum of squares
-}
-
-/**
- * Browser-compatible HNSW implementation for client-side vector search
- * Provides O(log N) approximate nearest neighbor search without Node.js dependencies
- */
-class BrowserHNSW {
-  private index: BrowserHNSWIndex;
-  private rng: () => number;
-
-  constructor(
-    dimension: number,
-    maxElements: number = 10000,
-    m: number = 16,
-    efConstruction: number = 200,
-    spaceType: 'cosine' | 'euclidean' | 'manhattan' = 'cosine',
-    seed: number = 42
-  ) {
-    // Simple seedable PRNG for reproducible results
-    let s = seed;
-    this.rng = () => {
-      s = Math.imul(16807, s) | 0 % 2147483647;
-      return (s & 2147483647) / 2147483648;
-    };
-
-    this.index = {
-      dimension,
-      maxElements,
-      efConstruction,
-      efSearch: efConstruction,
-      m,
-      mL: 1 / Math.log(2),
-      layers: [],
-      size: 0,
-      spaceType
-    };
-  }
-
-  /**
-   * Add a vector to the HNSW index
-   */
-  addPoint(vector: number[], id: number, metadata?: any): void {
-    if (vector.length !== this.index.dimension) {
-      throw new Error(`Vector dimension mismatch: expected ${this.index.dimension}, got ${vector.length}`);
-    }
-
-    // Generate random level for new node
-    const level = this.getRandomLevel();
-    
-    // Create node
-    const node: HNSWNode = {
-      id,
-      vector: [...vector],
-      level,
-      connections: new Map(),
-      metadata
-    };
-
-    // Initialize connections for each level
-    for (let lc = 0; lc <= level; lc++) {
-      node.connections.set(lc, new Set());
-    }
-
-    // Ensure we have enough layers
-    while (this.index.layers.length <= level) {
-      this.index.layers.push({
-        nodes: new Map(),
-        maxConnections: level === 0 ? this.index.m * 2 : this.index.m
-      });
-    }
-
-    // Add node to appropriate layers
-    for (let lc = 0; lc <= level; lc++) {
-      this.index.layers[lc].nodes.set(id, node);
-    }
-
-    // If this is the first node or higher level than entry point, update entry point
-    if (!this.index.entryPoint || level > this.getNodeLevel(this.index.entryPoint)) {
-      this.index.entryPoint = id;
-    }
-
-    // Connect to existing nodes
-    this.connectNode(node);
-    this.index.size++;
-  }
-
-  /**
-   * Search for k nearest neighbors
-   */
-  searchKnn(queryVector: number[], k: number): { neighbors: number[]; distances: number[] } {
-    if (queryVector.length !== this.index.dimension) {
-      throw new Error(`Query vector dimension mismatch: expected ${this.index.dimension}, got ${queryVector.length}`);
-    }
-
-    if (this.index.size === 0 || !this.index.entryPoint) {
-      return { neighbors: [], distances: [] };
-    }
-
-    let ep = this.index.entryPoint;
-    let epDist = this.distance(queryVector, this.getNodeVector(ep));
-
-    // Search from top layer down to layer 1
-    for (let lc = this.index.layers.length - 1; lc >= 1; lc--) {
-      const result = this.searchLayer(queryVector, ep, 1, lc);
-      if (result.length > 0) {
-        ep = result[0].id;
-        epDist = result[0].distance;
-      }
-    }
-
-    // Search layer 0 with efSearch
-    const candidates = this.searchLayer(queryVector, ep, Math.max(this.index.efSearch, k), 0);
-    
-    // Return top k results
-    const topK = candidates.slice(0, k);
-    return {
-      neighbors: topK.map(c => c.id),
-      distances: topK.map(c => c.distance)
-    };
-  }
-
-  /**
-   * Set efSearch parameter for search quality vs speed tradeoff
-   */
-  setEf(efSearch: number): void {
-    this.index.efSearch = efSearch;
-  }
-
-  /**
-   * Get current number of indexed vectors
-   */
-  getCurrentCount(): number {
-    return this.index.size;
-  }
-
-  // ==================== PRIVATE HELPER METHODS ====================
-
-  private getRandomLevel(): number {
-    let level = 0;
-    while (this.rng() < 0.5 && level < 16) {
-      level++;
-    }
-    return level;
-  }
-
-  private getNodeLevel(nodeId: number): number {
-    for (let lc = this.index.layers.length - 1; lc >= 0; lc--) {
-      if (this.index.layers[lc].nodes.has(nodeId)) {
-        return lc;
-      }
-    }
-    return 0;
-  }
-
-  private getNodeVector(nodeId: number): number[] {
-    for (const layer of this.index.layers) {
-      const node = layer.nodes.get(nodeId);
-      if (node) return node.vector;
-    }
-    throw new Error(`Node ${nodeId} not found`);
-  }
-
-  private distance(a: number[], b: number[]): number {
-    switch (this.index.spaceType) {
-      case 'cosine':
-        return 1 - this.cosineSimilarity(a, b);
-      case 'euclidean':
-        return this.euclideanDistance(a, b);
-      case 'manhattan':
-        return this.manhattanDistance(a, b);
-      default:
-        throw new Error(`Unknown space type: ${this.index.spaceType}`);
-    }
-  }
-
-  private cosineSimilarity(a: number[], b: number[]): number {
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-    
-    for (let i = 0; i < a.length; i++) {
-      dotProduct += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
-    }
-    
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-  }
-
-  private euclideanDistance(a: number[], b: number[]): number {
-    let sum = 0;
-    for (let i = 0; i < a.length; i++) {
-      const diff = a[i] - b[i];
-      sum += diff * diff;
-    }
-    return Math.sqrt(sum);
-  }
-
-  private manhattanDistance(a: number[], b: number[]): number {
-    let sum = 0;
-    for (let i = 0; i < a.length; i++) {
-      sum += Math.abs(a[i] - b[i]);
-    }
-    return sum;
-  }
-
-  private connectNode(node: HNSWNode): void {
-    for (let lc = 0; lc <= node.level; lc++) {
-      const layer = this.index.layers[lc];
-      const maxConnections = lc === 0 ? this.index.m * 2 : this.index.m;
-      
-      // Find candidates for connection
-      const candidates = this.searchLayer(node.vector, this.index.entryPoint!, this.index.efConstruction, lc);
-      
-      // Connect to best candidates
-      const connectionsNeeded = Math.min(maxConnections, candidates.length);
-      for (let i = 0; i < connectionsNeeded; i++) {
-        const candidateId = candidates[i].id;
-        if (candidateId !== node.id) {
-          // Add bidirectional connection
-          node.connections.get(lc)!.add(candidateId);
-          const candidateNode = layer.nodes.get(candidateId);
-          if (candidateNode) {
-            candidateNode.connections.get(lc)!.add(node.id);
-            
-            // Prune connections if needed
-            this.pruneConnections(candidateNode, lc);
-          }
-        }
-      }
-    }
-  }
-
-  private searchLayer(
-    queryVector: number[], 
-    entryPoint: number, 
-    numClosest: number, 
-    layer: number
-  ): Array<{ id: number; distance: number }> {
-    const visited = new Set<number>();
-    const candidates: Array<{ id: number; distance: number }> = [];
-    const w: Array<{ id: number; distance: number }> = [];
-
-    const entryDist = this.distance(queryVector, this.getNodeVector(entryPoint));
-    candidates.push({ id: entryPoint, distance: entryDist });
-    w.push({ id: entryPoint, distance: entryDist });
-    visited.add(entryPoint);
-
-    while (candidates.length > 0) {
-      // Get closest unvisited candidate
-      candidates.sort((a, b) => a.distance - b.distance);
-      const current = candidates.shift()!;
-
-      // If current is farther than farthest in result set, stop
-      if (w.length >= numClosest) {
-        w.sort((a, b) => b.distance - a.distance);
-        if (current.distance > w[0].distance) {
-          break;
-        }
-      }
-
-      // Explore neighbors
-      const currentNode = this.index.layers[layer].nodes.get(current.id);
-      if (currentNode) {
-        const connections = currentNode.connections.get(layer) || new Set();
-        for (const neighborId of connections) {
-          if (!visited.has(neighborId)) {
-            visited.add(neighborId);
-            const neighborDist = this.distance(queryVector, this.getNodeVector(neighborId));
-            
-            if (w.length < numClosest) {
-              candidates.push({ id: neighborId, distance: neighborDist });
-              w.push({ id: neighborId, distance: neighborDist });
-            } else {
-              w.sort((a, b) => b.distance - a.distance);
-              if (neighborDist < w[0].distance) {
-                candidates.push({ id: neighborId, distance: neighborDist });
-                w[0] = { id: neighborId, distance: neighborDist };
-              }
-            }
-          }
-        }
-      }
-    }
-
-    w.sort((a, b) => a.distance - b.distance);
-    return w.slice(0, numClosest);
-  }
-
-  private pruneConnections(node: HNSWNode, layer: number): void {
-    const connections = node.connections.get(layer);
-    if (!connections) return;
-
-    const maxConnections = layer === 0 ? this.index.m * 2 : this.index.m;
-    if (connections.size <= maxConnections) return;
-
-    // Sort connections by distance and keep closest ones
-    const connectionArray = Array.from(connections).map(id => ({
-      id,
-      distance: this.distance(node.vector, this.getNodeVector(id))
-    }));
-
-    connectionArray.sort((a, b) => a.distance - b.distance);
-    const keepConnections = connectionArray.slice(0, maxConnections);
-
-    connections.clear();
-    keepConnections.forEach(conn => connections.add(conn.id));
-  }
-}
-
 /**
  * Memory-focused indexing service providing high-level memory operations
- * Enhanced with browser-compatible HNSW for O(log N) search performance
+ * Uses native HNSW implementation via HnswIndexService for optimal performance
  */
 export class MemoryIndexService {
   private hnswService: HnswIndexService;
@@ -443,9 +89,7 @@ export class MemoryIndexService {
   private memoryIndex = new Map<string, Map<string, MemoryIndexEntry>>(); // userAddress -> memoryId -> entry
   private nextMemoryId = 1;
   
-  // Enhanced browser-compatible HNSW indexing
-  private browserIndexes = new Map<string, BrowserHNSW>(); // userAddress -> BrowserHNSW
-  private vectorClusters = new Map<string, VectorClusterResult>(); // userAddress -> clustering results
+  // Performance tracking
   private indexStats = new Map<string, {
     totalVectors: number;
     avgSimilarity: number;
@@ -474,11 +118,11 @@ export class MemoryIndexService {
       }
     );
     
-    console.log('✅ Enhanced MemoryIndexService initialized with browser-compatible HNSW');
+    console.log('✅ MemoryIndexService initialized with native HNSW (hnswlib-node)');
     console.log(`   Max elements: ${options.maxElements || 10000}`);
     console.log(`   Embedding dimension: ${options.dimension || 1536}`);
     console.log(`   HNSW parameters: M=${options.m || 16}, efConstruction=${options.efConstruction || 200}`);
-    console.log(`   Advanced features: clustering, optimization, performance analytics`);
+    console.log(`   Features: batching, caching, Walrus persistence, metadata filtering`);
   }
 
   /**
@@ -520,7 +164,7 @@ export class MemoryIndexService {
       // Generate vector ID
       const vectorId = this.nextMemoryId++;
       
-      // Add to legacy HNSW index (for backward compatibility)
+      // Add to HNSW index with batching
       this.hnswService.addVectorToIndexBatched(
         userAddress,
         vectorId,
@@ -537,23 +181,8 @@ export class MemoryIndexService {
         }
       );
 
-      // Add to browser-compatible HNSW index for enhanced performance
-      let browserIndex = this.browserIndexes.get(userAddress);
-      if (!browserIndex) {
-        browserIndex = await this.initializeBrowserIndex(userAddress, memoryEmbedding.length);
-      }
-      
-      browserIndex.addPoint(memoryEmbedding, vectorId, {
-        memoryId,
-        metadata,
-        blobId
-      });
-
-      // Update index statistics
-      const stats = this.indexStats.get(userAddress);
-      if (stats) {
-        stats.totalVectors++;
-      }
+      // Update performance statistics
+      this.updateIndexStats(userAddress);
       
       // Store in memory index
       if (!this.memoryIndex.has(userAddress)) {
@@ -585,17 +214,16 @@ export class MemoryIndexService {
   }
 
   /**
-   * Enhanced memory search using browser-compatible HNSW with advanced features
-   * Supports semantic search, clustering, and intelligent relevance scoring
+   * Enhanced memory search using native HNSW with advanced features
+   * Supports semantic search, metadata filtering, and intelligent relevance scoring
    */
   async searchMemories(query: MemorySearchQuery): Promise<MemorySearchResult[]> {
     const startTime = performance.now();
     
     try {
-      console.log(`🔍 Enhanced memory search for user ${query.userAddress}`);
+      console.log(`🔍 Memory search for user ${query.userAddress}`);
       console.log(`   Query: "${query.query || 'vector search'}"`);
       console.log(`   Mode: ${query.searchMode || 'semantic'}, K: ${query.k || 10}`);
-      console.log(`   Advanced features: clustering=${!!query.diversityFactor}, recency boost=${!!query.boostRecent}`);
       
       // Generate query vector if needed
       let queryVector = query.vector;
@@ -608,36 +236,10 @@ export class MemoryIndexService {
         throw new Error('No query vector provided and no query text with embedding service');
       }
 
-      // Get or create browser-compatible HNSW index for user
-      let browserIndex = this.browserIndexes.get(query.userAddress);
       const userMemories = this.memoryIndex.get(query.userAddress);
-      
-      if (!userMemories) {
+      if (!userMemories || userMemories.size === 0) {
         console.log('   No memories found for user');
         return [];
-      }
-
-      // Initialize browser HNSW index if needed
-      if (!browserIndex && userMemories.size > 0) {
-        console.log(`   Initializing browser HNSW index for ${userMemories.size} memories`);
-        browserIndex = await this.initializeBrowserIndex(query.userAddress, queryVector.length);
-        
-        // Populate index with existing memories
-        for (const [memoryId, entry] of userMemories) {
-          if (entry.embedding) {
-            browserIndex.addPoint(entry.embedding, entry.vectorId, {
-              memoryId,
-              metadata: entry.metadata
-            });
-          }
-        }
-        
-        console.log(`✅ Browser HNSW index initialized with ${browserIndex.getCurrentCount()} vectors`);
-      }
-
-      if (!browserIndex) {
-        console.log('   Falling back to linear search');
-        return await this.fallbackLinearSearch(query, queryVector, userMemories);
       }
 
       // Configure search parameters based on query mode
@@ -645,18 +247,27 @@ export class MemoryIndexService {
       const efSearch = query.searchMode === 'exact' ? searchK * 4 : 
                       query.searchMode === 'hybrid' ? searchK * 2 : searchK;
       
-      browserIndex.setEf(efSearch);
+      // Perform HNSW search using native implementation
+      const searchOptions: HNSWSearchOptions = {
+        k: Math.min(searchK * 3, 100), // Get more candidates for post-filtering
+        efSearch,
+        filter: this.createMetadataFilter(query)
+      };
 
-      // Perform HNSW search
-      const searchResult = browserIndex.searchKnn(queryVector, Math.min(searchK * 3, 100)); // Get more candidates for filtering
+      const hnswResult = await this.hnswService.searchVectors(
+        query.userAddress,
+        queryVector,
+        searchOptions
+      );
       
       // Convert to memory search results with enhanced scoring
       const results: MemorySearchResult[] = [];
       
-      for (let i = 0; i < searchResult.neighbors.length; i++) {
-        const vectorId = searchResult.neighbors[i];
-        const distance = searchResult.distances[i];
-        const similarity = 1 - distance; // Convert distance to similarity for cosine
+      for (let i = 0; i < hnswResult.ids.length; i++) {
+        const vectorId = hnswResult.ids[i];
+        const distance = hnswResult.distances[i];
+        // Calculate similarity from distance (cosine distance: similarity = 1 - distance)
+        const similarity = hnswResult.similarities?.[i] ?? (1 - distance);
         
         // Skip results below threshold
         if (query.threshold && similarity < query.threshold) {
@@ -666,11 +277,6 @@ export class MemoryIndexService {
         // Find memory entry by vector ID
         const memoryEntry = Array.from(userMemories.values()).find(entry => entry.vectorId === vectorId);
         if (!memoryEntry) continue;
-
-        // Apply metadata filters
-        if (!this.createMemoryFilter(query)(memoryEntry.metadata)) {
-          continue;
-        }
 
         // Enhanced relevance scoring
         let relevanceScore = this.calculateAdvancedRelevanceScore(
@@ -687,17 +293,13 @@ export class MemoryIndexService {
           relevanceScore += recencyBoost * 0.1;
         }
 
-        // Get cluster information if available
-        const clusterInfo = this.getClusterInfo(query.userAddress, vectorId);
-
         results.push({
           memoryId: memoryEntry.memoryId,
           blobId: memoryEntry.blobId,
           metadata: memoryEntry.metadata,
           similarity,
           relevanceScore,
-          extractedAt: memoryEntry.indexedAt,
-          clusterInfo
+          extractedAt: memoryEntry.indexedAt
         });
       }
 
@@ -715,13 +317,13 @@ export class MemoryIndexService {
       const searchLatency = performance.now() - startTime;
       this.updateSearchStats(query.userAddress, searchLatency);
 
-      console.log(`✅ Enhanced search completed in ${searchLatency.toFixed(2)}ms`);
-      console.log(`   Found ${finalResults.length} results (similarity range: ${finalResults.length > 0 ? finalResults[finalResults.length-1].similarity.toFixed(3) : 'N/A'} - ${finalResults.length > 0 ? finalResults[0].similarity.toFixed(3) : 'N/A'})`);
+      console.log(`✅ Search completed in ${searchLatency.toFixed(2)}ms`);
+      console.log(`   Found ${finalResults.length} results (similarity range: ${finalResults.length > 0 ? finalResults[finalResults.length-1].similarity.toFixed(3) : 'N/A'} - ${finalResults.length > 0 ? finalResults[0].similarity.toFixed(3) : 'N/A'}`);
       
       return finalResults;
       
     } catch (error) {
-      console.error('❌ Enhanced memory search failed:', error);
+      console.error('❌ Memory search failed:', error);
       throw error;
     }
   }
@@ -993,69 +595,76 @@ export class MemoryIndexService {
     };
   }
 
-  // ==================== ENHANCED HNSW HELPER METHODS ====================
+  // ==================== HNSW HELPER METHODS ====================
 
   /**
-   * Initialize browser-compatible HNSW index for a user
+   * Create metadata filter for HNSW search
    */
-  private async initializeBrowserIndex(userAddress: string, dimension: number): Promise<BrowserHNSW> {
-    const browserIndex = new BrowserHNSW(
-      dimension,
-      10000, // maxElements
-      16,    // m
-      200,   // efConstruction
-      'cosine' // spaceType
-    );
+  private createMetadataFilter(query: MemorySearchQuery): ((metadata: any) => boolean) | undefined {
+    if (!query.categories && !query.dateRange && !query.importanceRange && !query.tags) {
+      return undefined;
+    }
     
-    this.browserIndexes.set(userAddress, browserIndex);
-    this.indexStats.set(userAddress, {
-      totalVectors: 0,
-      avgSimilarity: 0,
-      searchLatency: [],
-      lastOptimized: new Date()
-    });
-    
-    return browserIndex;
+    return (metadata: any) => {
+      // Category filter
+      if (query.categories && query.categories.length > 0) {
+        if (!query.categories.includes(metadata.category)) {
+          return false;
+        }
+      }
+      
+      // Date range filter
+      if (query.dateRange) {
+        const created = new Date(metadata.createdTimestamp || 0);
+        if (query.dateRange.start && created < query.dateRange.start) {
+          return false;
+        }
+        if (query.dateRange.end && created > query.dateRange.end) {
+          return false;
+        }
+      }
+      
+      // Importance range filter
+      if (query.importanceRange) {
+        const importance = metadata.importance || 5;
+        if (query.importanceRange.min && importance < query.importanceRange.min) {
+          return false;
+        }
+        if (query.importanceRange.max && importance > query.importanceRange.max) {
+          return false;
+        }
+      }
+      
+      // Tags filter
+      if (query.tags && query.tags.length > 0) {
+        const metadataText = JSON.stringify(metadata).toLowerCase();
+        const hasAnyTag = query.tags.some(tag => 
+          metadataText.includes(tag.toLowerCase())
+        );
+        if (!hasAnyTag) {
+          return false;
+        }
+      }
+      
+      return true;
+    };
   }
 
   /**
-   * Fallback linear search when HNSW index is not available
+   * Update index statistics for a user
    */
-  private async fallbackLinearSearch(
-    query: MemorySearchQuery, 
-    queryVector: number[], 
-    userMemories: Map<string, MemoryIndexEntry>
-  ): Promise<MemorySearchResult[]> {
-    const results: MemorySearchResult[] = [];
-    
-    for (const [memoryId, entry] of userMemories) {
-      if (!entry.embedding) continue;
-      
-      // Apply metadata filters
-      if (!this.createMemoryFilter(query)(entry.metadata)) {
-        continue;
-      }
-      
-      // Calculate similarity
-      const similarity = this.cosineSimilarity(queryVector, entry.embedding);
-      
-      if (query.threshold && similarity < query.threshold) {
-        continue;
-      }
-      
-      const relevanceScore = this.calculateRelevanceScore(similarity, entry.metadata, query);
-      
-      results.push({
-        memoryId: entry.memoryId,
-        blobId: entry.blobId,
-        metadata: entry.metadata,
-        similarity,
-        relevanceScore,
-        extractedAt: entry.indexedAt
-      });
+  private updateIndexStats(userAddress: string): void {
+    let stats = this.indexStats.get(userAddress);
+    if (!stats) {
+      stats = {
+        totalVectors: 0,
+        avgSimilarity: 0,
+        searchLatency: [],
+        lastOptimized: new Date()
+      };
+      this.indexStats.set(userAddress, stats);
     }
-    
-    return results.sort((a, b) => b.relevanceScore - a.relevanceScore).slice(0, query.k || 10);
+    stats.totalVectors++;
   }
 
   /**
@@ -1114,26 +723,6 @@ export class MemoryIndexService {
     if (ageInDays < 30) return 0.5;       // Last month: 50% boost
     if (ageInDays < 90) return 0.2;       // Last quarter: 20% boost
     return 0.0;                           // Older: no boost
-  }
-
-  /**
-   * Get cluster information for a vector
-   */
-  private getClusterInfo(userAddress: string, vectorId: number): any {
-    const clusterResult = this.vectorClusters.get(userAddress);
-    if (!clusterResult) return undefined;
-    
-    const clusterId = clusterResult.assignments.get(vectorId);
-    if (clusterId === undefined) return undefined;
-    
-    const cluster = clusterResult.clusters.find(c => c.id === clusterId);
-    if (!cluster) return undefined;
-    
-    return {
-      clusterId: cluster.id,
-      clusterCenter: cluster.center,
-      intraClusterSimilarity: cluster.cohesion
-    };
   }
 
   /**
@@ -1204,7 +793,19 @@ export class MemoryIndexService {
   }
 
   /**
+   * Calculate vector magnitude
+   */
+  private calculateVectorMagnitude(vector: number[]): number {
+    let sum = 0;
+    for (const val of vector) {
+      sum += val * val;
+    }
+    return Math.sqrt(sum);
+  }
+
+  /**
    * Calculate cosine similarity between two vectors
+   * Used for semantic consistency scoring
    */
   private cosineSimilarity(a: number[], b: number[]): number {
     if (a.length !== b.length) return 0;
@@ -1224,17 +825,6 @@ export class MemoryIndexService {
   }
 
   /**
-   * Calculate vector magnitude
-   */
-  private calculateVectorMagnitude(vector: number[]): number {
-    let sum = 0;
-    for (const val of vector) {
-      sum += val * val;
-    }
-    return Math.sqrt(sum);
-  }
-
-  /**
    * Calculate semantic consistency score
    */
   private calculateSemanticConsistency(queryVector: number[], documentVector: number[]): number {
@@ -1244,37 +834,5 @@ export class MemoryIndexService {
     
     // Convert angle to consistency score (0-1, where 1 is perfect alignment)
     return 1 - (angle / Math.PI);
-  }
-
-  private calculateRelevanceScore(
-    similarity: number,
-    metadata: MemoryMetadata,
-    query: MemorySearchQuery
-  ): number {
-    let score = similarity * 0.6; // Base similarity weight
-    
-    // Boost by importance
-    score += (metadata.importance || 5) * 0.02; // 0.1 max boost
-    
-    // Recent content boost
-    const ageInDays = (Date.now() - (metadata.createdTimestamp || 0)) / (1000 * 60 * 60 * 24);
-    const recencyBoost = Math.max(0, (30 - ageInDays) / 30) * 0.2;
-    score += recencyBoost;
-    
-    // Category exact match boost
-    if (query.categories && query.categories.includes(metadata.category)) {
-      score += 0.15;
-    }
-    
-    // Topic boost if query text contains similar terms
-    if (query.query && metadata.topic) {
-      const queryLower = query.query.toLowerCase();
-      const topicLower = metadata.topic.toLowerCase();
-      if (queryLower.includes(topicLower) || topicLower.includes(queryLower)) {
-        score += 0.1;
-      }
-    }
-    
-    return Math.min(1.0, score);
   }
 }

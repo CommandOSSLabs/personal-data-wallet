@@ -26,6 +26,7 @@ export declare class EncryptionService {
     private suiClient;
     private packageId;
     private sessionKeyCache;
+    private permissionService;
     constructor(client: ClientWithCoreApi, config: PDWConfig);
     /**
      * Initialize SEAL service with proper configuration
@@ -67,9 +68,25 @@ export declare class EncryptionService {
      */
     importSessionKey(exportedKey: string, userAddress?: string): Promise<SessionKey>;
     /**
-     * Build access approval transaction for SEAL key servers
+     * Build access approval transaction for SEAL key servers (legacy - without app_id)
+     * @deprecated Use buildAccessTransactionWithAppId for OAuth-style permissions
      */
     buildAccessTransaction(userAddress: string, accessType?: 'read' | 'write'): Promise<Transaction>;
+    /**
+     * Build access approval transaction with app_id for OAuth-style permissions
+     *
+     * This method creates a transaction that includes the requesting application
+     * identifier, enabling OAuth-style permission validation where apps must be
+     * explicitly granted access by users before they can decrypt data.
+     *
+     * Uses CrossContextPermissionService for proper permission validation.
+     *
+     * @param userAddress - User's wallet address (used as SEAL identity)
+     * @param appId - Requesting application identifier
+     * @param accessType - Access level (read/write) - currently informational
+     * @returns Transaction for SEAL key server approval
+     */
+    buildAccessTransactionWithAppId(userAddress: string, appId: string, accessType?: 'read' | 'write'): Promise<Transaction>;
     /**
      * Create SEAL approval transaction bytes (matches memory-workflow-seal.ts pattern)
      * Returns raw PTB format bytes for SEAL verification

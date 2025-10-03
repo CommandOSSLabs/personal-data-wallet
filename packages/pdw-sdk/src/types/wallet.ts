@@ -28,19 +28,41 @@ export interface MainWallet {
 
 /**
  * Context wallet represents an app-scoped data container
+ * Stored as dynamic field on MainWallet for easy lookup
  * Provides isolation between different applications
  */
 export interface ContextWallet {
-  /** Unique context identifier (derived from user + app + salt) */
+  /** Sui object ID of the ContextWallet */
   id: string;
   /** Application ID that owns this context */
   appId: string;
+  /** Deterministic context ID (sha3_256 hash) */
+  contextId: string;
   /** Sui address of the wallet owner */
   owner: string;
+  /** Parent MainWallet object ID */
+  mainWalletId: string;
   /** Optional reference to access control policy */
   policyRef?: string;
   /** Timestamp when context was created */
   createdAt: number;
+  /** Granted permissions for this context */
+  permissions: string[];
+}
+
+/**
+ * Combined view of derived context information
+ * Includes both the deterministic hash ID and the actual Sui object address
+ */
+export interface DerivedContext {
+  /** Deterministic context ID (sha3_256 hash) - used for SEAL keys, tags */
+  contextId: string;
+  /** Application identifier */
+  appId: string;
+  /** Actual Sui object address (if context wallet has been created on-chain) */
+  objectAddress?: string;
+  /** Whether the context wallet exists on-chain */
+  exists: boolean;
 }
 
 /**

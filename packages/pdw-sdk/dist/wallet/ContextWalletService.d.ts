@@ -38,20 +38,28 @@ export declare class ContextWalletService {
     private encryptionService?;
     constructor(config: ContextWalletServiceConfig);
     /**
-     * Create a new context wallet for an app
+     * Create a new context wallet for an app (stored as dynamic field on MainWallet)
      * @param userAddress - User's Sui address
      * @param options - Context creation options
+     * @param signer - Transaction signer
      * @returns Created ContextWallet metadata
      */
-    create(userAddress: string, options: CreateContextWalletOptions): Promise<ContextWallet>;
+    create(userAddress: string, options: CreateContextWalletOptions, signer: any): Promise<ContextWallet>;
     /**
-     * Get context wallet by ID
+     * Get context wallet by app ID (fetches from dynamic field)
+     * @param userAddress - User's Sui address
+     * @param appId - Application identifier
+     * @returns ContextWallet metadata or null if not found
+     */
+    getContextForApp(userAddress: string, appId: string): Promise<ContextWallet | null>;
+    /**
+     * Get context wallet by ID (deprecated - use getContextForApp)
      * @param contextId - Context wallet ID
      * @returns ContextWallet metadata or null if not found
      */
     getContext(contextId: string): Promise<ContextWallet | null>;
     /**
-     * List all context wallets for a user
+     * List all context wallets for a user (from dynamic fields on MainWallet)
      * @param userAddress - User's Sui address
      * @returns Array of ContextWallet metadata
      */
@@ -92,19 +100,13 @@ export declare class ContextWalletService {
         createdAt: number;
     }>>;
     /**
-     * Get context wallet for a specific app and user
-     * @param userAddress - User's Sui address
-     * @param appId - Application ID
-     * @returns ContextWallet metadata or null if not found
-     */
-    getContextForApp(userAddress: string, appId: string): Promise<ContextWallet | null>;
-    /**
      * Ensure context wallet exists for an app, create if not found
      * @param userAddress - User's Sui address
      * @param appId - Application ID
+     * @param signer - Transaction signer for creation
      * @returns Existing or newly created ContextWallet
      */
-    ensureContext(userAddress: string, appId: string): Promise<ContextWallet>;
+    ensureContext(userAddress: string, appId: string, signer: any): Promise<ContextWallet>;
     /**
      * Delete a context wallet and all its data
      * @param contextId - Context wallet ID

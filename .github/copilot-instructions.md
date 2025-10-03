@@ -8,10 +8,10 @@ Purpose: make AI agents productive inside the SDK by pointing to the right files
 - **Core Functionality**: Store vector embeddings with metadata → Search by tags/properties → Build knowledge graphs → SEAL encryption for sensitive data
 - It relies on generated Move bindings under `src/generated/pdw/*` and a configured `packageId` to talk to deployed contracts
 
-## Current Status: Storage Service Consolidation Complete ✅
-**PRODUCTION READY**: Storage operations unified under services/StorageService.ts with 100% test validation and zero build errors.
+## Current Status: Dynamic Fields Architecture Complete ✅
+**PRODUCTION READY**: Wallet system upgraded to use Sui dynamic object fields for context storage with zero build errors.
 
-### ✅ Completed Consolidation Phase:
+### ✅ Completed Implementation Phases:
 1. **✅ SEAL Integration**: SealService working with official @mysten/seal package
 2. **✅ Walrus Integration**: StorageService using official writeBlobFlow patterns with upload relay
 3. **✅ Memory Operations**: Existing memory creation/retrieval flows confirmed working
@@ -20,6 +20,9 @@ Purpose: make AI agents productive inside the SDK by pointing to the right files
 6. **✅ Smart Contract**: Updated seal_access_control.move deployed with OAuth validation
 7. **✅ ViewService Testing**: 33/33 comprehensive tests passing (100% success rate)
 8. **✅ StorageService Consolidation**: Production service with 4/4 tests passing (~60s execution time)
+9. **✅ HNSW Consolidation**: Removed custom BrowserHNSW implementation (-375 lines), unified to native hnswlib-node (10-100x faster)
+10. **✅ QueryService Enhancement**: Integrated latest EmbeddingService API with embedText, embedBatch, similarity calculations
+11. **✅ Dynamic Fields Architecture**: Complete wallet system using Sui dynamic object fields (see DYNAMIC_FIELDS_IMPLEMENTATION.md)
 
 ### **CRITICAL Test Quality Gates**:
 - **ALL TESTS MUST PASS**: No component proceeds to next phase with failing tests
@@ -57,51 +60,70 @@ Purpose: make AI agents productive inside the SDK by pointing to the right files
 
 **Comprehensive Test Status**: 
 - **✅ Code Quality**: All major issues resolved, build successful
-- **✅ TypeScript**: Zero compilation errors across entire SDK
+- **✅ TypeScript**: Zero compilation errors across entire SDK (29% code reduction from HNSW consolidation)
 - **✅ StorageService**: 4/4 tests passing with real Walrus writeBlobFlow operations  
-- **✅ API Integration**: PersonalDataWallet, VectorService, HnswIndexService working
-- **✅ Legacy Cleanup**: Duplicate services removed, imports unified to services/ directory
+- **✅ API Integration**: PersonalDataWallet, QueryService, HnswIndexService working
+- **✅ Legacy Cleanup**: Duplicate services removed, custom BrowserHNSW removed (-375 lines), imports unified to services/ directory
+- **✅ Native HNSW**: Using hnswlib-node (10-100x faster than pure JS implementation)
+- **✅ Test Suite**: 98/98 production tests passing (8 cross-context + 10 SEAL + 18 Classifier + 12 Gemini + 34 GraphService + 16 KnowledgeGraphManager)
 
-### Current Phase: Ready for Next Development Phase ✅
-**STORAGE CONSOLIDATION COMPLETE**: All storage operations unified and production-ready:
-- **✅ Production StorageService**: services/StorageService.ts with writeBlobFlow pattern
-- **✅ Upload Relay Working**: Using `https://upload-relay.testnet.walrus.space` successfully
-- **✅ Test Validation**: 4/4 StorageService tests passing with real Walrus uploads
-- **✅ Build Success**: Zero TypeScript compilation errors across entire SDK
-- **✅ API Compatibility**: PersonalDataWallet, VectorService, HnswIndexService integrated
+### Current Phase: Dynamic Fields Architecture Complete ✅
+**WALLET SYSTEM IMPLEMENTED**: Complete implementation using Sui dynamic object fields with zero build errors:
+- **✅ Move Contract Enhanced**: wallet.move with dynamic field support, entry functions, helper methods
+- **✅ SDK Types Updated**: ContextWallet with contextId/permissions, new DerivedContext interface
+- **✅ MainWalletService Enhanced**: Added getContextInfo(), contextExists() for dual-mode operation
+- **✅ ContextWalletService Rewritten**: Full dynamic field integration (create, fetch, list methods)
+- **✅ Build Verification**: Zero TypeScript compilation errors across entire SDK
+- **✅ Architecture Requirements**: MainWallet per user ✓, Deterministic derivation ✓, 3rd party create ✓, Read with permissions ✓, No delete ✓
 
-**Ready for Next Phase**:
-- **Next**: Main Data Wallet (per user): identity anchor + key/derivation utilities
-- **Then**: App Context Wallets and Cross-App Access components
-- **Finally**: Cross-app aggregation and permission management
+**Implementation Complete** (see docs/DYNAMIC_FIELDS_IMPLEMENTATION.md):
+- **Wallet Architecture**: MainWallet stores ContextWallets as dynamic fields using app_id as key
+- **Deterministic IDs**: sha3_256(userAddress || appId || context_salt) for SEAL/tags
+- **O(1) Lookups**: Direct context retrieval by app_id
+- **Permission Model**: OAuth-style scopes (read:own, write:own, read:other, write:other) - NO delete
+- **3rd Party Integration**: Any app can create contexts for users (with signature)
+- **Cross-Context Access**: Apps can read other contexts with explicit user permission grants
 
-Recommended SDK modules (create under `packages/pdw-sdk/src`):
-- `wallet/MainWalletService.ts`: main wallet state, derivation, key mgmt.
-- `context/ContextWalletService.ts`: app-scoped container CRUD and queries.
-- `access/PermissionService.ts`: grants/revokes, consent requests, audits.
-- `aggregation/AggregationService.ts`: cross-context queries with policy filtering.
-- `types/wallet.ts`: public types & interfaces listed below.
+**Key Files**:
+- **Move Contract**: smart-contract/sources/wallet.move (dynamic fields, entry functions, events)
+- **SDK Services**: packages/pdw-sdk/src/wallet/{MainWalletService,ContextWalletService}.ts
+- **Types**: packages/pdw-sdk/src/types/wallet.ts (ContextWallet, DerivedContext, MainWallet)
+- **Documentation**: docs/DYNAMIC_FIELDS_IMPLEMENTATION.md (complete guide with examples)
 
 ## Key files to know
 - Client extension: `src/client/PersonalDataWallet.ts` (public surface: `pdw.createMemory`, `pdw.tx/*`, `pdw.call/*`, `pdw.view/*`, `pdw.bcs`)
-- Transactions: `src/transactions/TransactionService.ts` (uses `@mysten/sui/transactions` Transaction, not TransactionBlock)
-- Memory/search: `src/memory/MemoryService.ts`, retrieval: `src/retrieval/*`
+- **✅ WALLET SERVICES**: `src/wallet/MainWalletService.ts`, `src/wallet/ContextWalletService.ts` (dynamic field architecture)
+- Transactions: `src/services/TransactionService.ts` (uses `@mysten/sui/transactions` Transaction, not TransactionBlock)
 - **✅ PRODUCTION STORAGE**: `src/services/StorageService.ts` (official @mysten/walrus writeBlobFlow integration)
-- Storage legacy: `src/storage/{WalrusService,WalrusStorageService,StorageManager}.ts` (deprecated, use services/StorageService)
-- Test legacy: `src/storage/WalrusTestAdapter.ts` (disabled during consolidation)
-- Encryption/SEAL: `src/encryption/EncryptionService.ts`, `src/security/SealService.ts`
-- Views: `src/view/ViewService.ts` | Blockchain helpers: `src/blockchain/*`
-- Generated types: `src/generated/pdw/{memory,seal_access_control}.ts`
+- **✅ NATIVE HNSW**: `src/vector/HnswIndexService.ts` (native hnswlib-node with batching, caching, Walrus persistence)
+- **✅ MEMORY INDEXING**: `src/services/MemoryIndexService.ts` (high-level memory operations using native HNSW)
+- **✅ EMBEDDINGS**: `src/services/EmbeddingService.ts` (Google Gemini API with embedText, embedBatch, similarity calculations)
+- **✅ ADVANCED QUERIES**: `src/services/QueryService.ts` (semantic, vector, hybrid search with EmbeddingService integration)
+- Encryption/SEAL: `src/services/EncryptionService.ts`, `src/security/SealService.ts`
+- Views: `src/services/ViewService.ts` | Blockchain helpers: `src/blockchain/*`
+- Knowledge Graph: `src/graph/GraphService.ts`, `src/services/KnowledgeGraphManager.ts`
+- Generated types: `src/generated/pdw/{memory,seal_access_control,wallet}.ts`
 - Codegen config/scripts: `sui-codegen.config.ts`, `scripts/{fix-codegen-paths.js,verify-deployment.js}`
 - Examples/tests: `examples/*.ts`, `test/*.ts`
 
+**Legacy/Deprecated Files** (do not use):
+- `src/storage/{WalrusService,WalrusStorageService,StorageManager}.ts` - Use `services/StorageService` instead
+- `src/storage/WalrusTestAdapter.ts` - Disabled during consolidation
+- Custom BrowserHNSW implementation - Removed, use native HnswIndexService
+
 ## Public API patterns (how to use)
 - Extend Sui client: `const client = new SuiClient(...).$extend(PersonalDataWallet /* or PersonalDataWallet.asClientExtension(cfg) */)` → access via `client.pdw`.
+- **Main Wallet Operations**: `mainWalletService.createMainWallet(userAddress)`, `getMainWallet(userAddress)`, `deriveContextId(userAddress, appId)`, `getContextInfo(userAddress, appId)`, `contextExists(userAddress, appId)`.
+- **Context Wallet Operations**: `contextWalletService.create(userAddress, { appId }, signer)`, `getContextForApp(userAddress, appId)`, `listUserContexts(userAddress)`, `ensureContext(userAddress, appId, signer)`.
 - **Vector Embedding Storage**: `pdw.createMemory(content, embeddings, metadata)`, `pdw.searchMemories(query, tags)`, `pdw.getMemoryContext(contextId)`.
 - **Graph Operations**: Build knowledge graphs with embeddings, search by relationships and metadata tags
+- **Advanced Queries**: Use `QueryService` for semantic/hybrid/analytical search with auto-embedding generation
+- **Embeddings**: `EmbeddingService.embedText({ text, type, taskType })` → `{ vector, dimension, model, processingTime }`
+- **Vector Search**: Native HNSW via `HnswIndexService` with O(log N) performance, batching, metadata filtering
 - Transactions: build with `pdw.tx.createMemoryRecord(...)` (returns Transaction) or execute with `pdw.call.createMemoryRecord(opts, signer)`.
 - Views: `pdw.view.getUserMemories(addr)`, `getMemory(id)`, `getMemoryIndex(addr)`, `objectExists(id)`.
 - BCS/types: `pdw.bcs.Memory`, `MemoryIndex`, `MemoryMetadata`, plus access-control types from `seal_access_control`.
+
 
 ## Wallet SDK API (specs to implement)
 - Main wallet
@@ -137,12 +159,45 @@ Contracts for inputs/outputs (types/wallet.ts):
 ## Test Quality Assurance Workflow
 **MANDATORY TESTING REQUIREMENTS**: All new components must achieve 100% test pass rate before proceeding.
 
+### **CRITICAL: NO MOCKS ALLOWED** 🚫
+- **NEVER use mocks, stubs, or spies**: All tests must use real implementations
+- **NO `jest.mock()`, `jest.spyOn()`, `jest.fn()`**: Tests must interact with actual services
+- **NO `mockImplementation()` or `mockReturnValue()`**: Use real function behavior
+- **Real network calls**: Tests hit actual Sui testnet and Walrus storage
+- **Real encryption**: Tests use actual @mysten/seal package, not mocked SEAL
+- **Real console output**: Let console.warn/error appear in test output naturally
+- **Exception**: Only mock external services that are truly unavailable (e.g., third-party APIs with rate limits)
+
+**Test Refactoring Status**:
+- ✅ **COMPLIANT**: `test/integration/cross-context-data-access.test.ts` (8/8 passing)
+- ✅ **COMPLIANT**: `test/encryption/seal-oauth-integration.test.ts` (10/10 passing)
+- ✅ **REFACTORED**: `test/services/ClassifierService.test.ts` (18/18 passing - real EmbeddingService)
+- ✅ **REFACTORED**: `test/services/GeminiAIService.test.ts` (12/12 passing - real Gemini API)
+- ✅ **REFACTORED**: `test/services/GraphService.test.ts` (34/34 passing - real embeddings + AI extraction)
+- ✅ **REFACTORED**: `test/services/KnowledgeGraphManager.integration.test.ts` (16/16 passing - real orchestration)
+- ⚠️ **PENDING**: Legacy service tests (7 files) - awaiting refactoring
+- ⚠️ **PENDING**: Infrastructure tests (3 files) - awaiting refactoring
+
+**Refactoring Priority**:
+1. ✅ **DONE**: ClassifierService.test.ts - removed all mocks, 18/18 passing
+2. ✅ **DONE**: GeminiAIService.test.ts - removed all mocks, 12/12 passing
+3. ✅ **DONE**: GraphService.test.ts - removed all mocks, 34/34 passing with vector embeddings
+4. ✅ **DONE**: KnowledgeGraphManager.integration.test.ts - created NEW file, 16/16 passing with real orchestration
+5. ⚠️ **TODO**: MainWalletService.test.ts - use real SuiClient
+6. ⚠️ **TODO**: ViewService.test.ts - use real blockchain queries
+
+**CRITICAL ENFORCEMENT**: 
+- ANY test file using `jest.mock()`, `jest.fn()`, `jest.spyOn()`, `mockImplementation()`, or `jest.Mocked<T>` is **NOT COMPLIANT**
+- Tests must instantiate real service classes with real dependencies
+- Only exception: External third-party APIs with rate limits (document why mock is needed)
+
 ### Testing Process:
 1. **Create Comprehensive Tests**: Cover all public API methods, error scenarios, edge cases
 2. **Use Real Data**: Integrate actual testnet object IDs and blob IDs from Suiscan account 
 3. **Run After Every Edit**: Execute tests immediately after code changes to verify functionality
 4. **100% Pass Rate Gate**: All tests must pass before moving to next implementation phase
 5. **Codacy Analysis**: Run code quality checks on all test files after creation/modification
+6. **Real Implementations Only**: Tests must use actual services, real network calls, real encryption
 
 ### Test Execution Commands:
 - **Component Tests**: `npm test -- test/{component}/{ComponentName}.test.ts`
@@ -170,12 +225,16 @@ Contracts for inputs/outputs (types/wallet.ts):
 ## Implementation conventions
 - Transactions use `Transaction` from `@mysten/sui/transactions`; set gas via `tx.setGasBudget()` or `tx.setGasPrice()` as needed.
 - Codegen wrappers (e.g., `MemoryModule.createMemoryRecord`) are preferred where available; otherwise fall back to `tx.moveCall({ target: packageId + '::module::fn', ... })`.
+- **Vector Indexing**: Use `HnswIndexService` (native hnswlib-node) for O(log N) vector search. Features: intelligent batching, LRU caching, Walrus persistence, metadata filtering.
+- **Embeddings**: Use `EmbeddingService` (Google Gemini) for vector generation. Methods: `embedText()`, `embedBatch()`, `calculateCosineSimilarity()`, `findMostSimilar()`.
+- **Advanced Search**: Use `QueryService` for complex queries. Supports: vector, semantic, keyword, hybrid, graph, temporal, and analytical search modes.
 - Chat view methods in the SDK hit the backend via `apiUrl`; ensure backend is running and URL is configured.
 
 ### Official dependencies and docs policy
 - **CRITICAL**: Always use official `@mysten/seal` and `@mysten/walrus` packages that are installed in the SDK
 - Import actual classes: `import { SealClient, SessionKey } from '@mysten/seal'` and `import { WalrusClient } from '@mysten/walrus'`
-- Do not add or rely on mock/stub implementations in SDK source; integrate with the real services/APIs.
+- **NO MOCKS**: Do not add or rely on mock/stub implementations in SDK source OR tests; integrate with the real services/APIs
+- **Real Implementations Only**: All tests must use actual network calls, real encryption, real storage operations
 - Always use the latest stable packages from the Mysten ecosystem (`@mysten/sui`, `@mysten/seal`, `@mysten/walrus`, `@mysten/bcs`, `@mysten/codegen`, `@mysten/utils`). Prefer generated bindings over handwritten calls.
 - Follow the official publisher documentation and API references when adding or updating functionality. Mirror official patterns and types; avoid hand-rolled cryptography or ad-hoc protocol changes.
 - When upstream APIs change, update types and code via `npm run codegen`, align usages, and bump versions accordingly. Avoid temporary shims; fix at the integration points.

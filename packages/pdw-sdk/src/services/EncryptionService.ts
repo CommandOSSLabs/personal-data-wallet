@@ -9,6 +9,7 @@ import { SessionKey } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import { fromHex, toHex } from '@mysten/sui/utils';
 import { SealService } from '../security/SealService';
+import { CrossContextPermissionService } from './CrossContextPermissionService';
 import type {
   ClientWithCoreApi,
   PDWConfig,
@@ -38,6 +39,7 @@ export class EncryptionService {
   private suiClient: any;
   private packageId: string;
   private sessionKeyCache = new Map<string, SessionKey>();
+  private permissionService: CrossContextPermissionService;
 
   constructor(
     private client: ClientWithCoreApi,
@@ -46,6 +48,15 @@ export class EncryptionService {
     this.suiClient = (client as any).client || client;
     this.packageId = config.packageId || '';
     this.sealService = this.initializeSealService();
+    
+    // Initialize permission service for OAuth-style access control
+    this.permissionService = new CrossContextPermissionService(
+      {
+        packageId: this.packageId,
+        accessRegistryId: config.accessRegistryId || ''
+      },
+      this.suiClient
+    );
   }
 
   /**
@@ -336,7 +347,8 @@ export class EncryptionService {
   // ==================== ACCESS CONTROL TRANSACTIONS ====================
 
   /**
-   * Build access approval transaction for SEAL key servers
+   * Build access approval transaction for SEAL key servers (legacy - without app_id)
+   * @deprecated Use buildAccessTransactionWithAppId for OAuth-style permissions
    */
   async buildAccessTransaction(
     userAddress: string,
@@ -354,6 +366,35 @@ export class EncryptionService {
     });
 
     return tx;
+  }
+
+  /**
+   * Build access approval transaction with app_id for OAuth-style permissions
+   * 
+   * This method creates a transaction that includes the requesting application
+   * identifier, enabling OAuth-style permission validation where apps must be
+   * explicitly granted access by users before they can decrypt data.
+   * 
+   * Uses CrossContextPermissionService for proper permission validation.
+   * 
+   * @param userAddress - User's wallet address (used as SEAL identity)
+   * @param appId - Requesting application identifier
+   * @param accessType - Access level (read/write) - currently informational
+   * @returns Transaction for SEAL key server approval
+   */
+  async buildAccessTransactionWithAppId(
+    userAddress: string,
+    appId: string,
+    accessType: 'read' | 'write' = 'read'
+  ): Promise<Transaction> {
+    // Convert user address to bytes for SEAL identity
+    const identityBytes = fromHex(userAddress.replace('0x', ''));
+    
+    // Use CrossContextPermissionService to build seal_approve with app_id
+    return this.permissionService.buildSealApproveTransaction(
+      identityBytes,
+      appId
+    );
   }
 
   /**

@@ -32,6 +32,8 @@ export interface CreateMemoryResponse {
   requiresIndexCreation?: boolean
   indexBlobId?: string
   graphBlobId?: string
+  vectorId?: number      // Added: Vector ID from backend
+  blobId?: string        // Added: Walrus blob ID
 }
 
 // Cache key prefix for localStorage
@@ -276,7 +278,8 @@ class MemoryIndexService {
     }
 
     try {
-      const PACKAGE_ID = '0x8ae699f05fbbf9c314118d53bfdd6e43c4daa12b7a785a972128f1efaf65b50c'
+      // Use current deployed testnet package ID
+      const PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID || '0x5bab30565143ff73b8945d2141cdf996fd901b9b2c68d6e9303bc265dab169fa'
       const tx = new Transaction()
       
       tx.moveCall({
@@ -339,8 +342,8 @@ class MemoryIndexService {
         console.log('Transaction digest:', result.digest)
         
         // Import SuiClient dynamically to get transaction details
-        const { SuiClient } = await import('@mysten/sui/client')
-        const client = new SuiClient({ url: 'https://fullnode.testnet.sui.io:443' })
+        const { SuiClient, getFullnodeUrl } = await import('@mysten/sui/client')
+        const client = new SuiClient({ url: getFullnodeUrl('testnet') })
         
         // Wait for transaction to be indexed
         console.log('Waiting for transaction confirmation...')
@@ -383,8 +386,9 @@ class MemoryIndexService {
             for (const event of txResult.events) {
               if (event.type.includes('::memory::MemoryIndexUpdated') && event.parsedJson) {
                 console.log('Found MemoryIndexUpdated event:', event.parsedJson)
-                if (event.parsedJson.id) {
-                  return event.parsedJson.id
+                const parsedData = event.parsedJson as { id?: string }
+                if (parsedData.id) {
+                  return parsedData.id
                 }
               }
             }
@@ -456,6 +460,7 @@ class MemoryIndexService {
       }
 
       if (!backendResponse.success) {
+        console.error('Backend memory creation failed:', backendResponse.message);
         return backendResponse;
       }
 
@@ -562,6 +567,3 @@ class MemoryIndexService {
 
 // Export singleton instance
 export const memoryIndexService = new MemoryIndexService()
-
-// Export types
-export type { MemoryIndexState, PrepareIndexResponse, RegisterIndexResponse, CreateMemoryResponse }

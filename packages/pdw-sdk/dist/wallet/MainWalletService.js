@@ -84,7 +84,7 @@ class MainWalletService {
     /**
      * Derive a deterministic context ID for app isolation
      * @param options - Derivation options
-     * @returns Deterministic context ID
+     * @returns Deterministic context ID (hash only, for backward compatibility)
      */
     async deriveContextId(options) {
         let salt = options.salt;
@@ -101,6 +101,54 @@ class MainWalletService {
         const inputBytes = new TextEncoder().encode(input);
         const hash = (0, sha3_1.sha3_256)(inputBytes);
         return `0x${Array.from(hash).map(b => b.toString(16).padStart(2, '0')).join('')}`;
+    }
+    /**
+     * Get full context information (deterministic ID + object address if exists)
+     * @param userAddress - User's Sui address
+     * @param appId - Application identifier
+     * @returns DerivedContext with contextId and optional objectAddress
+     */
+    async getContextInfo(userAddress, appId) {
+        // Derive deterministic ID
+        const contextId = await this.deriveContextId({ userAddress, appId });
+        // Check if context wallet object exists on-chain
+        const mainWallet = await this.getMainWallet(userAddress);
+        if (!mainWallet) {
+            return { contextId, appId, exists: false };
+        }
+        // Try to find context wallet as dynamic field
+        try {
+            const response = await this.suiClient.getDynamicFieldObject({
+                parentId: mainWallet.walletId,
+                name: {
+                    type: '0x1::string::String',
+                    value: appId
+                }
+            });
+            if (response.data) {
+                return {
+                    contextId,
+                    appId,
+                    objectAddress: response.data.objectId,
+                    exists: true
+                };
+            }
+        }
+        catch (error) {
+            // Context not found as dynamic field
+            console.debug(`Context wallet not found for appId: ${appId}`);
+        }
+        return { contextId, appId, exists: false };
+    }
+    /**
+     * Check if a context wallet exists on-chain
+     * @param userAddress - User's Sui address
+     * @param appId - Application identifier
+     * @returns True if context wallet exists as dynamic field
+     */
+    async contextExists(userAddress, appId) {
+        const contextInfo = await this.getContextInfo(userAddress, appId);
+        return contextInfo.exists;
     }
     /**
      * Rotate SEAL session and backup keys for a user

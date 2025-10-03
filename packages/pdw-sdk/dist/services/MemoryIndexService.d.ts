@@ -59,6 +59,7 @@ export interface MemorySearchResult {
     relevanceScore: number;
     content?: string | Uint8Array;
     extractedAt?: Date;
+    embedding?: number[];
     clusterInfo?: {
         clusterId: number;
         clusterCenter: number[];
@@ -67,7 +68,7 @@ export interface MemorySearchResult {
 }
 /**
  * Memory-focused indexing service providing high-level memory operations
- * Enhanced with browser-compatible HNSW for O(log N) search performance
+ * Uses native HNSW implementation via HnswIndexService for optimal performance
  */
 export declare class MemoryIndexService {
     private hnswService;
@@ -75,8 +76,6 @@ export declare class MemoryIndexService {
     private storageService?;
     private memoryIndex;
     private nextMemoryId;
-    private browserIndexes;
-    private vectorClusters;
     private indexStats;
     constructor(storageService?: StorageService, options?: MemoryIndexOptions);
     /**
@@ -91,8 +90,8 @@ export declare class MemoryIndexService {
         indexed: boolean;
     }>;
     /**
-     * Enhanced memory search using browser-compatible HNSW with advanced features
-     * Supports semantic search, clustering, and intelligent relevance scoring
+     * Enhanced memory search using native HNSW with advanced features
+     * Supports semantic search, metadata filtering, and intelligent relevance scoring
      */
     searchMemories(query: MemorySearchQuery): Promise<MemorySearchResult[]>;
     /**
@@ -158,13 +157,13 @@ export declare class MemoryIndexService {
     destroy(): void;
     private createMemoryFilter;
     /**
-     * Initialize browser-compatible HNSW index for a user
+     * Create metadata filter for HNSW search
      */
-    private initializeBrowserIndex;
+    private createMetadataFilter;
     /**
-     * Fallback linear search when HNSW index is not available
+     * Update index statistics for a user
      */
-    private fallbackLinearSearch;
+    private updateIndexStats;
     /**
      * Enhanced relevance scoring with multiple factors
      */
@@ -174,10 +173,6 @@ export declare class MemoryIndexService {
      */
     private calculateRecencyBoost;
     /**
-     * Get cluster information for a vector
-     */
-    private getClusterInfo;
-    /**
      * Diversify search results to avoid clustering
      */
     private diversifyResults;
@@ -186,17 +181,17 @@ export declare class MemoryIndexService {
      */
     private updateSearchStats;
     /**
-     * Calculate cosine similarity between two vectors
-     */
-    private cosineSimilarity;
-    /**
      * Calculate vector magnitude
      */
     private calculateVectorMagnitude;
     /**
+     * Calculate cosine similarity between two vectors
+     * Used for semantic consistency scoring
+     */
+    private cosineSimilarity;
+    /**
      * Calculate semantic consistency score
      */
     private calculateSemanticConsistency;
-    private calculateRelevanceScore;
 }
 //# sourceMappingURL=MemoryIndexService.d.ts.map
