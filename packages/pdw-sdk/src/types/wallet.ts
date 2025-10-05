@@ -69,15 +69,41 @@ export interface DerivedContext {
  * Request for user consent to access data across contexts
  * Used in OAuth-style permission flow
  */
+export type ConsentStatus = 'pending' | 'approved' | 'denied';
+
 export interface ConsentRequest {
-  /** Application requesting access */
-  requesterAppId: string;
+  /** Wallet requesting access (requester app/context wallet address) */
+  requesterWallet: string;
+  /** Wallet that will grant access (target context wallet address) */
+  targetWallet: string;
   /** Specific permission scopes being requested */
-  targetScopes: string[];
+  targetScopes: PermissionScope[];
   /** Human-readable purpose for the access request */
   purpose: string;
   /** Optional expiration timestamp for the request */
   expiresAt?: number;
+  /** Unique identifier for the request */
+  requestId?: string;
+  /** Timestamp when the request was created */
+  createdAt?: number;
+  /** Current status of the consent request */
+  status?: ConsentStatus;
+  /** Timestamp when the request was last updated */
+  updatedAt?: number;
+}
+
+/**
+ * Persisted consent request with required metadata fields
+ */
+export interface ConsentRequestRecord extends ConsentRequest {
+  /** Unique identifier for the request */
+  requestId: string;
+  /** Timestamp when the request was created */
+  createdAt: number;
+  /** Current status of the consent request */
+  status: ConsentStatus;
+  /** Timestamp when the request was last updated */
+  updatedAt: number;
 }
 
 /**
@@ -87,14 +113,20 @@ export interface ConsentRequest {
 export interface AccessGrant {
   /** Unique grant identifier */
   id: string;
-  /** Context ID that access is granted to */
-  contextId: string;
-  /** Application that is granted access */
-  granteeAppId: string;
+  /** Wallet that requested access (grantee) */
+  requestingWallet: string;
+  /** Target wallet that granted access (context owner wallet) */
+  targetWallet: string;
   /** Specific permission scopes granted */
-  scopes: string[];
+  scopes: PermissionScope[];
   /** Expiration timestamp for this grant */
   expiresAt?: number;
+  /** Timestamp when grant was recorded */
+  grantedAt: number;
+  /** Optional transaction digest if executed on-chain */
+  transactionDigest?: string;
+  /** Timestamp when grant was revoked */
+  revokedAt?: number;
 }
 
 /**
@@ -182,8 +214,10 @@ export type PermissionScope = typeof PermissionScopes[keyof typeof PermissionSco
  * Options for requesting consent
  */
 export interface RequestConsentOptions {
-  /** Application requesting access */
-  appId: string;
+  /** Wallet requesting access */
+  requesterWallet: string;
+  /** Target wallet that owns the data */
+  targetWallet: string;
   /** Permission scopes being requested */
   scopes: PermissionScope[];
   /** Human-readable purpose */
@@ -196,10 +230,10 @@ export interface RequestConsentOptions {
  * Options for granting permissions
  */
 export interface GrantPermissionsOptions {
-  /** Context ID to grant access to */
-  contextId: string;
-  /** Application receiving access */
-  recipientAppId: string;
+  /** Wallet requesting access (grantee) */
+  requestingWallet: string;
+  /** Target wallet that owns the data */
+  targetWallet: string;
   /** Permission scopes to grant */
   scopes: PermissionScope[];
   /** Optional expiration timestamp */
@@ -210,18 +244,24 @@ export interface GrantPermissionsOptions {
  * Options for revoking permissions
  */
 export interface RevokePermissionsOptions {
-  /** Grant ID to revoke */
-  grantId: string;
+  /** Wallet requesting access */
+  requestingWallet: string;
+  /** Target wallet that granted the access */
+  targetWallet: string;
+  /** Optional scope to revoke (revokes all if omitted) */
+  scope?: PermissionScope;
 }
 
 /**
  * Options for aggregated queries across contexts
  */
 export interface AggregatedQueryOptions {
-  /** App contexts to query (must have permissions) */
-  apps: string[];
-  /** User address for permission validation */
+  /** Wallet requesting the aggregated query */
+  requestingWallet: string;
+  /** Owner of the contexts being queried */
   userAddress: string;
+  /** Optional explicit list of target wallets to include */
+  targetWallets?: string[];
   /** Search query */
   query: string;
   /** Required permission scope */

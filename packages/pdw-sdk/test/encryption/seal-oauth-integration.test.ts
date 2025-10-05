@@ -1,8 +1,8 @@
 /**
- * SEAL Integration Tests with OAuth-style App ID
- * 
+ * SEAL Integration Tests with Wallet Allowlist Permissions
+ *
  * Tests the updated EncryptionService with CrossContextPermissionService
- * for OAuth-style permission validation during decryption.
+ * for wallet-based permission validation during decryption.
  */
 
 import { describe, it, expect, beforeAll } from '@jest/globals';
@@ -16,7 +16,7 @@ import dotenv from 'dotenv';
 
 dotenv.config({ path: '.env.test' });
 
-describe('SEAL Integration with OAuth-style Permissions', () => {
+describe('SEAL Integration with Wallet Allowlist Permissions', () => {
   let client: SuiClient;
   let encryptionService: EncryptionService;
   let permissionService: CrossContextPermissionService;
@@ -24,6 +24,9 @@ describe('SEAL Integration with OAuth-style Permissions', () => {
   let userAddress: string;
   const packageId = process.env.PACKAGE_ID || process.env.SUI_PACKAGE_ID || '';
   const accessRegistryId = process.env.ACCESS_REGISTRY_ID || '';
+  const requestingWalletA = '0x1111111111111111111111111111111111111111111111111111111111111111';
+  const requestingWalletB = '0x2222222222222222222222222222222222222222222222222222222222222222';
+  const contextWallet = '0x3333333333333333333333333333333333333333333333333333333333333333';
 
   beforeAll(() => {
     // Initialize Sui client
@@ -71,11 +74,10 @@ describe('SEAL Integration with OAuth-style Permissions', () => {
   });
 
   describe('Transaction Building', () => {
-    it('should build seal_approve transaction with app_id', async () => {
-      const appId = 'test-app';
-      const tx = await encryptionService.buildAccessTransactionWithAppId(
+    it('should build seal_approve transaction for requesting wallet', async () => {
+      const tx = await encryptionService.buildAccessTransactionForWallet(
         userAddress,
-        appId,
+        requestingWalletA,
         'read'
       );
 
@@ -95,16 +97,16 @@ describe('SEAL Integration with OAuth-style Permissions', () => {
       // Note: Real console.warn will appear in test output
     });
 
-    it('should build different transactions for different app IDs', async () => {
-      const tx1 = await encryptionService.buildAccessTransactionWithAppId(
+    it('should build different transactions for different requesting wallets', async () => {
+      const tx1 = await encryptionService.buildAccessTransactionForWallet(
         userAddress,
-        'app-1',
+        requestingWalletA,
         'read'
       );
 
-      const tx2 = await encryptionService.buildAccessTransactionWithAppId(
+      const tx2 = await encryptionService.buildAccessTransactionForWallet(
         userAddress,
-        'app-2',
+        requestingWalletB,
         'read'
       );
 
@@ -120,7 +122,7 @@ describe('SEAL Integration with OAuth-style Permissions', () => {
       expect(tx1Data.inputs.length).toBeGreaterThan(0);
       expect(tx2Data.inputs.length).toBeGreaterThan(0);
       
-      // Inputs should be different due to different app_id parameters (app-1 vs app-2)
+  // Inputs should be different due to different requesting wallet parameters
       expect(JSON.stringify(tx1Data.inputs)).not.toEqual(JSON.stringify(tx2Data.inputs));
     });
   });
@@ -141,8 +143,8 @@ describe('SEAL Integration with OAuth-style Permissions', () => {
     }, 60000);
   });
 
-  describe('Decryption with App ID', () => {
-    it('should warn when decrypting without app_id', async () => {
+  describe('Decryption with Wallet Allowlist', () => {
+    it('should warn when decrypting without requestingWallet', async () => {
       // Encrypt first
       const testData = 'Test data';
       const encrypted = await encryptionService.encrypt(testData, userAddress);
@@ -160,7 +162,7 @@ describe('SEAL Integration with OAuth-style Permissions', () => {
       }
     }, 60000);
 
-    it('should attempt decryption with app_id', async () => {
+  it('should attempt decryption with requestingWallet', async () => {
       // Encrypt first
       const testData = 'Test data with app';
       const encrypted = await encryptionService.encrypt(testData, userAddress);
@@ -170,7 +172,7 @@ describe('SEAL Integration with OAuth-style Permissions', () => {
         await encryptionService.decrypt({
           encryptedContent: encrypted.encryptedContent,
           userAddress,
-          appId: 'test-app',
+          requestingWallet: requestingWalletA,
         });
       } catch (error) {
         // Expected to fail due to session key/permission setup requirements
@@ -181,13 +183,12 @@ describe('SEAL Integration with OAuth-style Permissions', () => {
   });
 
   describe('CrossContextPermissionService Integration', () => {
-    it('should build seal_approve transaction with context validation', () => {
+    it('should build seal_approve transaction with wallet validation', () => {
       const identityBytes = fromHex(userAddress.replace('0x', ''));
-      const appId = 'medical-app';
 
       const tx = permissionService.buildSealApproveTransaction(
         identityBytes,
-        appId
+        requestingWalletA
       );
 
       expect(tx).toBeDefined();
@@ -195,12 +196,10 @@ describe('SEAL Integration with OAuth-style Permissions', () => {
     });
 
     it('should use same transaction builder as EncryptionService', async () => {
-      const appId = 'social-app';
-      
       // Build transaction via EncryptionService
-      const encryptionTx = await encryptionService.buildAccessTransactionWithAppId(
+      const encryptionTx = await encryptionService.buildAccessTransactionForWallet(
         userAddress,
-        appId,
+        requestingWalletB,
         'read'
       );
 
@@ -208,7 +207,7 @@ describe('SEAL Integration with OAuth-style Permissions', () => {
       const identityBytes = fromHex(userAddress.replace('0x', ''));
       const permissionTx = permissionService.buildSealApproveTransaction(
         identityBytes,
-        appId
+        requestingWalletB
       );
 
       // Both should be valid transactions
@@ -228,31 +227,32 @@ describe('SEAL Integration with OAuth-style Permissions', () => {
     });
   });
 
-  describe('OAuth-style Permission Flow', () => {
+  describe('Wallet Allowlist Permission Flow', () => {
     it('should demonstrate complete permission + decryption flow', async () => {
-      const sourceContextId = '0x1234567890abcdef';
-      const requestingAppId = 'medical-app';
+      const expiresAt = Date.now() + 86400000; // 24h
 
-      // Step 1: Register context (would be done by app)
-      const registerTx = permissionService.buildRegisterContextTransaction({
-        contextId: sourceContextId,
-        appId: 'social-app'
+      // Step 1: Register context wallet (would be done by app)
+      const registerTx = permissionService.buildRegisterContextWalletTransaction({
+        contextWallet,
+        derivationIndex: 5,
+        appHint: 'social-app'
       });
       expect(registerTx).toBeDefined();
 
-      // Step 2: Grant cross-context access
-      const grantTx = permissionService.buildGrantCrossContextAccessTransaction({
-        requestingAppId,
-        sourceContextId,
+      // Step 2: Grant wallet allowlist access
+      const grantTx = permissionService.buildGrantWalletAllowlistTransaction({
+        requestingWallet: requestingWalletA,
+        targetWallet: contextWallet,
+        scope: 'read',
         accessLevel: 'read',
-        expiresAt: Date.now() + 86400000 // 24h
+        expiresAt
       });
       expect(grantTx).toBeDefined();
 
-      // Step 3: Build SEAL approval with app_id for decryption
-      const sealTx = await encryptionService.buildAccessTransactionWithAppId(
+      // Step 3: Build SEAL approval with requesting wallet for decryption
+      const sealTx = await encryptionService.buildAccessTransactionForWallet(
         userAddress,
-        requestingAppId,
+        requestingWalletA,
         'read'
       );
       expect(sealTx).toBeDefined();
@@ -261,7 +261,7 @@ describe('SEAL Integration with OAuth-style Permissions', () => {
       expect(registerTx.constructor.name).toMatch(/Transaction/);
       expect(grantTx.constructor.name).toMatch(/Transaction/);
       expect(sealTx.constructor.name).toMatch(/Transaction/);
-    });
+    }, 60000);
   });
 
   describe('Backward Compatibility', () => {

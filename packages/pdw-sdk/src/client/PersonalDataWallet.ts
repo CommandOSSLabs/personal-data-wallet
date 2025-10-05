@@ -9,7 +9,7 @@ import type { ClientWithCoreApi, PDWConfig } from '../types';
 import { MemoryService } from '../memory/MemoryService';
 import { ChatService } from '../chat/ChatService';
 import { StorageService } from '../services/StorageService';
-import { EncryptionService } from '../services/EncryptionService';
+import { EncryptionService } from '../encryption/EncryptionService';
 import { TransactionService } from '../transactions/TransactionService';
 import { ViewService } from '../view/ViewService';
 import { MainWalletService } from '../wallet/MainWalletService';
@@ -19,12 +19,14 @@ import { AggregationService } from '../aggregation/AggregationService';
 import { PDWApiClient } from '../api/client';
 import { createDefaultConfig } from '../config/defaults';
 import { validateConfig } from '../config/validation';
+import type { ConsentRepository } from '../permissions/ConsentRepository';
 
 export interface PersonalDataWalletExtension {
   // Top-level imperative methods
   createMemory: MemoryService['createMemory'];
   searchMemories: MemoryService['searchMemories'];
   getMemoryContext: MemoryService['getMemoryContext'];
+  setConsentRepository: (repository?: ConsentRepository) => void;
   
   // Storage methods
   uploadToStorage: StorageService['upload'];
@@ -159,12 +161,15 @@ export class PersonalDataWallet {
     this.#contextWallet = new ContextWalletService({
       suiClient: (client as any).client || client,
       packageId: this.#config.packageId || '',
-      mainWalletService: this.#mainWallet
+      mainWalletService: this.#mainWallet,
+      storageService: this.#storage,
+      encryptionService: this.#encryption
     });
     
     this.#permission = new PermissionService({
       suiClient: (client as any).client || client,
       packageId: this.#config.packageId || '',
+      accessRegistryId: this.#config.accessRegistryId || '',
       apiUrl: this.#config.apiUrl,
       contextWalletService: this.#contextWallet
     });
@@ -190,6 +195,9 @@ export class PersonalDataWallet {
   getMemoryContext: MemoryService['getMemoryContext'];
   uploadToStorage: StorageService['upload'];
   retrieveFromStorage: StorageService['retrieve'];
+  setConsentRepository(repository?: ConsentRepository): void {
+    this.#permission.setConsentRepository(repository);
+  }
 
   // Transaction builders
   get tx() {

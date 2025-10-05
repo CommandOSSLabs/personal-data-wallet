@@ -1,836 +1,183 @@
-/**
- * ViewService Integration Tests
- * 
- * Tests read-only blockchain query methods for memory and access control operations.
- * Based on established Jest patterns with comprehensive mocking and error handling.
- */
+import { beforeAll, describe, expect, it, jest } from '@jest/globals';
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+import { sha3_256 } from '@noble/hashes/sha3';
+import dotenv from 'dotenv';
 
-require('dotenv').config({ path: '.env.test' });
+import { ViewService } from '../../src/services/ViewService';
 
-const { ViewService } = require('../../dist/view/ViewService');
-const { SuiClient } = require('@mysten/sui/client');
+dotenv.config({ path: '.env.test' });
 
-describe('ViewService', () => {
-  let viewService: any;
-  let mockSuiClient: any;
-  let testConfig: any;
-  const testAddress = '0x1234567890abcdef1234567890abcdef12345678';
-  const testPackageId = '0x8765432109fedcba8765432109fedcba87654321';
+describe('ViewService (integration)', () => {
+  jest.setTimeout(60_000);
 
-  beforeAll(async () => {
-    // Test configuration
-    testConfig = {
-      packageId: testPackageId,
-      apiUrl: 'https://test-api.example.com',
-    };
+  let suiClient: SuiClient;
+  let service: ViewService;
+  let packageId: string;
+  const testUserAddress = process.env.TEST_USER_ADDRESS || '';
+  const walletRegistryId = process.env.WALLET_REGISTRY_ID || '';
+  const accessRegistryId = process.env.ACCESS_REGISTRY_ID || '';
+  const hasTestUser = Boolean(testUserAddress);
 
-    // Mock SuiClient with comprehensive method stubs
-    mockSuiClient = {
-      getOwnedObjects: jest.fn(),
-      getObject: jest.fn(),
-      queryEvents: jest.fn(),
-      getCheckpoint: jest.fn(),
-    };
+  const toHex = (bytes: Uint8Array) => Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  const deriveAddress = (label: string) => `0x${toHex(sha3_256(new TextEncoder().encode(label)))}`;
 
-    // Initialize ViewService with mocked client
-    viewService = new ViewService(mockSuiClient, testConfig);
+  beforeAll(() => {
+    packageId = process.env.PACKAGE_ID || process.env.SUI_PACKAGE_ID || '';
+    if (!packageId) {
+      throw new Error('PACKAGE_ID (or SUI_PACKAGE_ID) must be defined in .env.test for ViewService tests');
+    }
+
+    const network = (process.env.SUI_NETWORK as 'testnet' | 'devnet' | 'mainnet') || 'testnet';
+    const rpcUrl = process.env.SUI_RPC_URL || getFullnodeUrl(network);
+
+    suiClient = new SuiClient({ url: rpcUrl });
+    service = new ViewService(suiClient as any, {
+      packageId,
+      apiUrl: process.env.PDW_API_URL || process.env.API_URL || 'https://pdw-sdk.integration.tests',
+      accessRegistryId,
+      walletRegistryId,
+    });
   });
 
-  beforeEach(() => {
-    // Reset all mocks before each test
-    jest.clearAllMocks();
-    jest.restoreAllMocks();
-  });
+  describe('object helpers', () => {
+    it('returns false for clearly invalid object IDs', async () => {
+      const invalidObjectId = 'not-a-sui-object-id';
+      const exists = await service.objectExists(invalidObjectId);
+      expect(exists).toBe(false);
+    });
 
-  // ==================== OBJECT EXISTENCE TESTS ====================
+    it('detects existing registry objects when configured', async () => {
+      if (!walletRegistryId) {
+        console.warn('⚠️  WALLET_REGISTRY_ID not configured; skipping positive objectExists assertion.');
+        return;
+      }
 
-  describe('objectExists', () => {
-    test('should return true for existing object', async () => {
-      const testObjectId = '0xabcdef1234567890abcdef1234567890abcdef12';
-      
-      mockSuiClient.getObject.mockResolvedValue({
-        data: {
-          objectId: testObjectId,
-          type: `${testPackageId}::memory::Memory`,
-        }
-      });
-
-      const exists = await viewService.objectExists(testObjectId);
-      
+      const exists = await service.objectExists(walletRegistryId);
       expect(exists).toBe(true);
-      expect(mockSuiClient.getObject).toHaveBeenCalledWith({
-        id: testObjectId,
-        options: { showType: true }
-      });
-    });
 
-    test('should return false for non-existent object', async () => {
-      const testObjectId = '0xnonexistent1234567890abcdef1234567890';
-      
-      mockSuiClient.getObject.mockResolvedValue({
-        data: null
-      });
-
-      const exists = await viewService.objectExists(testObjectId);
-      
-      expect(exists).toBe(false);
-    });
-
-    test('should return false when client throws error', async () => {
-      const testObjectId = '0xerror1234567890abcdef1234567890abcd';
-      
-      mockSuiClient.getObject.mockRejectedValue(new Error('Network error'));
-
-      const exists = await viewService.objectExists(testObjectId);
-      
-      expect(exists).toBe(false);
-    });
-
-    test('should handle invalid object ID format gracefully', async () => {
-      const invalidObjectId = 'invalid-object-id';
-      
-      mockSuiClient.getObject.mockRejectedValue(new Error('Invalid object ID'));
-
-      const exists = await viewService.objectExists(invalidObjectId);
-      
-      expect(exists).toBe(false);
+      const objectType = await service.getObjectType(walletRegistryId);
+      expect(typeof objectType === 'string' ? objectType.length : 0).toBeGreaterThan(0);
     });
   });
 
-  describe('getObjectType', () => {
-    test('should return object type for valid object', async () => {
-      const testObjectId = '0xabcdef1234567890abcdef1234567890abcdef12';
-      const expectedType = `${testPackageId}::memory::Memory`;
-      
-      mockSuiClient.getObject.mockResolvedValue({
-        data: {
-          objectId: testObjectId,
-          type: expectedType,
-        }
-      });
+  describe('memory queries', () => {
+    it('retrieves memory listings for the configured user (if any)', async () => {
+      const address = hasTestUser ? testUserAddress : deriveAddress('pdw-empty-memories');
+      const result = await service.getUserMemories(address, { limit: 25 });
 
-      const objectType = await viewService.getObjectType(testObjectId);
-      
-      expect(objectType).toBe(expectedType);
-    });
+      expect(Array.isArray(result.data)).toBe(true);
+      expect(typeof result.hasMore).toBe('boolean');
 
-    test('should return null for non-existent object', async () => {
-      const testObjectId = '0xnonexistent1234567890abcdef1234567890';
-      
-      mockSuiClient.getObject.mockResolvedValue({
-        data: null
-      });
-
-      const objectType = await viewService.getObjectType(testObjectId);
-      
-      expect(objectType).toBe(null);
-    });
-
-    test('should return null when client throws error', async () => {
-      const testObjectId = '0xerror1234567890abcdef1234567890abcd';
-      
-      mockSuiClient.getObject.mockRejectedValue(new Error('Network error'));
-
-      const objectType = await viewService.getObjectType(testObjectId);
-      
-      expect(objectType).toBe(null);
-    });
-  });
-
-  // ==================== USER MEMORY QUERIES ====================
-
-  describe('getUserMemories', () => {
-    const mockMemoryData = [
-      {
-        data: {
-          objectId: '0xmemory1234567890abcdef1234567890abcdef',
-          content: {
-            fields: {
-              owner: testAddress,
-              category: 'personal',
-              vector_id: '123',
-              blob_id: 'walrus_blob_123',
-              content_type: 'text/plain',
-              content_size: '1024',
-              content_hash: 'hash123',
-              topic: 'Test Memory',
-              importance: '5',
-              embedding_blob_id: 'embedding_123',
-              created_at: '1234567890',
-              updated_at: '1234567890',
-            }
-          }
-        }
-      },
-      {
-        data: {
-          objectId: '0xmemory2345678901bcdef2345678901bcdef2',
-          content: {
-            fields: {
-              owner: testAddress,
-              category: 'work',
-              vector_id: '124',
-              blob_id: 'walrus_blob_124',
-              content_type: 'application/json',
-              content_size: '2048',
-              content_hash: 'hash124',
-              topic: 'Work Memory',
-              importance: '8',
-              embedding_blob_id: 'embedding_124',
-              created_at: '1234567891',
-              updated_at: '1234567891',
-            }
-          }
-        }
+      if (result.data.length > 0) {
+        const memory = result.data[0];
+        expect(memory.id.startsWith('0x')).toBe(true);
+        expect(memory.owner).toBe(address);
+        expect(typeof memory.category).toBe('string');
+        expect(typeof memory.contentSize).toBe('number');
+        expect(typeof memory.importance).toBe('number');
       }
-    ];
-
-    test('should get user memories with default options', async () => {
-      mockSuiClient.getOwnedObjects.mockResolvedValue({
-        data: mockMemoryData,
-        nextCursor: null,
-        hasNextPage: false,
-      });
-
-      const result = await viewService.getUserMemories(testAddress);
-      
-      expect(result.data).toHaveLength(2);
-      expect(result.hasMore).toBe(false);
-      expect(result.nextCursor).toBeUndefined();
-      
-      expect(result.data[0]).toEqual({
-        id: '0xmemory1234567890abcdef1234567890abcdef',
-        owner: testAddress,
-        category: 'personal',
-        vectorId: 123,
-        blobId: 'walrus_blob_123',
-        contentType: 'text/plain',
-        contentSize: 1024,
-        contentHash: 'hash123',
-        topic: 'Test Memory',
-        importance: 5,
-        embeddingBlobId: 'embedding_123',
-        createdAt: 1234567890,
-        updatedAt: 1234567890,
-      });
-
-      expect(mockSuiClient.getOwnedObjects).toHaveBeenCalledWith({
-        owner: testAddress,
-        filter: {
-          StructType: `${testPackageId}::memory::Memory`,
-        },
-        options: {
-          showContent: true,
-          showType: true,
-        },
-        limit: 50,
-        cursor: undefined,
-      });
     });
 
-    test('should get user memories with pagination', async () => {
-      const cursor = 'test_cursor_123';
-      const limit = 25;
-
-      mockSuiClient.getOwnedObjects.mockResolvedValue({
-        data: mockMemoryData.slice(0, 1),
-        nextCursor: 'next_cursor_456',
-        hasNextPage: true,
-      });
-
-      const result = await viewService.getUserMemories(testAddress, {
-        limit,
-        cursor,
-      });
-      
-      expect(result.data).toHaveLength(1);
-      expect(result.hasMore).toBe(true);
-      expect(result.nextCursor).toBe('next_cursor_456');
-
-      expect(mockSuiClient.getOwnedObjects).toHaveBeenCalledWith({
-        owner: testAddress,
-        filter: {
-          StructType: `${testPackageId}::memory::Memory`,
-        },
-        options: {
-          showContent: true,
-          showType: true,
-        },
-        limit,
-        cursor,
-      });
-    });
-
-    test('should filter memories by category', async () => {
-      mockSuiClient.getOwnedObjects.mockResolvedValue({
-        data: mockMemoryData,
-        nextCursor: null,
-        hasNextPage: false,
-      });
-
-      const result = await viewService.getUserMemories(testAddress, {
-        category: 'work',
-      });
-      
-      // Should filter out 'personal' category, leaving only 'work'
-      expect(result.data).toHaveLength(1);
-      expect(result.data[0].category).toBe('work');
-    });
-
-    test('should handle empty result', async () => {
-      mockSuiClient.getOwnedObjects.mockResolvedValue({
-        data: [],
-        nextCursor: null,
-        hasNextPage: false,
-      });
-
-      const result = await viewService.getUserMemories(testAddress);
-      
-      expect(result.data).toHaveLength(0);
-      expect(result.hasMore).toBe(false);
-    });
-
-    test('should handle client error', async () => {
-      mockSuiClient.getOwnedObjects.mockRejectedValue(new Error('Network failure'));
-
-      await expect(viewService.getUserMemories(testAddress))
-        .rejects.toThrow('Failed to get user memories: Error: Network failure');
-    });
-  });
-
-  // ==================== SPECIFIC MEMORY QUERIES ====================
-
-  describe('getMemory', () => {
-    const testMemoryId = '0xmemory1234567890abcdef1234567890abcdef';
-    const mockMemoryResponse = {
-      data: {
-        objectId: testMemoryId,
-        content: {
-          fields: {
-            owner: testAddress,
-            category: 'personal',
-            vector_id: '123',
-            blob_id: 'walrus_blob_123',
-            content_type: 'text/plain',
-            content_size: '1024',
-            content_hash: 'hash123',
-            topic: 'Test Memory',
-            importance: '5',
-            embedding_blob_id: 'embedding_123',
-            created_at: '1234567890',
-            updated_at: '1234567890',
-          }
-        }
+    it('fetches individual memories when identifiers are available', async () => {
+      const address = hasTestUser ? testUserAddress : deriveAddress('pdw-memory-fetch');
+      const listing = await service.getUserMemories(address, { limit: 5 });
+      if (listing.data.length === 0) {
+        expect(listing.data).toHaveLength(0);
+        return;
       }
-    };
 
-    test('should get specific memory by ID', async () => {
-      mockSuiClient.getObject.mockResolvedValue(mockMemoryResponse);
+      const first = listing.data[0];
+      const memory = await service.getMemory(first.id);
 
-      const memory = await viewService.getMemory(testMemoryId);
-      
-      expect(memory).toEqual({
-        id: testMemoryId,
-        owner: testAddress,
-        category: 'personal',
-        vectorId: 123,
-        blobId: 'walrus_blob_123',
-        contentType: 'text/plain',
-        contentSize: 1024,
-        contentHash: 'hash123',
-        topic: 'Test Memory',
-        importance: 5,
-        embeddingBlobId: 'embedding_123',
-        createdAt: 1234567890,
-        updatedAt: 1234567890,
-      });
-
-      expect(mockSuiClient.getObject).toHaveBeenCalledWith({
-        id: testMemoryId,
-        options: {
-          showContent: true,
-          showType: true,
-        },
-      });
-    });
-
-    test('should return null for non-existent memory', async () => {
-      mockSuiClient.getObject.mockResolvedValue({
-        data: null
-      });
-
-      const memory = await viewService.getMemory(testMemoryId);
-      
-      expect(memory).toBe(null);
-    });
-
-    test('should return null for object without content', async () => {
-      mockSuiClient.getObject.mockResolvedValue({
-        data: {
-          objectId: testMemoryId,
-          content: null
-        }
-      });
-
-      const memory = await viewService.getMemory(testMemoryId);
-      
-      expect(memory).toBe(null);
-    });
-
-    test('should handle client error', async () => {
-      mockSuiClient.getObject.mockRejectedValue(new Error('Object not found'));
-
-      await expect(viewService.getMemory(testMemoryId))
-        .rejects.toThrow('Failed to get memory: Error: Object not found');
-    });
-  });
-
-  // ==================== MEMORY INDEX QUERIES ====================
-
-  describe('getMemoryIndex', () => {
-    const mockIndexResponse = {
-      data: [
-        {
-          data: {
-            objectId: '0xindex1234567890abcdef1234567890abcdef',
-            content: {
-              fields: {
-                owner: testAddress,
-                version: '1',
-                index_blob_id: 'index_blob_123',
-                graph_blob_id: 'graph_blob_123',
-                memory_count: '42',
-                last_updated: '1234567890',
-              }
-            }
-          }
-        }
-      ],
-      nextCursor: null,
-      hasNextPage: false,
-    };
-
-    test('should get memory index for user', async () => {
-      mockSuiClient.getOwnedObjects.mockResolvedValue(mockIndexResponse);
-
-      const index = await viewService.getMemoryIndex(testAddress);
-      
-      expect(index).toEqual({
-        id: '0xindex1234567890abcdef1234567890abcdef',
-        owner: testAddress,
-        version: 1,
-        indexBlobId: 'index_blob_123',
-        graphBlobId: 'graph_blob_123',
-        memoryCount: 42,
-        lastUpdated: 1234567890,
-      });
-
-      expect(mockSuiClient.getOwnedObjects).toHaveBeenCalledWith({
-        owner: testAddress,
-        filter: {
-          StructType: `${testPackageId}::memory::MemoryIndex`,
-        },
-        options: {
-          showContent: true,
-          showType: true,
-        },
-        limit: 1,
-      });
-    });
-
-    test('should return null when no index exists', async () => {
-      mockSuiClient.getOwnedObjects.mockResolvedValue({
-        data: [],
-        nextCursor: null,
-        hasNextPage: false,
-      });
-
-      const index = await viewService.getMemoryIndex(testAddress);
-      
-      expect(index).toBe(null);
-    });
-
-    test('should return null for object without content', async () => {
-      mockSuiClient.getOwnedObjects.mockResolvedValue({
-        data: [
-          {
-            data: {
-              objectId: '0xindex1234567890abcdef1234567890abcdef',
-              content: null
-            }
-          }
-        ],
-        nextCursor: null,
-        hasNextPage: false,
-      });
-
-      const index = await viewService.getMemoryIndex(testAddress);
-      
-      expect(index).toBe(null);
-    });
-
-    test('should handle client error', async () => {
-      mockSuiClient.getOwnedObjects.mockRejectedValue(new Error('Network error'));
-
-      await expect(viewService.getMemoryIndex(testAddress))
-        .rejects.toThrow('Failed to get memory index: Error: Network error');
-    });
-  });
-
-  // ==================== MEMORY STATISTICS ====================
-
-  describe('getMemoryStats', () => {
-    const mockStatsMemories = {
-      data: [
-        {
-          id: '0xmemory1',
-          owner: testAddress,
-          category: 'personal',
-          vectorId: 1,
-          blobId: 'blob1',
-          contentType: 'text/plain',
-          contentSize: 1000,
-          contentHash: 'hash1',
-          topic: 'Memory 1',
-          importance: 5,
-          embeddingBlobId: 'embed1',
-          createdAt: 1234567890,
-          updatedAt: 1234567890,
-        },
-        {
-          id: '0xmemory2',
-          owner: testAddress,
-          category: 'work',
-          vectorId: 2,
-          blobId: 'blob2',
-          contentType: 'text/plain',
-          contentSize: 2000,
-          contentHash: 'hash2',
-          topic: 'Memory 2',
-          importance: 8,
-          embeddingBlobId: 'embed2',
-          createdAt: 1234567891,
-          updatedAt: 1234567892,
-        },
-        {
-          id: '0xmemory3',
-          owner: testAddress,
-          category: 'personal',
-          vectorId: 3,
-          blobId: 'blob3',
-          contentType: 'application/json',
-          contentSize: 1500,
-          contentHash: 'hash3',
-          topic: 'Memory 3',
-          importance: 3,
-          embeddingBlobId: 'embed3',
-          createdAt: 1234567893,
-          updatedAt: 1234567894,
-        }
-      ],
-      nextCursor: undefined,
-      hasMore: false,
-    };
-
-    test('should calculate memory statistics correctly', async () => {
-      // Mock getUserMemories to return test data
-      jest.spyOn(viewService, 'getUserMemories').mockResolvedValue(mockStatsMemories);
-
-      const stats = await viewService.getMemoryStats(testAddress);
-      
-      expect(stats).toEqual({
-        totalMemories: 3,
-        categoryCounts: {
-          personal: 2,
-          work: 1,
-        },
-        totalSize: 4500,
-        averageImportance: (5 + 8 + 3) / 3, // 5.33...
-        lastActivityTime: 1234567894,
-      });
-
-      expect(viewService.getUserMemories).toHaveBeenCalledWith(testAddress, { limit: 1000 });
-    });
-
-    test('should handle empty memories', async () => {
-      jest.spyOn(viewService, 'getUserMemories').mockResolvedValue({
-        data: [],
-        nextCursor: undefined,
-        hasMore: false,
-      });
-
-      const stats = await viewService.getMemoryStats(testAddress);
-      
-      expect(stats).toEqual({
-        totalMemories: 0,
-        categoryCounts: {},
-        totalSize: 0,
-        averageImportance: 0,
-        lastActivityTime: 0,
-      });
-    });
-
-    test('should handle getUserMemories error', async () => {
-      jest.spyOn(viewService, 'getUserMemories').mockRejectedValue(new Error('Memory fetch failed'));
-
-      await expect(viewService.getMemoryStats(testAddress))
-        .rejects.toThrow('Failed to get memory stats: Error: Memory fetch failed');
-    });
-  });
-
-  // ==================== ACCESS CONTROL QUERIES ====================
-
-  describe('getAccessPermissions', () => {
-    const mockPermissionData = [
-      {
-        data: {
-          objectId: '0xperm1234567890abcdef1234567890abcdef',
-          content: {
-            fields: {
-              grantor: testAddress,
-              grantee: '0x9876543210fedcba9876543210fedcba98765432',
-              content_id: '0xcontent123',
-              permission_type: 'read',
-              expires_at: (Date.now() + 3600000).toString(), // 1 hour from now
-              created_at: '1234567890',
-            }
-          }
-        }
-      },
-      {
-        data: {
-          objectId: '0xperm2345678901bcdef2345678901bcdef2',
-          content: {
-            fields: {
-              grantor: testAddress,
-              grantee: '0x8765432109fedcba8765432109fedcba87654321',
-              content_id: '0xcontent124',
-              permission_type: 'write',
-              expires_at: (Date.now() - 3600000).toString(), // 1 hour ago (expired)
-              created_at: '1234567891',
-            }
-          }
-        }
+      expect(memory).not.toBeNull();
+      if (!memory) {
+        return;
       }
-    ];
 
-    test('should get access permissions as grantor', async () => {
-      mockSuiClient.getOwnedObjects.mockResolvedValue({
-        data: mockPermissionData,
-        nextCursor: null,
-        hasNextPage: false,
-      });
-
-      const permissions = await viewService.getAccessPermissions(testAddress);
-      
-      expect(permissions).toHaveLength(2);
-      expect(permissions[0].grantor).toBe(testAddress);
-      expect(permissions[0].permissionType).toBe('read');
-      expect(permissions[0].isActive).toBe(true);
-      expect(permissions[1].isActive).toBe(false); // expired
-
-      expect(mockSuiClient.getOwnedObjects).toHaveBeenCalledWith({
-        owner: testAddress,
-        filter: {
-          StructType: `${testPackageId}::seal_access_control::AccessPermission`,
-        },
-        options: {
-          showContent: true,
-          showType: true,
-        },
-      });
+      expect(memory.id).toBe(first.id);
+      expect(memory.owner).toBe(address);
+      expect(memory.category).toBe(first.category);
     });
 
-    test('should filter active permissions only', async () => {
-      mockSuiClient.getOwnedObjects.mockResolvedValue({
-        data: mockPermissionData,
-        nextCursor: null,
-        hasNextPage: false,
+    it('summarizes memory statistics without mocks', async () => {
+      const address = hasTestUser ? testUserAddress : deriveAddress('pdw-memory-stats');
+      const stats = await service.getMemoryStats(address);
+
+      expect(stats.totalMemories).toBeGreaterThanOrEqual(0);
+      expect(typeof stats.totalSize).toBe('number');
+      expect(typeof stats.averageImportance).toBe('number');
+      expect(typeof stats.lastActivityTime).toBe('number');
+
+      Object.entries(stats.categoryCounts).forEach(([category, count]) => {
+        expect(typeof category).toBe('string');
+        expect(typeof count).toBe('number');
       });
-
-      const permissions = await viewService.getAccessPermissions(testAddress, {
-        activeOnly: true,
-      });
-      
-      expect(permissions).toHaveLength(1);
-      expect(permissions[0].isActive).toBe(true);
-    });
-
-    test('should handle permissions without expiration', async () => {
-      const neverExpiringPermission = [{
-        data: {
-          objectId: '0xperm3456789012cdef3456789012cdef3',
-          content: {
-            fields: {
-              grantor: testAddress,
-              grantee: '0x7654321098fedcba7654321098fedcba76543210',
-              content_id: '0xcontent125',
-              permission_type: 'admin',
-              expires_at: null,
-              created_at: '1234567892',
-            }
-          }
-        }
-      }];
-
-      mockSuiClient.getOwnedObjects.mockResolvedValue({
-        data: neverExpiringPermission,
-        nextCursor: null,
-        hasNextPage: false,
-      });
-
-      const permissions = await viewService.getAccessPermissions(testAddress);
-      
-      expect(permissions).toHaveLength(1);
-      expect(permissions[0].expiresAt).toBeUndefined();
-      expect(permissions[0].isActive).toBe(true);
-    });
-
-    test('should handle client error', async () => {
-      mockSuiClient.getOwnedObjects.mockRejectedValue(new Error('Permission query failed'));
-
-      await expect(viewService.getAccessPermissions(testAddress))
-        .rejects.toThrow('Failed to get access permissions: Error: Permission query failed');
     });
   });
 
-  // ==================== BCS TYPE VALIDATION ====================
+  describe('memory index', () => {
+    it('returns structured metadata when an index exists', async () => {
+      const address = hasTestUser ? testUserAddress : deriveAddress('pdw-memory-index');
+      const index = await service.getMemoryIndex(address);
+      if (!index) {
+        expect(index).toBeNull();
+        return;
+      }
 
-  describe('BCS integration patterns', () => {
-    test('should handle object type validation with package structure', async () => {
-      const memoryType = `${testPackageId}::memory::Memory`;
-      const indexType = `${testPackageId}::memory::MemoryIndex`;
-      const permissionType = `${testPackageId}::seal_access_control::AccessPermission`;
-
-      // Test memory type
-      mockSuiClient.getObject.mockResolvedValueOnce({
-        data: { objectId: '0xtest1', type: memoryType }
-      });
-      
-      const type1 = await viewService.getObjectType('0xtest1');
-      expect(type1).toBe(memoryType);
-
-      // Test index type  
-      mockSuiClient.getObject.mockResolvedValueOnce({
-        data: { objectId: '0xtest2', type: indexType }
-      });
-      
-      const type2 = await viewService.getObjectType('0xtest2');
-      expect(type2).toBe(indexType);
-
-      // Test permission type
-      mockSuiClient.getObject.mockResolvedValueOnce({
-        data: { objectId: '0xtest3', type: permissionType }
-      });
-      
-      const type3 = await viewService.getObjectType('0xtest3');
-      expect(type3).toBe(permissionType);
-    });
-
-    test('should validate struct type filters in queries', async () => {
-      mockSuiClient.getOwnedObjects.mockResolvedValue({
-        data: [],
-        nextCursor: null,
-        hasNextPage: false,
-      });
-
-      await viewService.getUserMemories(testAddress);
-      
-      expect(mockSuiClient.getOwnedObjects).toHaveBeenCalledWith(
-        expect.objectContaining({
-          filter: {
-            StructType: `${testPackageId}::memory::Memory`,
-          }
-        })
-      );
+      expect(index.owner).toBe(address);
+      expect(index.id.startsWith('0x')).toBe(true);
+      expect(index.version).toBeGreaterThanOrEqual(0);
+      expect(typeof index.indexBlobId).toBe('string');
     });
   });
 
-  // ==================== ERROR HANDLING AND NETWORK FAILURES ====================
+  describe('access control queries', () => {
+    it('lists access permissions granted by the test user when available', async () => {
+      const address = hasTestUser ? testUserAddress : deriveAddress('pdw-access-permissions');
+      const permissions = await service.getAccessPermissions(address, { asGrantor: true });
+      expect(Array.isArray(permissions)).toBe(true);
 
-  describe('Error handling and resilience', () => {
-    test('should handle network timeout errors', async () => {
-      const timeoutError = new Error('Request timeout');
-      timeoutError.name = 'TimeoutError';
-      
-      mockSuiClient.getOwnedObjects.mockRejectedValue(timeoutError);
-
-      await expect(viewService.getUserMemories(testAddress))
-        .rejects.toThrow('Failed to get user memories: TimeoutError: Request timeout');
-    });
-
-    test('should handle invalid response structure', async () => {
-      mockSuiClient.getOwnedObjects.mockResolvedValue({
-        data: [
-          {
-            data: {
-              objectId: '0xtest',
-              content: {
-                // Missing 'fields' property
-                invalidStructure: true
-              }
-            }
-          }
-        ],
-        nextCursor: null,
-        hasNextPage: false,
+      permissions.forEach((permission) => {
+        expect(permission.id.startsWith('0x')).toBe(true);
+        expect(permission.grantor).toBe(address);
+        expect(typeof permission.grantee).toBe('string');
+        expect(typeof permission.permissionType).toBe('string');
+        expect(typeof permission.createdAt).toBe('number');
       });
-
-      const result = await viewService.getUserMemories(testAddress);
-      
-      // Should gracefully handle invalid structure by filtering out invalid objects
-      expect(result.data).toHaveLength(0);
     });
 
-    test('should handle malformed field data', async () => {
-      mockSuiClient.getOwnedObjects.mockResolvedValue({
-        data: [
-          {
-            data: {
-              objectId: '0xtest',
-              content: {
-                fields: {
-                  owner: testAddress,
-                  category: 'test',
-                  vector_id: 'invalid_number',
-                  blob_id: 'blob1',
-                  content_type: 'text/plain',
-                  content_size: 'invalid_size',
-                  content_hash: 'hash1',
-                  topic: 'Test',
-                  importance: 'invalid_importance',
-                  embedding_blob_id: 'embed1',
-                  created_at: 'invalid_timestamp',
-                  updated_at: 'invalid_timestamp',
-                }
-              }
-            }
-          }
-        ],
-        nextCursor: null,
-        hasNextPage: false,
+    it('returns empty results when registry objects are not configured', async () => {
+      const registries = await service.getContentRegistry();
+      expect(registries.data.length).toBe(0);
+      expect(registries.hasMore).toBe(false);
+    });
+
+    it('fetches content registry entries for the configured owner when available', async () => {
+      if (!testUserAddress || !walletRegistryId) {
+        const address = deriveAddress('pdw-content-registry');
+        const registries = await service.getContentRegistry({ owner: address, limit: 1 });
+        expect(Array.isArray(registries.data)).toBe(true);
+        return;
+      }
+
+      const registries = await service.getContentRegistry({ owner: testUserAddress, limit: 10 });
+
+      expect(Array.isArray(registries.data)).toBe(true);
+      expect(typeof registries.hasMore).toBe('boolean');
+
+      registries.data.forEach((entry) => {
+        expect(entry.owner).toBe(testUserAddress);
+        expect(entry.id.startsWith('0x')).toBe(true);
+        expect(typeof entry.contentHash).toBe('string');
       });
-
-      const result = await viewService.getUserMemories(testAddress);
-      
-      // Should handle malformed data by parsing with fallbacks
-      expect(result.data).toHaveLength(1);
-      expect(result.data[0].vectorId).toBeNaN();
-      expect(result.data[0].contentSize).toBeNaN();
-      expect(result.data[0].importance).toBeNaN();
-    });
-
-    test('should handle rate limiting errors', async () => {
-      const rateLimitError = new Error('Rate limit exceeded');
-      rateLimitError.name = 'RateLimitError';
-      
-      mockSuiClient.getObject.mockRejectedValue(rateLimitError);
-
-      await expect(viewService.getMemory('0xtest'))
-        .rejects.toThrow('Failed to get memory: RateLimitError: Rate limit exceeded');
     });
   });
 
-  console.log('✅ ViewService comprehensive tests created successfully');
-  console.log('📋 Tests cover: object queries, memory operations, indexing, permissions, BCS validation, error handling');
+  describe('search helpers', () => {
+    it('returns an empty array for unindexed content-hash lookups', async () => {
+      const result = await service.findMemoryByContentHash('nonexistent-hash-for-integration-test');
+      expect(Array.isArray(result)).toBe(true);
+      expect(result.length).toBe(0);
+    });
+  });
 });

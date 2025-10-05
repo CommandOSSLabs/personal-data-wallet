@@ -228,28 +228,37 @@ export declare class PersonalDataWallet {
         ensureContext: (userAddress: string, appId: string, signer: any) => Promise<import("..").ContextWallet>;
     };
     get access(): {
-        requestConsent: (options: import("..").RequestConsentOptions) => Promise<import("..").ConsentRequest>;
-        grantPermissions: (userAddress: string, options: import("..").GrantPermissionsOptions) => Promise<import("..").AccessGrant>;
-        revokePermissions: (userAddress: string, options: import("..").RevokePermissionsOptions) => Promise<boolean>;
-        checkPermission: (appId: string, scope: import("..").PermissionScope, userAddress: string) => Promise<boolean>;
+        requestConsent: (options: import("..").RequestConsentOptions) => Promise<import("..").ConsentRequestRecord>;
+        grantPermissions: (userAddress: string, options: import("..").GrantPermissionsOptions & {
+            signer?: import("@mysten/sui/dist/cjs/cryptography").Signer;
+        }) => Promise<import("..").AccessGrant>;
+        revokePermissions: (userAddress: string, options: import("..").RevokePermissionsOptions & {
+            signer?: import("@mysten/sui/dist/cjs/cryptography").Signer;
+        }) => Promise<boolean>;
+        checkPermission: (appId: string, scope: import("..").PermissionScope, userAddressOrTargetWallet: string) => Promise<boolean>;
         getGrantsByUser: (userAddress: string) => Promise<import("..").AccessGrant[]>;
         validateOAuthPermission: (walletOwner: string, appId: string, requestedScope: string) => Promise<boolean>;
     };
     get aggregate(): {
         query: (options: import("..").AggregatedQueryOptions) => Promise<import("../aggregation/AggregationService").AggregatedQueryResult>;
-        queryWithScopes: (userAddress: string, query: string, scopes: import("..").PermissionScope[]) => Promise<import("../aggregation/AggregationService").AggregatedQueryResult>;
-        search: (userAddress: string, searchQuery: string, options?: {
-            appIds?: string[];
+        queryWithScopes: (requestingWallet: string, userAddress: string, query: string, scopes: import("..").PermissionScope[]) => Promise<import("../aggregation/AggregationService").AggregatedQueryResult>;
+        search: (requestingWallet: string, userAddress: string, searchQuery: string, options?: {
+            targetWallets?: string[];
             categories?: string[];
             limit?: number;
             minPermissionScope?: import("..").PermissionScope;
         }) => Promise<import("../aggregation/AggregationService").AggregatedQueryResult>;
-        getAggregatedStats: (userAddress: string, appIds: string[]) => Promise<{
+        getAggregatedStats: (userAddress: string, targetWallets: string[]) => Promise<{
             totalContexts: number;
             totalItems: number;
             totalSize: number;
             categoryCounts: Record<string, number>;
-            appBreakdown: Record<string, {
+            contextBreakdown: Record<string, {
+                items: number;
+                size: number;
+                lastActivity: number;
+            }>;
+            appBreakdown?: Record<string, {
                 items: number;
                 size: number;
                 lastActivity: number;

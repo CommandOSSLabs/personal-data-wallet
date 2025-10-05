@@ -28,6 +28,7 @@ export interface AggregatedQueryResult {
     /** Query results organized by app context */
     results: Array<{
         contextId: string;
+        targetWallet: string;
         appId: string;
         data: Array<{
             id: string;
@@ -73,19 +74,24 @@ export declare class AggregationService {
      * @param scopes - Required permission scopes
      * @returns Filtered aggregated results
      */
-    queryWithScopes(userAddress: string, query: string, scopes: PermissionScope[]): Promise<AggregatedQueryResult>;
+    queryWithScopes(requestingWallet: string, userAddress: string, query: string, scopes: PermissionScope[]): Promise<AggregatedQueryResult>;
     /**
      * Get aggregated statistics across contexts
      * @param userAddress - User address
      * @param appIds - Apps to include in statistics
      * @returns Aggregated statistics
      */
-    getAggregatedStats(userAddress: string, appIds: string[]): Promise<{
+    getAggregatedStats(userAddress: string, targetWallets: string[]): Promise<{
         totalContexts: number;
         totalItems: number;
         totalSize: number;
         categoryCounts: Record<string, number>;
-        appBreakdown: Record<string, {
+        contextBreakdown: Record<string, {
+            items: number;
+            size: number;
+            lastActivity: number;
+        }>;
+        appBreakdown?: Record<string, {
             items: number;
             size: number;
             lastActivity: number;
@@ -98,17 +104,12 @@ export declare class AggregationService {
      * @param options - Search options
      * @returns Search results
      */
-    search(userAddress: string, searchQuery: string, options?: {
-        appIds?: string[];
+    search(requestingWallet: string, userAddress: string, searchQuery: string, options?: {
+        targetWallets?: string[];
         categories?: string[];
         limit?: number;
         minPermissionScope?: PermissionScope;
     }): Promise<AggregatedQueryResult>;
-    /**
-     * Derive context ID (helper method)
-     * @private
-     */
-    private deriveContextId;
     /**
      * Filter data by search query
      * @private

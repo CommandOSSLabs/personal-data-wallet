@@ -45,10 +45,12 @@ export interface ContextWallet {
  * Used in OAuth-style permission flow
  */
 export interface ConsentRequest {
-    /** Application requesting access */
-    requesterAppId: string;
+    /** Wallet requesting access */
+    requesterWallet: string;
+    /** Target wallet that owns the data */
+    targetWallet: string;
     /** Specific permission scopes being requested */
-    targetScopes: string[];
+    targetScopes: PermissionScope[];
     /** Human-readable purpose for the access request */
     purpose: string;
     /** Optional expiration timestamp for the request */
@@ -61,14 +63,18 @@ export interface ConsentRequest {
 export interface AccessGrant {
     /** Unique grant identifier */
     id: string;
-    /** Context ID that access is granted to */
-    contextId: string;
-    /** Application that is granted access */
-    granteeAppId: string;
+    /** Wallet requesting access (grantee) */
+    requestingWallet: string;
+    /** Target wallet that grants access */
+    targetWallet: string;
     /** Specific permission scopes granted */
-    scopes: string[];
+    scopes: PermissionScope[];
     /** Expiration timestamp for this grant */
     expiresAt?: number;
+    /** Timestamp when grant was issued */
+    grantedAt: number;
+    /** Optional transaction digest once executed on-chain */
+    transactionDigest?: string;
 }
 /**
  * Options for creating a new main wallet
@@ -148,8 +154,10 @@ export type PermissionScope = typeof PermissionScopes[keyof typeof PermissionSco
  * Options for requesting consent
  */
 export interface RequestConsentOptions {
-    /** Application requesting access */
-    appId: string;
+    /** Wallet requesting access */
+    requesterWallet: string;
+    /** Target wallet that owns the data */
+    targetWallet: string;
     /** Permission scopes being requested */
     scopes: PermissionScope[];
     /** Human-readable purpose */
@@ -161,10 +169,10 @@ export interface RequestConsentOptions {
  * Options for granting permissions
  */
 export interface GrantPermissionsOptions {
-    /** Context ID to grant access to */
-    contextId: string;
-    /** Application receiving access */
-    recipientAppId: string;
+    /** Wallet requesting access (grantee) */
+    requestingWallet: string;
+    /** Target wallet that owns the data */
+    targetWallet: string;
     /** Permission scopes to grant */
     scopes: PermissionScope[];
     /** Optional expiration timestamp */
@@ -174,17 +182,23 @@ export interface GrantPermissionsOptions {
  * Options for revoking permissions
  */
 export interface RevokePermissionsOptions {
-    /** Grant ID to revoke */
-    grantId: string;
+    /** Wallet requesting access */
+    requestingWallet: string;
+    /** Target wallet that granted access */
+    targetWallet: string;
+    /** Optional scope to revoke */
+    scope?: PermissionScope;
 }
 /**
  * Options for aggregated queries across contexts
  */
 export interface AggregatedQueryOptions {
-    /** App contexts to query (must have permissions) */
-    apps: string[];
+    /** Wallet requesting the aggregated query */
+    requestingWallet: string;
     /** User address for permission validation */
     userAddress: string;
+    /** Optional list of target wallets to include */
+    targetWallets?: string[];
     /** Search query */
     query: string;
     /** Required permission scope */

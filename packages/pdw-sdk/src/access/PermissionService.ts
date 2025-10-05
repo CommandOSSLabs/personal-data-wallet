@@ -8,11 +8,16 @@
  * - Permission auditing and revocation
  */
 
+import { randomUUID } from 'crypto';
 import { SuiClient } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
+import { normalizeSuiAddress } from '@mysten/sui/utils';
+import type { Signer } from '@mysten/sui/cryptography';
 
 import { 
   ConsentRequest,
+  ConsentRequestRecord,
+  ConsentStatus,
   AccessGrant,
   PermissionScope,
   RequestConsentOptions,
@@ -20,6 +25,9 @@ import {
   RevokePermissionsOptions 
 } from '../types/wallet.js';
 import { ContextWalletService } from '../wallet/ContextWalletService.js';
+import { CrossContextPermissionService } from '../services/CrossContextPermissionService';
+import type { WalletAllowlistPermission } from '../services/CrossContextPermissionService';
+import type { ConsentRepository } from '../permissions/ConsentRepository.js';
 
 /**
  * Configuration for PermissionService
@@ -29,10 +37,16 @@ export interface PermissionServiceConfig {
   suiClient: SuiClient;
   /** Package ID for Move contracts */
   packageId: string;
+  /** Access registry ID for wallet allowlists */
+  accessRegistryId: string;
   /** API URL for backend consent UI */
   apiUrl?: string;
   /** ContextWalletService for validation */
   contextWalletService?: ContextWalletService;
+  /** Optional injected cross-context permission service */
+  crossContextPermissionService?: CrossContextPermissionService;
+  /** Optional repository for consent persistence */
+  consentRepository?: ConsentRepository;
 }
 
 /**
@@ -43,12 +57,30 @@ export class PermissionService {
   private packageId: string;
   private apiUrl: string;
   private contextWalletService?: ContextWalletService;
+  private crossContextPermissions: CrossContextPermissionService;
+  private pendingConsents: Map<string, ConsentRequestRecord> = new Map();
+  private consentRepository?: ConsentRepository;
 
   constructor(config: PermissionServiceConfig) {
     this.suiClient = config.suiClient;
     this.packageId = config.packageId;
     this.apiUrl = config.apiUrl || 'http://localhost:3001/api';
     this.contextWalletService = config.contextWalletService;
+    this.consentRepository = config.consentRepository;
+
+    if (!config.accessRegistryId) {
+      throw new Error('PermissionService requires accessRegistryId for wallet-based permissions');
+    }
+
+    this.crossContextPermissions =
+      config.crossContextPermissionService ??
+      new CrossContextPermissionService(
+        {
+          packageId: this.packageId,
+          accessRegistryId: config.accessRegistryId,
+        },
+        this.suiClient,
+      );
   }
 
   /**
@@ -56,16 +88,28 @@ export class PermissionService {
    * @param options - Consent request options
    * @returns Created consent request
    */
-  async requestConsent(options: RequestConsentOptions): Promise<ConsentRequest> {
-    const consentRequest: ConsentRequest = {
-      requesterAppId: options.appId,
+  async requestConsent(options: RequestConsentOptions): Promise<ConsentRequestRecord> {
+    const requesterWallet = normalizeSuiAddress(options.requesterWallet);
+    const targetWallet = normalizeSuiAddress(options.targetWallet);
+    const now = Date.now();
+
+    const requestId = randomUUID();
+    const consentRequest: ConsentRequestRecord = {
+      requesterWallet,
+      targetWallet,
       targetScopes: options.scopes,
       purpose: options.purpose,
-      expiresAt: options.expiresIn ? Date.now() + options.expiresIn : undefined
+      expiresAt: options.expiresIn ? now + options.expiresIn : undefined,
+      requestId,
+      createdAt: now,
+      updatedAt: now,
+      status: 'pending',
     };
 
+    await this.persistConsentRequest(consentRequest);
+
     // TODO: Send consent request to backend for UI presentation
-    // For now, just return the request object
+    // For now, return the persisted record so callers can track status locally
     return consentRequest;
   }
 
@@ -75,26 +119,70 @@ export class PermissionService {
    * @param options - Grant options
    * @returns Created access grant
    */
-  async grantPermissions(userAddress: string, options: GrantPermissionsOptions): Promise<AccessGrant> {
-    // Validate context exists and user owns it
+  async grantPermissions(
+    userAddress: string,
+    options: GrantPermissionsOptions & { signer?: Signer }
+  ): Promise<AccessGrant> {
+    const requestingWallet = normalizeSuiAddress(options.requestingWallet);
+    const targetWallet = normalizeSuiAddress(options.targetWallet);
     if (this.contextWalletService) {
-      const hasAccess = await this.contextWalletService.validateAccess(options.contextId, userAddress);
-      if (!hasAccess) {
-        throw new Error('User does not own the specified context');
+      const ownsContext = await this.contextWalletService.validateAccess(targetWallet, userAddress);
+      if (!ownsContext) {
+        throw new Error('User does not own the specified target wallet');
       }
     }
 
-    // Create access grant
-    const grant: AccessGrant = {
-      id: `grant_${Date.now()}`,
-      contextId: options.contextId,
-      granteeAppId: options.recipientAppId,
-      scopes: options.scopes,
-      expiresAt: options.expiresAt
-    };
+    let lastDigest: string | undefined;
+    if (options.signer) {
+      for (const scope of options.scopes) {
+        const accessLevel = scope.startsWith('write:') ? 'write' : 'read';
+        lastDigest = await this.crossContextPermissions.grantWalletAllowlistAccess(
+          {
+            requestingWallet,
+            targetWallet,
+            scope,
+            accessLevel,
+            expiresAt: options.expiresAt ?? 0,
+          },
+          options.signer,
+        );
+      }
+    }
 
-    // TODO: Record grant on-chain using seal_access_control contract
-    // TODO: Store policy blob in Walrus for quick lookups
+    const permissions = await this.crossContextPermissions.queryWalletPermissions({
+      requestingWallet,
+      targetWallet,
+    });
+
+    const grantFromChain = this.buildGrantFromPermissions(
+      requestingWallet,
+      targetWallet,
+      permissions,
+    );
+
+    const now = Date.now();
+    let grant: AccessGrant =
+      grantFromChain ?? {
+        id: `grant_${requestingWallet}_${targetWallet}_${now}`,
+        requestingWallet,
+        targetWallet,
+        scopes: options.scopes,
+        expiresAt: options.expiresAt,
+        grantedAt: now,
+      };
+
+    if (lastDigest) {
+      grant = {
+        ...grant,
+        transactionDigest: lastDigest,
+      };
+    }
+    await this.updateConsentStatus({
+      requesterWallet: requestingWallet,
+      targetWallet,
+      newStatus: 'approved',
+      updatedAt: now,
+    });
 
     return grant;
   }
@@ -105,49 +193,59 @@ export class PermissionService {
    * @param options - Revoke options
    * @returns Success status
    */
-  async revokePermissions(userAddress: string, options: RevokePermissionsOptions): Promise<boolean> {
-    // TODO: Remove grant from on-chain registry
-    // TODO: Invalidate cached policy blob in Walrus
-    
+  async revokePermissions(
+    userAddress: string,
+    options: RevokePermissionsOptions & { signer?: Signer }
+  ): Promise<boolean> {
+    const requestingWallet = normalizeSuiAddress(options.requestingWallet);
+    const targetWallet = normalizeSuiAddress(options.targetWallet);
+
+    if (this.contextWalletService) {
+      const ownsContext = await this.contextWalletService.validateAccess(targetWallet, userAddress);
+      if (!ownsContext) {
+        throw new Error('User does not own the specified target wallet');
+      }
+    }
+
+    if (options.signer) {
+      await this.crossContextPermissions.revokeWalletAllowlistAccess(
+        {
+          requestingWallet,
+          targetWallet,
+          scope: options.scope,
+        },
+        options.signer,
+      );
+    }
+
     return true;
   }
 
   /**
-   * Check if an app has specific permission
-   * @param appId - Application ID
-   * @param scope - Permission scope to check
-   * @param userAddress - User address for permission validation
-   * @returns True if app has permission
+   * Determine if a requesting wallet currently has permission to access a target wallet
    */
-  async checkPermission(appId: string, scope: PermissionScope, userAddress: string): Promise<boolean> {
-    // Get all grants for this app and user
-    const grants = await this.getGrantsForApp(appId, userAddress);
-    
-    // Check if any non-expired grant includes the required scope
-    const now = Date.now();
-    for (const grant of grants) {
-      if (grant.expiresAt && grant.expiresAt < now) {
-        continue; // Grant expired
-      }
-      
-      if (grant.scopes.includes(scope)) {
-        return true;
-      }
-    }
-    
-    return false;
+  async hasWalletPermission(
+    requestingWallet: string,
+    targetWallet: string,
+    scope: PermissionScope
+  ): Promise<boolean> {
+    return await this.crossContextPermissions.hasWalletPermission({
+      requestingWallet: normalizeSuiAddress(requestingWallet),
+      targetWallet: normalizeSuiAddress(targetWallet),
+      scope,
+    });
   }
 
   /**
-   * Get all access grants for an app
-   * @param appId - Application ID
-   * @param userAddress - User address
-   * @returns Array of access grants
+   * Legacy compatibility method for app-scoped permission checks
+   * Interprets appId as requesting wallet address.
    */
-  async getGrantsForApp(appId: string, userAddress: string): Promise<AccessGrant[]> {
-    // TODO: Query on-chain access registry
-    // For now, return empty array
-    return [];
+  async checkPermission(
+    appId: string,
+    scope: PermissionScope,
+    userAddressOrTargetWallet: string
+  ): Promise<boolean> {
+    return await this.hasWalletPermission(appId, userAddressOrTargetWallet, scope);
   }
 
   /**
@@ -156,9 +254,9 @@ export class PermissionService {
    * @returns Array of access grants
    */
   async getGrantsByUser(userAddress: string): Promise<AccessGrant[]> {
-    // TODO: Query on-chain access registry by user
-    // For now, return empty array
-    return [];
+    const normalized = normalizeSuiAddress(userAddress);
+    const permissions = await this.crossContextPermissions.listGrantsByTarget(normalized);
+    return this.convertPermissionsToGrants(permissions);
   }
 
   /**
@@ -167,9 +265,13 @@ export class PermissionService {
    * @returns Array of pending consent requests
    */
   async getPendingConsents(userAddress: string): Promise<ConsentRequest[]> {
-    // TODO: Query backend API for pending consents
-    // For now, return empty array
-    return [];
+    const normalized = normalizeSuiAddress(userAddress);
+    if (this.consentRepository) {
+      return await this.consentRepository.listByTarget(normalized, 'pending');
+    }
+    return Array.from(this.pendingConsents.values())
+      .filter((request) => request.targetWallet === normalized && request.status === 'pending')
+      .map((request) => ({ ...request }));
   }
 
   /**
@@ -182,14 +284,27 @@ export class PermissionService {
   async approveConsent(
     userAddress: string, 
     consentRequest: ConsentRequest, 
-    contextId: string
+    _contextId: string
   ): Promise<AccessGrant> {
-    return await this.grantPermissions(userAddress, {
-      contextId,
-      recipientAppId: consentRequest.requesterAppId,
-      scopes: consentRequest.targetScopes as PermissionScope[],
+    const grant = await this.grantPermissions(userAddress, {
+      requestingWallet: consentRequest.requesterWallet,
+      targetWallet: consentRequest.targetWallet,
+      scopes: consentRequest.targetScopes,
       expiresAt: consentRequest.expiresAt
     });
+
+    const updatedAt = Date.now();
+    if (consentRequest.requestId) {
+      await this.updateConsentStatus({
+        requesterWallet: consentRequest.requesterWallet,
+        targetWallet: consentRequest.targetWallet,
+        newStatus: 'approved',
+        updatedAt,
+        requestId: consentRequest.requestId,
+      });
+    }
+
+    return grant;
   }
 
   /**
@@ -199,8 +314,26 @@ export class PermissionService {
    * @returns Success status
    */
   async denyConsent(userAddress: string, consentRequest: ConsentRequest): Promise<boolean> {
-    // TODO: Mark consent as denied in backend
-    // For now, just return success
+    const now = Date.now();
+    if (consentRequest.requestId) {
+      await this.updateConsentStatus({
+        requesterWallet: consentRequest.requesterWallet,
+        targetWallet: consentRequest.targetWallet,
+        newStatus: 'denied',
+        updatedAt: now,
+        requestId: consentRequest.requestId,
+      });
+    } else {
+      const inferredRequestId = randomUUID();
+      await this.persistConsentRequest({
+        ...consentRequest,
+        requestId: inferredRequestId,
+        createdAt: now,
+        updatedAt: now,
+        status: 'denied',
+      });
+    }
+
     return true;
   }
 
@@ -212,13 +345,58 @@ export class PermissionService {
   async getPermissionAudit(userAddress: string): Promise<Array<{
     timestamp: number;
     action: 'grant' | 'revoke' | 'request' | 'deny';
-    appId: string;
+    requestingWallet: string;
+    targetWallet: string;
     scopes: PermissionScope[];
-    contextId?: string;
   }>> {
-    // TODO: Query audit events from blockchain and backend
-    // For now, return empty array
-    return [];
+    const normalized = normalizeSuiAddress(userAddress);
+    const auditEntries: Array<{
+      timestamp: number;
+      action: 'grant' | 'revoke' | 'request' | 'deny';
+      requestingWallet: string;
+      targetWallet: string;
+      scopes: PermissionScope[];
+    }> = [];
+
+    const consentRecords = this.consentRepository
+      ? await this.consentRepository.listByTarget(normalized)
+      : Array.from(this.pendingConsents.values()).filter((request) => request.targetWallet === normalized);
+
+    for (const request of consentRecords) {
+      auditEntries.push({
+        timestamp: request.createdAt,
+        action: 'request',
+        requestingWallet: request.requesterWallet,
+        targetWallet: request.targetWallet,
+        scopes: request.targetScopes,
+      });
+
+      if (request.status === 'denied') {
+        auditEntries.push({
+          timestamp: request.updatedAt,
+          action: 'deny',
+          requestingWallet: request.requesterWallet,
+          targetWallet: request.targetWallet,
+          scopes: request.targetScopes,
+        });
+      }
+    }
+
+    const history = await this.crossContextPermissions.getWalletAllowlistHistory({
+      targetWallet: normalized,
+    });
+
+    for (const event of history) {
+      auditEntries.push({
+        timestamp: event.timestamp,
+        action: event.action,
+        requestingWallet: event.requestingWallet,
+        targetWallet: event.targetWallet,
+        scopes: [this.toPermissionScope(event.scope)],
+      });
+    }
+
+    return auditEntries.sort((a, b) => a.timestamp - b.timestamp);
   }
 
   /**
@@ -234,34 +412,20 @@ export class PermissionService {
     requestedScope: string
   ): Promise<boolean> {
     // This integrates with our existing SEAL access control
-    return await this.checkPermission(appId, requestedScope as PermissionScope, walletOwner);
+    return await this.hasWalletPermission(appId, walletOwner, requestedScope as PermissionScope);
   }
 
   /**
-   * Create on-chain approval transaction for SEAL
-   * @param userAddress - User creating the approval
-   * @param appId - Application to approve
-   * @param scopes - Permission scopes to approve
-   * @returns Transaction for approval
+   * Build seal_approve transaction for a requesting wallet
    */
   createApprovalTransaction(
-    userAddress: string,
-    appId: string, 
-    scopes: PermissionScope[]
+    contentId: Uint8Array,
+    requestingWallet: string
   ): Transaction {
-    const tx = new Transaction();
-    
-    // Call seal_access_control contract to grant approval
-    tx.moveCall({
-      target: `${this.packageId}::seal_access_control::seal_approve`,
-      arguments: [
-        tx.pure.address(userAddress),
-        tx.pure.address(appId),
-        tx.pure.string(scopes.join(','))
-      ]
-    });
-
-    return tx;
+    return this.crossContextPermissions.buildSealApproveTransaction(
+      contentId,
+      normalizeSuiAddress(requestingWallet),
+    );
   }
 
   /**
@@ -279,13 +443,12 @@ export class PermissionService {
     const grants = await this.getGrantsByUser(userAddress);
     const now = Date.now();
     
-    const activeGrants = grants.filter(g => !g.expiresAt || g.expiresAt > now);
-    const uniqueApps = new Set(grants.map(g => g.granteeAppId));
-    const uniqueScopes = new Set(grants.flatMap(g => g.scopes));
+    const activeGrants = grants.filter((g) => !g.expiresAt || g.expiresAt > now);
+    const uniqueApps = new Set(grants.map((g) => g.requestingWallet));
+    const uniqueScopes = new Set(grants.flatMap((g) => g.scopes));
     
-    const recentActivity = grants.length > 0 
-      ? Math.max(...grants.map(g => g.expiresAt || 0))
-      : 0;
+    const recentActivity =
+      grants.length > 0 ? Math.max(...grants.map((g) => g.expiresAt || 0)) : 0;
 
     return {
       totalGrants: grants.length,
@@ -302,8 +465,139 @@ export class PermissionService {
    * @returns Number of permissions cleaned up
    */
   async cleanupExpiredPermissions(userAddress: string): Promise<number> {
-    // TODO: Implement cleanup of expired grants from on-chain registry
-    // For now, return 0
-    return 0;
+    const now = Date.now();
+    const grants = await this.getGrantsByUser(userAddress);
+
+    return grants.filter((grant) => {
+      if (!grant.expiresAt || grant.expiresAt === 0) {
+        return false;
+      }
+      return grant.expiresAt <= now;
+    }).length;
+  }
+
+  private buildGrantFromPermissions(
+    requestingWallet: string,
+    targetWallet: string,
+    permissions: WalletAllowlistPermission[],
+  ): AccessGrant | undefined {
+    const grants = this.convertPermissionsToGrants(permissions);
+    return grants.find(
+      (candidate) =>
+        candidate.requestingWallet === requestingWallet &&
+        candidate.targetWallet === targetWallet,
+    );
+  }
+
+  private convertPermissionsToGrants(
+    permissions: WalletAllowlistPermission[],
+  ): AccessGrant[] {
+    const grouped = new Map<string, WalletAllowlistPermission[]>();
+
+    for (const permission of permissions) {
+      const key = `${permission.requestingWallet}-${permission.targetWallet}`;
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.push(permission);
+      } else {
+        grouped.set(key, [permission]);
+      }
+    }
+
+    const grants: AccessGrant[] = [];
+    for (const entries of grouped.values()) {
+      if (entries.length === 0) {
+        continue;
+      }
+
+      const [first] = entries;
+      const scopes = new Set<PermissionScope>();
+      let earliestGrantedAt = entries[0].grantedAt;
+      let expiresAtCandidate = 0;
+
+      for (const entry of entries) {
+        scopes.add(this.toPermissionScope(entry.scope));
+        if (entry.grantedAt < earliestGrantedAt) {
+          earliestGrantedAt = entry.grantedAt;
+        }
+        if (entry.expiresAt > expiresAtCandidate) {
+          expiresAtCandidate = entry.expiresAt;
+        }
+      }
+
+      const grant: AccessGrant = {
+        id: `grant_${first.requestingWallet}_${first.targetWallet}_${earliestGrantedAt}`,
+        requestingWallet: first.requestingWallet,
+        targetWallet: first.targetWallet,
+        scopes: Array.from(scopes),
+        grantedAt: earliestGrantedAt,
+      };
+
+      if (expiresAtCandidate > 0) {
+        grant.expiresAt = expiresAtCandidate;
+      }
+
+      grants.push(grant);
+    }
+
+    return grants;
+  }
+
+  private toPermissionScope(scope: string): PermissionScope {
+    return scope as PermissionScope;
+  }
+
+  private async persistConsentRequest(record: ConsentRequestRecord): Promise<void> {
+    if (this.consentRepository) {
+      await this.consentRepository.save(record);
+    } else {
+      this.pendingConsents.set(record.requestId, { ...record });
+    }
+  }
+
+  /**
+   * Swap the consent persistence backend at runtime.
+   * Useful for applications that want to wire a custom repository after
+   * the service has been constructed (e.g., demos supplying a filesystem store).
+   */
+  setConsentRepository(repository?: ConsentRepository): void {
+    this.consentRepository = repository;
+  }
+
+  private async updateConsentStatus(params: {
+    requesterWallet: string;
+    targetWallet: string;
+    newStatus: ConsentStatus;
+    updatedAt: number;
+    requestId?: string;
+  }): Promise<void> {
+    const normalizedRequester = normalizeSuiAddress(params.requesterWallet);
+    const normalizedTarget = normalizeSuiAddress(params.targetWallet);
+
+    if (this.consentRepository) {
+      if (params.requestId) {
+        await this.consentRepository.updateStatus(params.requestId, params.newStatus, params.updatedAt);
+      } else {
+        const pendingRecords = await this.consentRepository.listByTarget(normalizedTarget, 'pending');
+        await Promise.all(
+          pendingRecords
+            .filter((record) => record.requesterWallet === normalizedRequester)
+            .map((record) =>
+              this.consentRepository!.updateStatus(record.requestId, params.newStatus, params.updatedAt),
+            ),
+        );
+      }
+    }
+
+    for (const [requestId, record] of this.pendingConsents.entries()) {
+      if (record.requesterWallet === normalizedRequester && record.targetWallet === normalizedTarget) {
+        const updatedRecord: ConsentRequestRecord = {
+          ...record,
+          status: params.newStatus,
+          updatedAt: params.updatedAt,
+        };
+        this.pendingConsents.set(requestId, updatedRecord);
+      }
+    }
   }
 }

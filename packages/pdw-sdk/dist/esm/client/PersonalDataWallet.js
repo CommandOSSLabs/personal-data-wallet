@@ -67,6 +67,7 @@ export class PersonalDataWallet {
         __classPrivateFieldSet(this, _PersonalDataWallet_permission, new PermissionService({
             suiClient: client.client || client,
             packageId: __classPrivateFieldGet(this, _PersonalDataWallet_config, "f").packageId || '',
+            accessRegistryId: __classPrivateFieldGet(this, _PersonalDataWallet_config, "f").accessRegistryId || '',
             apiUrl: __classPrivateFieldGet(this, _PersonalDataWallet_config, "f").apiUrl,
             contextWalletService: __classPrivateFieldGet(this, _PersonalDataWallet_contextWallet, "f")
         }), "f");

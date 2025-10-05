@@ -55,6 +55,7 @@ export interface ContentRegistry {
     createdAt: number;
 }
 export declare class ViewService {
+    private static readonly MAX_QUERY_LIMIT;
     private client;
     private config;
     constructor(client: ClientWithCoreApi, config: PDWConfig);

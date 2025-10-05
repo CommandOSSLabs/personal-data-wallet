@@ -141,5 +141,7 @@ export declare class ContextWalletService {
         categories: Record<string, number>;
         lastActivity: number;
     }>;
+    private extractOptionalString;
+    private matchesContextIdentifier;
 }
 //# sourceMappingURL=ContextWalletService.d.ts.map

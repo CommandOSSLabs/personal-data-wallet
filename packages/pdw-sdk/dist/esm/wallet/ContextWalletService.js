@@ -8,6 +8,7 @@
  * - Integration with MainWalletService for identity
  */
 import { Transaction } from '@mysten/sui/transactions';
+import { normalizeSuiAddress } from '@mysten/sui/utils';
 /**
  * ContextWalletService handles app-scoped data containers
  */
@@ -132,10 +133,43 @@ export class ContextWalletService {
      */
     async getContext(contextId) {
         try {
-            // This is deprecated since we now store as dynamic fields
-            // Would need to know the app_id to fetch properly
-            console.warn('getContext(contextId) is deprecated, use getContextForApp(userAddress, appId) instead');
-            return null;
+            const response = await this.suiClient.getObject({
+                id: contextId,
+                options: {
+                    showContent: true,
+                    showOwner: true,
+                    showType: true,
+                },
+            });
+            const objectData = response.data;
+            if (!objectData || !objectData.content || objectData.content.dataType !== 'moveObject') {
+                return null;
+            }
+            const fields = objectData.content.fields;
+            const contextIdBytes = Array.isArray(fields.context_id)
+                ? fields.context_id
+                : Array.isArray(fields.context_id?.fields?.contents)
+                    ? fields.context_id.fields.contents
+                    : [];
+            const derivedContextId = `0x${contextIdBytes
+                .map((byte) => Number(byte).toString(16).padStart(2, '0'))
+                .join('')}`;
+            const ownerAddress = fields.owner ? normalizeSuiAddress(String(fields.owner)) : undefined;
+            const mainWalletId = fields.main_wallet_id
+                ? normalizeSuiAddress(String(fields.main_wallet_id))
+                : undefined;
+            return {
+                id: objectData.objectId,
+                appId: fields.app_id || '',
+                contextId: derivedContextId,
+                owner: ownerAddress || (mainWalletId ?? ''),
+                mainWalletId: mainWalletId || '',
+                policyRef: this.extractOptionalString(fields.policy_ref),
+                createdAt: Number(fields.created_at || Date.now()),
+                permissions: Array.isArray(fields.permissions)
+                    ? fields.permissions.map((permission) => String(permission))
+                    : ['read:own', 'write:own'],
+            };
         }
         catch (error) {
             console.error('Error fetching context wallet:', error);
@@ -268,7 +302,7 @@ export class ContextWalletService {
                             const decrypted = await this.encryptionService.decrypt({
                                 encryptedData: parsed,
                                 userAddress: context.owner, // Use context owner's address
-                                appId: context.appId, // Use context's app identity for permission validation
+                                requestingWallet: context.id, // Use context wallet address for permission validation
                                 // sessionKey would need to be provided by caller in real implementation
                             });
                             decryptedContent = typeof decrypted === 'string' ? decrypted : JSON.stringify(decrypted);
@@ -379,17 +413,20 @@ export class ContextWalletService {
      * @returns True if user has access
      */
     async validateAccess(contextId, userAddress) {
+        const normalizedUser = normalizeSuiAddress(userAddress);
+        const targetId = contextId.toLowerCase();
+        // First, try direct lookup by object ID
         const context = await this.getContext(contextId);
-        if (!context) {
-            return false;
-        }
-        // Owner always has access
-        if (context.owner === userAddress) {
+        if (context && normalizeSuiAddress(context.owner) === normalizedUser) {
             return true;
         }
-        // TODO: Check access grants via PermissionService
-        // For now, only owner has access
-        return false;
+        // Fallback: iterate through user contexts and match by id or derived context id
+        const userContexts = await this.listUserContexts(normalizedUser);
+        const match = userContexts.find(ctx => this.matchesContextIdentifier(ctx, targetId));
+        if (!match) {
+            return false;
+        }
+        return normalizeSuiAddress(match.owner) === normalizedUser;
     }
     /**
      * Get statistics for a context wallet
@@ -408,6 +445,37 @@ export class ContextWalletService {
             categories: {},
             lastActivity: context.createdAt
         };
+    }
+    extractOptionalString(value) {
+        if (!value) {
+            return undefined;
+        }
+        if (typeof value === 'string') {
+            return value;
+        }
+        if (value.fields) {
+            if (Array.isArray(value.fields.vec) && value.fields.vec.length > 0) {
+                const first = value.fields.vec[0];
+                if (typeof first === 'string') {
+                    return first;
+                }
+                if (first?.fields?.bytes) {
+                    return first.fields.bytes;
+                }
+            }
+            if (value.fields.some) {
+                return value.fields.some;
+            }
+        }
+        if (value.some) {
+            return value.some;
+        }
+        return undefined;
+    }
+    matchesContextIdentifier(context, identifier) {
+        const normalizedIdentifier = identifier.toLowerCase();
+        return (context.id.toLowerCase() === normalizedIdentifier ||
+            context.contextId.toLowerCase() === normalizedIdentifier);
     }
 }
 //# sourceMappingURL=ContextWalletService.js.map

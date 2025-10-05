@@ -16,7 +16,7 @@
  * @author Personal Data Wallet Team
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.VERSION = exports.AggregationService = exports.PermissionService = exports.ContextWalletService = exports.MainWalletService = exports.SDK = exports.QuickStartConfigs = exports.SDK_NAME = exports.SDK_VERSION = exports.Config = exports.ConfigurationHelper = exports.MemoryDecryptionPipeline = exports.MemoryRetrievalService = exports.BlockchainManager = exports.SuiService = exports.StorageManager = exports.WalrusStorageService = exports.KnowledgeGraphManager = exports.GraphService = exports.MemoryProcessingCache = exports.BatchingService = exports.BatchManager = exports.HnswIndexService = exports.VectorManager = exports.EmbeddingService = exports.PipelineManager = exports.MemoryPipeline = void 0;
+exports.VERSION = exports.AggregationService = exports.InMemoryConsentRepository = exports.FileSystemConsentRepository = exports.PermissionService = exports.ContextWalletService = exports.MainWalletService = exports.SDK = exports.QuickStartConfigs = exports.SDK_NAME = exports.SDK_VERSION = exports.Config = exports.ConfigurationHelper = exports.MemoryDecryptionPipeline = exports.MemoryRetrievalService = exports.BlockchainManager = exports.SuiService = exports.StorageManager = exports.WalrusStorageService = exports.KnowledgeGraphManager = exports.GraphService = exports.MemoryProcessingCache = exports.BatchingService = exports.BatchManager = exports.HnswIndexService = exports.VectorManager = exports.EmbeddingService = exports.PipelineManager = exports.MemoryPipeline = void 0;
 exports.createQuickStartPipeline = createQuickStartPipeline;
 exports.createPipelineManager = createPipelineManager;
 // Core pipeline - the main entry point
@@ -272,6 +272,9 @@ var ContextWalletService_1 = require("./wallet/ContextWalletService");
 Object.defineProperty(exports, "ContextWalletService", { enumerable: true, get: function () { return ContextWalletService_1.ContextWalletService; } });
 var PermissionService_1 = require("./access/PermissionService");
 Object.defineProperty(exports, "PermissionService", { enumerable: true, get: function () { return PermissionService_1.PermissionService; } });
+var ConsentRepository_1 = require("./permissions/ConsentRepository");
+Object.defineProperty(exports, "FileSystemConsentRepository", { enumerable: true, get: function () { return ConsentRepository_1.FileSystemConsentRepository; } });
+Object.defineProperty(exports, "InMemoryConsentRepository", { enumerable: true, get: function () { return ConsentRepository_1.InMemoryConsentRepository; } });
 var AggregationService_1 = require("./aggregation/AggregationService");
 Object.defineProperty(exports, "AggregationService", { enumerable: true, get: function () { return AggregationService_1.AggregationService; } });
 // Legacy version for compatibility

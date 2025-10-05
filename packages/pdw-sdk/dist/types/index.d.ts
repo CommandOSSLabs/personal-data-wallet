@@ -418,7 +418,7 @@ export interface SealDecryptionOptions {
     encryptedContent?: Uint8Array;
     encryptedData?: string;
     userAddress: string;
-    appId?: string;
+    requestingWallet?: string;
     sessionKey?: any;
     signedTxBytes?: Uint8Array;
 }

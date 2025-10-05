@@ -246,6 +246,7 @@ export default {
 export { MainWalletService } from './wallet/MainWalletService';
 export { ContextWalletService } from './wallet/ContextWalletService';
 export { PermissionService } from './access/PermissionService';
+export { FileSystemConsentRepository, InMemoryConsentRepository } from './permissions/ConsentRepository';
 export { AggregationService } from './aggregation/AggregationService';
 // Legacy version for compatibility
 export const VERSION = '1.0.0';

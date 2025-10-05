@@ -56,9 +56,12 @@
     "@google/generative-ai": "^0.21.0",
     "@mysten/bcs": "^1.8.0",
     "@mysten/codegen": "^0.5.0",
+    "@mysten/dapp-kit": "^0.19.0",
     "@mysten/seal": "^0.6.0",
+    "@mysten/slush-wallet": "^0.2.1",
     "@mysten/utils": "^0.2.0",
     "@mysten/walrus": "^0.7.0",
+    "@tanstack/react-query": "^5.90.2",
     "hnswlib-node": "^1.4.2",
     "sha3": "^2.1.4",
     "undici": "^7.16.0"

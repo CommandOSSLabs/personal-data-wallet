@@ -39,7 +39,7 @@ export declare class EncryptionService {
     /**
      * Decrypt data using SEAL with session keys via SealService
      * Handles both new binary format (Uint8Array) and legacy base64 format
-     * Now includes app_id for OAuth-style permission validation
+     * Validates wallet-based allowlists during approval flow
      */
     decrypt(options: SealDecryptionOptions): Promise<Uint8Array>;
     /**
@@ -61,19 +61,19 @@ export declare class EncryptionService {
     /**
      * Build access approval transaction for SEAL key servers (LEGACY)
      *
-     * @deprecated Use buildAccessTransactionWithAppId instead for OAuth-style permissions
+     * @deprecated Use buildAccessTransactionForWallet instead for wallet-based permissions
      */
     buildAccessTransaction(userAddress: string, accessType?: 'read' | 'write'): Promise<Transaction>;
     /**
-     * Build access approval transaction with app_id for OAuth-style permissions
+     * Build access approval transaction for a requesting wallet address
      * Uses CrossContextPermissionService for proper permission validation
      *
      * @param userAddress - User's wallet address (used as SEAL identity)
-     * @param appId - Requesting application identifier
+     * @param requestingWallet - Wallet requesting access
      * @param accessType - Access level (read/write)
      * @returns Transaction for SEAL key server approval
      */
-    buildAccessTransactionWithAppId(userAddress: string, appId: string, accessType?: 'read' | 'write'): Promise<Transaction>;
+    buildAccessTransactionForWallet(userAddress: string, requestingWallet: string, accessType?: 'read' | 'write'): Promise<Transaction>;
     /**
      * Build transaction to grant access to another user
      */

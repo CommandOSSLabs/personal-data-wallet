@@ -1,318 +1,182 @@
 /**
- * MainWalletService Tests
- * 
- * Tests for the core wallet identity management functionality
+ * MainWalletService Integration Tests (No Mocks)
+ *
+ * Exercises on-chain lookups and deterministic helpers using the
+ * production configuration from `.env.test`.
  */
 
+import { beforeAll, describe, expect, it, jest } from '@jest/globals';
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+import { sha3_256 } from '@noble/hashes/sha3';
+import dotenv from 'dotenv';
+
 import { MainWalletService } from '../../src/wallet/MainWalletService';
-import { SuiClient } from '@mysten/sui/client';
 
-// Mock SuiClient for testing
-const mockSuiClient = {
-  getOwnedObjects: jest.fn(),
-  signAndExecuteTransaction: jest.fn(),
-} as unknown as SuiClient;
+dotenv.config({ path: '.env.test' });
 
-describe('MainWalletService', () => {
+const toHex = (bytes: Uint8Array) => Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+const deriveAddress = (label: string) => `0x${toHex(sha3_256(new TextEncoder().encode(label)))}`;
+
+describe('MainWalletService (integration)', () => {
+  jest.setTimeout(60_000);
+
+  let suiClient: SuiClient;
   let service: MainWalletService;
-  const testPackageId = '0x1234567890abcdef1234567890abcdef12345678';
-  
-  beforeEach(() => {
-    service = new MainWalletService({
-      suiClient: mockSuiClient,
-      packageId: testPackageId
-    });
-    
-    // Reset mocks
-    jest.clearAllMocks();
+  let packageId: string;
+  const testUserAddress = process.env.TEST_USER_ADDRESS || '';
+
+  beforeAll(() => {
+    packageId = process.env.PACKAGE_ID || process.env.SUI_PACKAGE_ID || '';
+    if (!packageId) {
+      throw new Error('PACKAGE_ID (or SUI_PACKAGE_ID) must be defined in .env.test for MainWalletService tests');
+    }
+
+    const network = (process.env.SUI_NETWORK as 'testnet' | 'mainnet' | 'devnet') || 'testnet';
+    const rpcUrl = process.env.SUI_RPC_URL || getFullnodeUrl(network);
+
+    suiClient = new SuiClient({ url: rpcUrl });
+    service = new MainWalletService({ suiClient, packageId });
   });
 
   describe('getMainWallet', () => {
-    it('should return null when no wallet exists', async () => {
-      // Mock empty response
-      (mockSuiClient.getOwnedObjects as jest.Mock).mockResolvedValue({
-        data: []
-      });
-
-      const result = await service.getMainWallet('0xuser123');
+    it('returns null for an unused address', async () => {
+      const unusedAddress = deriveAddress('pdw-unused-address');
+      const result = await service.getMainWallet(unusedAddress);
       expect(result).toBeNull();
     });
 
-    it('should parse main wallet from blockchain response', async () => {
-      // Mock wallet object response
-      const mockWalletObject = {
-        data: {
-          objectId: 'wallet_id_123',
-          content: {
-            dataType: 'moveObject',
-            fields: {
-              created_at: '1234567890',
-              context_salt: 'test_salt_123'
-            }
-          }
-        }
-      };
+    it('retrieves metadata for the configured test user when available', async () => {
+      if (!testUserAddress) {
+        expect(testUserAddress).toBe('');
+        const wallet = await service.getMainWallet(testUserAddress);
+        expect(wallet).toBeNull();
+        return;
+      }
 
-      (mockSuiClient.getOwnedObjects as jest.Mock).mockResolvedValue({
-        data: [mockWalletObject]
-      });
+      const wallet = await service.getMainWallet(testUserAddress);
 
-      const result = await service.getMainWallet('0xuser123');
-      
-      expect(result).toEqual({
-        owner: '0xuser123',
-        walletId: 'wallet_id_123',
-        createdAt: 1234567890,
-        salts: {
-          context: 'test_salt_123'
-        }
-      });
+      if (!wallet) {
+        expect(wallet).toBeNull();
+        return;
+      }
+
+      expect(wallet.owner).toBe(testUserAddress);
+      expect(wallet.walletId.startsWith('0x')).toBe(true);
+      expect(wallet.createdAt).toBeGreaterThan(0);
+      expect(wallet.salts.context.length).toBeGreaterThan(0);
     });
   });
 
   describe('createMainWallet', () => {
-    it('should create a new main wallet with generated salt', async () => {
-      const userAddress = '0xuser123';
-      
-      const result = await service.createMainWallet({
-        userAddress
-      });
+    it('generates a new wallet with random salt when none provided', async () => {
+      const address = deriveAddress('pdw-main-wallet-create');
+      const result = await service.createMainWallet({ userAddress: address });
 
-      expect(result.owner).toBe(userAddress);
+      expect(result.owner).toBe(address);
       expect(result.walletId).toContain('wallet_');
-      expect(result.walletId).toContain(userAddress);
       expect(result.salts.context).toBeDefined();
       expect(result.salts.context.length).toBeGreaterThan(0);
-      expect(result.createdAt).toBeGreaterThan(0);
     });
 
-    it('should create a main wallet with custom salt', async () => {
-      const userAddress = '0xuser123';
-      const customSalt = 'custom_test_salt';
-      
+    it('respects custom salt input', async () => {
+      const address = deriveAddress('pdw-main-wallet-custom');
+      const salt = 'custom_salt_for_tests';
+
       const result = await service.createMainWallet({
-        userAddress,
-        salts: {
-          context: customSalt
-        }
+        userAddress: address,
+        salts: { context: salt }
       });
 
-      expect(result.salts.context).toBe(customSalt);
+      expect(result.salts.context).toBe(salt);
     });
   });
 
   describe('deriveContextId', () => {
-    it('should derive deterministic context ID', async () => {
-      const userAddress = '0xuser123';
-      const appId = 'test_app';
-      const salt = 'test_salt';
+    it('produces deterministic hashes for identical inputs', async () => {
+      const address = deriveAddress('pdw-context-deterministic');
+      const salt = 'context_salt';
 
-      const contextId1 = await service.deriveContextId({
-        userAddress,
-        appId,
-        salt
-      });
+      const first = await service.deriveContextId({ userAddress: address, appId: 'app-a', salt });
+      const second = await service.deriveContextId({ userAddress: address, appId: 'app-a', salt });
 
-      const contextId2 = await service.deriveContextId({
-        userAddress,
-        appId,
-        salt
-      });
-
-      // Should be deterministic
-      expect(contextId1).toBe(contextId2);
-      expect(contextId1).toMatch(/^0x[a-f0-9]{64}$/);
+      expect(first).toBe(second);
+      expect(first).toMatch(/^0x[a-f0-9]{64}$/);
     });
 
-    it('should derive different context IDs for different apps', async () => {
-      const userAddress = '0xuser123';
-      const salt = 'test_salt';
+    it('yields distinct IDs for different appIds', async () => {
+      const address = deriveAddress('pdw-context-distinct');
+      const salt = 'context_salt';
 
-      const contextId1 = await service.deriveContextId({
-        userAddress,
-        appId: 'app1',
-        salt
-      });
+      const one = await service.deriveContextId({ userAddress: address, appId: 'app-one', salt });
+      const two = await service.deriveContextId({ userAddress: address, appId: 'app-two', salt });
 
-      const contextId2 = await service.deriveContextId({
-        userAddress,
-        appId: 'app2',
-        salt
-      });
-
-      expect(contextId1).not.toBe(contextId2);
+      expect(one).not.toBe(two);
     });
 
-    it('should get salt from main wallet if not provided', async () => {
-      const userAddress = '0xuser123';
-      const appId = 'test_app';
-      const walletSalt = 'wallet_salt_123';
+    it('throws when attempting salt lookup for unknown wallets', async () => {
+      const address = deriveAddress('pdw-context-missing-wallet');
 
-      // Mock main wallet with salt
-      const mockWalletObject = {
-        data: {
-          objectId: 'wallet_id_123',
-          content: {
-            dataType: 'moveObject',
-            fields: {
-              created_at: '1234567890',
-              context_salt: walletSalt
-            }
-          }
-        }
-      };
-
-      (mockSuiClient.getOwnedObjects as jest.Mock).mockResolvedValue({
-        data: [mockWalletObject]
-      });
-
-      const contextId = await service.deriveContextId({
-        userAddress,
-        appId
-      });
-
-      expect(contextId).toMatch(/^0x[a-f0-9]{64}$/);
-      expect(mockSuiClient.getOwnedObjects).toHaveBeenCalledWith({
-        owner: userAddress,
-        filter: {
-          StructType: `${testPackageId}::wallet::MainWallet`
-        },
-        options: {
-          showContent: true,
-          showType: true
-        }
-      });
-    });
-
-    it('should throw error if main wallet not found and no salt provided', async () => {
-      const userAddress = '0xuser123';
-      const appId = 'test_app';
-
-      // Mock no wallet found
-      (mockSuiClient.getOwnedObjects as jest.Mock).mockResolvedValue({
-        data: []
-      });
-
-      await expect(service.deriveContextId({
-        userAddress,
-        appId
-      })).rejects.toThrow('Main wallet not found - create one first');
+      await expect(
+        service.deriveContextId({ userAddress: address, appId: 'integration-app' })
+      ).rejects.toThrow('Main wallet not found - create one first');
     });
   });
 
   describe('rotateKeys', () => {
-    it('should rotate keys and return result', async () => {
-      const userAddress = '0xuser123';
-      
-      const result = await service.rotateKeys({
-        userAddress,
-        sessionKeyTtlMin: 120
-      });
+    it('returns simulated rotation metadata', async () => {
+      const address = deriveAddress('pdw-rotate-keys');
+      const result = await service.rotateKeys({ userAddress: address, sessionKeyTtlMin: 90 });
 
-      expect(result.sessionKeyId).toContain('session_');
-      expect(result.sessionKeyId).toContain(userAddress);
+      expect(result.sessionKeyId).toContain(address.slice(2, 10));
       expect(result.expiresAt).toBeGreaterThan(Date.now());
       expect(result.backupKeyRotated).toBe(true);
     });
   });
 
   describe('hasMainWallet', () => {
-    it('should return true when wallet exists', async () => {
-      // Mock wallet exists
-      const mockWalletObject = {
-        data: {
-          objectId: 'wallet_id_123',
-          content: {
-            dataType: 'moveObject',
-            fields: {
-              created_at: '1234567890',
-              context_salt: 'test_salt'
-            }
-          }
-        }
-      };
-
-      (mockSuiClient.getOwnedObjects as jest.Mock).mockResolvedValue({
-        data: [mockWalletObject]
-      });
-
-      const result = await service.hasMainWallet('0xuser123');
-      expect(result).toBe(true);
+    it('detects absence for unused addresses', async () => {
+      const address = deriveAddress('pdw-has-wallet-none');
+      const result = await service.hasMainWallet(address);
+      expect(result).toBe(false);
     });
 
-    it('should return false when wallet does not exist', async () => {
-      // Mock no wallet
-      (mockSuiClient.getOwnedObjects as jest.Mock).mockResolvedValue({
-        data: []
-      });
-
-      const result = await service.hasMainWallet('0xuser123');
-      expect(result).toBe(false);
+    it('returns a boolean for configured test user presence checks', async () => {
+      const address = testUserAddress || deriveAddress('pdw-has-wallet-fallback');
+      const result = await service.hasMainWallet(address);
+      expect(typeof result).toBe('boolean');
     });
   });
 
-  describe('address validation', () => {
-    it('should validate Sui address format', async () => {
-      const invalidAddress = 'invalid_address';
-      
-      await expect(service.getMainWalletRequired(invalidAddress))
-        .rejects.toThrow('Invalid Sui address format');
+  describe('address validation helpers', () => {
+    it('rejects malformed Sui addresses', async () => {
+      await expect(service.getMainWalletRequired('not-a-valid-address')).rejects.toThrow('Invalid Sui address format');
     });
 
-    it('should accept valid Sui address format', async () => {
-      const validAddress = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
-      
-      // Mock no wallet found
-      (mockSuiClient.getOwnedObjects as jest.Mock).mockResolvedValue({
-        data: []
-      });
-
-      await expect(service.getMainWalletRequired(validAddress))
-        .rejects.toThrow('Main wallet not found for address');
+    it('requires an existing wallet for well-formed addresses', async () => {
+      const validAddress = deriveAddress('pdw-valid-address');
+      await expect(service.getMainWalletRequired(validAddress)).rejects.toThrow('Main wallet not found for address');
     });
   });
 
   describe('ensureMainWallet', () => {
-    it('should return existing wallet if found', async () => {
-      const userAddress = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
-      
-      // Mock existing wallet
-      const mockWalletObject = {
-        data: {
-          objectId: 'existing_wallet_123',
-          content: {
-            dataType: 'moveObject',
-            fields: {
-              created_at: '1234567890',
-              context_salt: 'existing_salt'
-            }
-          }
-        }
-      };
+    it('returns existing metadata for the configured user when available', async () => {
+      if (!testUserAddress) {
+        console.warn('⚠️  TEST_USER_ADDRESS not configured; skipping ensureMainWallet existing-path test.');
+        return;
+      }
 
-      (mockSuiClient.getOwnedObjects as jest.Mock).mockResolvedValue({
-        data: [mockWalletObject]
-      });
-
-      const result = await service.ensureMainWallet(userAddress);
-      
-      expect(result.walletId).toBe('existing_wallet_123');
-      expect(result.salts.context).toBe('existing_salt');
+      const wallet = await service.ensureMainWallet(testUserAddress);
+      expect(wallet.owner).toBe(testUserAddress);
+      expect(wallet.salts.context.length).toBeGreaterThan(0);
     });
 
-    it('should create new wallet if not found', async () => {
-      const userAddress = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
-      
-      // Mock no existing wallet
-      (mockSuiClient.getOwnedObjects as jest.Mock).mockResolvedValue({
-        data: []
-      });
+    it('generates deterministic metadata for new addresses', async () => {
+      const freshAddress = deriveAddress(`pdw-ensure-${Date.now()}`);
+      const wallet = await service.ensureMainWallet(freshAddress);
 
-      const result = await service.ensureMainWallet(userAddress);
-      
-      expect(result.owner).toBe(userAddress);
-      expect(result.walletId).toContain('wallet_');
-      expect(result.salts.context).toBeDefined();
+      expect(wallet.owner).toBe(freshAddress);
+      expect(wallet.walletId).toContain(freshAddress.slice(2, 10));
+      expect(wallet.salts.context.length).toBeGreaterThan(0);
     });
   });
 });

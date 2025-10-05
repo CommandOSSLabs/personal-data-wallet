@@ -6,7 +6,7 @@
  */
 import { SessionKey } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
-import type { ClientWithCoreApi, PDWConfig, AccessPermission, Thunk, SealEncryptionResult, SealDecryptionOptions } from '../types';
+import type { ClientWithCoreApi, PDWConfig, AccessPermission, Thunk, SealDecryptionOptions } from '../types';
 export interface AccessGrantOptions {
     ownerAddress: string;
     recipientAddress: string;
@@ -33,13 +33,25 @@ export declare class EncryptionService {
      */
     private initializeSealService;
     /**
-     * Encrypt data using SEAL identity-based encryption via SealService
-     * Returns binary encrypted content (Uint8Array) - NO base64 conversion
+     * Build access approval transaction for SEAL key servers (LEGACY)
+     *
+     * @deprecated Use buildAccessTransactionForWallet instead for wallet-based permissions
      */
-    encrypt(data: Uint8Array | string, userAddress: string, metadata?: Record<string, string>): Promise<SealEncryptionResult>;
+    buildAccessTransaction(userAddress: string, accessType?: 'read' | 'write'): Promise<Transaction>;
+    /**
+     * Build access approval transaction for a requesting wallet address
+     * Uses CrossContextPermissionService for proper permission validation
+     *
+     * @param userAddress - User's wallet address (used as SEAL identity)
+     * @param requestingWallet - Wallet requesting access
+     * @param accessType - Access level (read/write)
+     * @returns Transaction for SEAL key server approval
+     */
+    buildAccessTransactionForWallet(userAddress: string, requestingWallet: string, accessType?: 'read' | 'write'): Promise<Transaction>;
     /**
      * Decrypt data using SEAL with session keys via SealService
      * Handles both new binary format (Uint8Array) and legacy base64 format
+     * Validates wallet-based allowlists during approval flow
      */
     decrypt(options: SealDecryptionOptions): Promise<Uint8Array>;
     /**
@@ -67,26 +79,6 @@ export declare class EncryptionService {
      * Import previously exported session key
      */
     importSessionKey(exportedKey: string, userAddress?: string): Promise<SessionKey>;
-    /**
-     * Build access approval transaction for SEAL key servers (legacy - without app_id)
-     * @deprecated Use buildAccessTransactionWithAppId for OAuth-style permissions
-     */
-    buildAccessTransaction(userAddress: string, accessType?: 'read' | 'write'): Promise<Transaction>;
-    /**
-     * Build access approval transaction with app_id for OAuth-style permissions
-     *
-     * This method creates a transaction that includes the requesting application
-     * identifier, enabling OAuth-style permission validation where apps must be
-     * explicitly granted access by users before they can decrypt data.
-     *
-     * Uses CrossContextPermissionService for proper permission validation.
-     *
-     * @param userAddress - User's wallet address (used as SEAL identity)
-     * @param appId - Requesting application identifier
-     * @param accessType - Access level (read/write) - currently informational
-     * @returns Transaction for SEAL key server approval
-     */
-    buildAccessTransactionWithAppId(userAddress: string, appId: string, accessType?: 'read' | 'write'): Promise<Transaction>;
     /**
      * Create SEAL approval transaction bytes (matches memory-workflow-seal.ts pattern)
      * Returns raw PTB format bytes for SEAL verification

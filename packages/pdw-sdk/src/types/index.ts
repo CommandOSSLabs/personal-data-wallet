@@ -475,7 +475,7 @@ export interface SealDecryptionOptions {
   encryptedContent?: Uint8Array;    // New binary format (preferred)
   encryptedData?: string;           // Legacy base64 format (deprecated)
   userAddress: string;
-  appId?: string;                   // Application ID for OAuth-style permission validation
+  requestingWallet?: string;        // Wallet address requesting decryption (defaults to user)
   sessionKey?: any; // SessionKey from @mysten/seal
   signedTxBytes?: Uint8Array;
 }

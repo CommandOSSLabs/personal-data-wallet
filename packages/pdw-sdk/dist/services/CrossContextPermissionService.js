@@ -8,6 +8,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CrossContextPermissionService = void 0;
 const transactions_1 = require("@mysten/sui/transactions");
+const utils_1 = require("@mysten/sui/utils");
 /**
  * Service for managing cross-context permissions
  */
@@ -24,8 +25,8 @@ class CrossContextPermissionService {
      * @param signer - Transaction signer
      * @returns Transaction digest
      */
-    async registerContext(options, signer) {
-        const tx = this.buildRegisterContextTransaction(options);
+    async registerContextWallet(options, signer) {
+        const tx = this.buildRegisterContextWalletTransaction(options);
         const result = await this.client.signAndExecuteTransaction({
             transaction: tx,
             signer,
@@ -45,15 +46,15 @@ class CrossContextPermissionService {
      * @param options - Context registration options
      * @returns Transaction object
      */
-    buildRegisterContextTransaction(options) {
+    buildRegisterContextWalletTransaction(options) {
         const tx = new transactions_1.Transaction();
-        // Get clock object
         tx.moveCall({
-            target: `${this.packageId}::seal_access_control::register_context`,
+            target: `${this.packageId}::seal_access_control::register_context_wallet`,
             arguments: [
                 tx.object(this.accessRegistryId),
-                tx.pure.string(options.contextId),
-                tx.pure.string(options.appId),
+                tx.pure.address((0, utils_1.normalizeSuiAddress)(options.contextWallet)),
+                tx.pure.u64(options.derivationIndex),
+                tx.pure.string(options.appHint ?? ''),
                 tx.object('0x6'), // Clock object
             ],
         });
@@ -66,8 +67,8 @@ class CrossContextPermissionService {
      * @param signer - Transaction signer
      * @returns Transaction digest
      */
-    async grantCrossContextAccess(options, signer) {
-        const tx = this.buildGrantCrossContextAccessTransaction(options);
+    async grantWalletAllowlistAccess(options, signer) {
+        const tx = this.buildGrantWalletAllowlistTransaction(options);
         const result = await this.client.signAndExecuteTransaction({
             transaction: tx,
             signer,
@@ -87,14 +88,15 @@ class CrossContextPermissionService {
      * @param options - Permission grant options
      * @returns Transaction object
      */
-    buildGrantCrossContextAccessTransaction(options) {
+    buildGrantWalletAllowlistTransaction(options) {
         const tx = new transactions_1.Transaction();
         tx.moveCall({
-            target: `${this.packageId}::seal_access_control::grant_cross_context_access`,
+            target: `${this.packageId}::seal_access_control::grant_wallet_allowlist_access`,
             arguments: [
                 tx.object(this.accessRegistryId),
-                tx.pure.string(options.requestingAppId),
-                tx.pure.string(options.sourceContextId),
+                tx.pure.address((0, utils_1.normalizeSuiAddress)(options.requestingWallet)),
+                tx.pure.address((0, utils_1.normalizeSuiAddress)(options.targetWallet)),
+                tx.pure.string(options.scope ?? 'read'),
                 tx.pure.string(options.accessLevel),
                 tx.pure.u64(options.expiresAt),
                 tx.object('0x6'), // Clock object
@@ -109,8 +111,8 @@ class CrossContextPermissionService {
      * @param signer - Transaction signer
      * @returns Transaction digest
      */
-    async revokeCrossContextAccess(options, signer) {
-        const tx = this.buildRevokeCrossContextAccessTransaction(options);
+    async revokeWalletAllowlistAccess(options, signer) {
+        const tx = this.buildRevokeWalletAllowlistTransaction(options);
         const result = await this.client.signAndExecuteTransaction({
             transaction: tx,
             signer,
@@ -130,32 +132,33 @@ class CrossContextPermissionService {
      * @param options - Permission revocation options
      * @returns Transaction object
      */
-    buildRevokeCrossContextAccessTransaction(options) {
+    buildRevokeWalletAllowlistTransaction(options) {
         const tx = new transactions_1.Transaction();
         tx.moveCall({
-            target: `${this.packageId}::seal_access_control::revoke_cross_context_access`,
+            target: `${this.packageId}::seal_access_control::revoke_wallet_allowlist_access`,
             arguments: [
                 tx.object(this.accessRegistryId),
-                tx.pure.string(options.requestingAppId),
-                tx.pure.string(options.sourceContextId),
+                tx.pure.address((0, utils_1.normalizeSuiAddress)(options.requestingWallet)),
+                tx.pure.address((0, utils_1.normalizeSuiAddress)(options.targetWallet)),
+                tx.pure.string(options.scope ?? 'read'),
             ],
         });
         return tx;
     }
     /**
-     * Build seal_approve transaction with app_id parameter
+     * Build seal_approve transaction for a requesting wallet address
      *
      * @param contentId - Content identifier (SEAL key ID bytes)
-     * @param requestingAppId - App requesting decryption
+     * @param requestingWallet - Wallet requesting decryption
      * @returns Transaction object
      */
-    buildSealApproveTransaction(contentId, requestingAppId) {
+    buildSealApproveTransaction(contentId, requestingWallet) {
         const tx = new transactions_1.Transaction();
         tx.moveCall({
             target: `${this.packageId}::seal_access_control::seal_approve`,
             arguments: [
                 tx.pure.vector('u8', Array.from(contentId)),
-                tx.pure.string(requestingAppId),
+                tx.pure.address((0, utils_1.normalizeSuiAddress)(requestingWallet)),
                 tx.object(this.accessRegistryId),
                 tx.object('0x6'), // Clock object
             ],
@@ -163,69 +166,142 @@ class CrossContextPermissionService {
         return tx;
     }
     /**
-     * Query cross-context permissions for an app
-     *
-     * Note: This requires querying events or implementing a view function
-     * For now, returns events filtered by app
-     *
-     * @param requestingAppId - App to query permissions for
-     * @param sourceContextId - Optional context to filter by
-     * @returns List of permissions
+     * Query wallet allowlist permissions filtered by requester, target, or scope
      */
-    async queryPermissions(requestingAppId, sourceContextId) {
-        // Query CrossContextAccessChanged events
-        const events = await this.client.queryEvents({
-            query: {
-                MoveEventType: `${this.packageId}::seal_access_control::CrossContextAccessChanged`,
-            },
-            limit: 100,
-        });
-        const permissions = [];
-        for (const event of events.data) {
-            const parsedEvent = event.parsedJson;
-            // Filter by requesting app and context
-            if (parsedEvent.requesting_app_id === requestingAppId) {
-                if (!sourceContextId || parsedEvent.source_context_id === sourceContextId) {
-                    // Only include if granted (not revoked)
-                    if (parsedEvent.granted) {
-                        permissions.push({
-                            requestingAppId: parsedEvent.requesting_app_id,
-                            sourceContextId: parsedEvent.source_context_id,
-                            accessLevel: parsedEvent.access_level,
-                            grantedAt: Number(event.timestampMs),
-                            expiresAt: Number(parsedEvent.expires_at),
-                            grantedBy: parsedEvent.granted_by,
-                        });
-                    }
-                }
+    async queryWalletPermissions(options) {
+        const events = await this.fetchWalletAllowlistEvents();
+        const state = this.reduceWalletAllowlistEvents(events);
+        const normalizedRequester = options.requestingWallet ? (0, utils_1.normalizeSuiAddress)(options.requestingWallet) : undefined;
+        const normalizedTarget = options.targetWallet ? (0, utils_1.normalizeSuiAddress)(options.targetWallet) : undefined;
+        const scopeFilter = options.scope ?? undefined;
+        return Array.from(state.values())
+            .filter((permission) => {
+            if (normalizedRequester && permission.requestingWallet !== normalizedRequester) {
+                return false;
             }
-        }
-        return permissions;
+            if (normalizedTarget && permission.targetWallet !== normalizedTarget) {
+                return false;
+            }
+            if (scopeFilter && permission.scope !== scopeFilter) {
+                return false;
+            }
+            return true;
+        });
+    }
+    async listGrantsByTarget(targetWallet, scope) {
+        return this.queryWalletPermissions({ targetWallet, scope });
+    }
+    async listGrantsByRequester(requestingWallet, scope) {
+        return this.queryWalletPermissions({ requestingWallet, scope });
     }
     /**
-     * Check if an app has permission to access a context
-     *
-     * @param options - Check permission options
-     * @returns True if permission exists and is not expired
+     * Determine whether a wallet currently has allowlist permission
      */
-    async hasPermission(options) {
-        const permissions = await this.queryPermissions(options.requestingAppId, options.sourceContextId);
+    async hasWalletPermission(options) {
+        const permissions = await this.queryWalletPermissions(options);
         const now = Date.now();
-        return permissions.some(p => p.sourceContextId === options.sourceContextId &&
-            p.expiresAt > now);
+        return permissions.some(permission => {
+            const expiry = permission.expiresAt;
+            return expiry === 0 || expiry > now;
+        });
     }
     /**
-     * Get all contexts that an app has access to
-     *
-     * @param requestingAppId - App to query
-     * @returns List of accessible context IDs
+     * List target wallets this requester can access for an optional scope
      */
-    async getAccessibleContexts(requestingAppId) {
-        const permissions = await this.queryPermissions(requestingAppId);
+    async getAccessibleWallets(requestingWallet, scope = 'read') {
+        const permissions = await this.queryWalletPermissions({ requestingWallet, scope });
         const now = Date.now();
         return permissions
-            .filter(p => p.expiresAt > now)
-            .map(p => p.sourceContextId);
+            .filter(permission => permission.expiresAt === 0 || permission.expiresAt > now)
+            .map(permission => permission.targetWallet);
+    }
+    async getWalletAllowlistHistory(filter) {
+        const events = await this.fetchWalletAllowlistEvents();
+        const normalizedRequester = filter?.requestingWallet
+            ? (0, utils_1.normalizeSuiAddress)(filter.requestingWallet)
+            : undefined;
+        const normalizedTarget = filter?.targetWallet
+            ? (0, utils_1.normalizeSuiAddress)(filter.targetWallet)
+            : undefined;
+        return events
+            .filter((event) => {
+            if (normalizedRequester && event.requestingWallet !== normalizedRequester) {
+                return false;
+            }
+            if (normalizedTarget && event.targetWallet !== normalizedTarget) {
+                return false;
+            }
+            return true;
+        })
+            .map((event) => ({
+            timestamp: event.grantedAt,
+            action: event.granted ? 'grant' : 'revoke',
+            requestingWallet: event.requestingWallet,
+            targetWallet: event.targetWallet,
+            scope: event.scope,
+            accessLevel: event.accessLevel,
+            expiresAt: event.expiresAt,
+            grantedBy: event.grantedBy,
+        }))
+            .sort((a, b) => a.timestamp - b.timestamp);
+    }
+    async fetchWalletAllowlistEvents() {
+        const response = await this.client.queryEvents({
+            query: {
+                MoveEventType: `${this.packageId}::seal_access_control::WalletAllowlistChanged`,
+            },
+            limit: 1000,
+            order: 'ascending',
+        });
+        const events = [];
+        for (const event of response.data) {
+            const parsed = event.parsedJson;
+            if (!parsed) {
+                continue;
+            }
+            const requestingWallet = (0, utils_1.normalizeSuiAddress)(String(parsed.requester_wallet));
+            const targetWallet = (0, utils_1.normalizeSuiAddress)(String(parsed.target_wallet));
+            const scope = String(parsed.scope ?? 'read');
+            const accessLevel = String(parsed.access_level ?? 'read');
+            const granted = Boolean(parsed.granted);
+            const expiresAt = Number(parsed.expires_at ?? 0);
+            const grantedBy = (0, utils_1.normalizeSuiAddress)(String(parsed.granted_by ?? requestingWallet));
+            const grantedAt = Number(event.timestampMs ?? Date.now());
+            const key = `${requestingWallet}-${targetWallet}-${scope}`;
+            events.push({
+                key,
+                requestingWallet,
+                targetWallet,
+                scope,
+                accessLevel,
+                granted,
+                expiresAt,
+                grantedAt,
+                grantedBy,
+            });
+        }
+        return events;
+    }
+    reduceWalletAllowlistEvents(events) {
+        const state = new Map();
+        const sorted = [...events].sort((a, b) => a.grantedAt - b.grantedAt);
+        for (const event of sorted) {
+            if (event.granted) {
+                state.set(event.key, {
+                    requestingWallet: event.requestingWallet,
+                    targetWallet: event.targetWallet,
+                    scope: event.scope,
+                    accessLevel: event.accessLevel,
+                    grantedAt: event.grantedAt,
+                    expiresAt: event.expiresAt,
+                    grantedBy: event.grantedBy,
+                });
+            }
+            else {
+                state.delete(event.key);
+            }
+        }
+        return state;
     }
 }
 exports.CrossContextPermissionService = CrossContextPermissionService;

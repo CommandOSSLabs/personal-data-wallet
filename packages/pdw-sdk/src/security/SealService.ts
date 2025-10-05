@@ -7,7 +7,7 @@
 
 import { SuiClient } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
-import { fromHex, toHex } from '@mysten/sui/utils';
+import { fromHex, toHex, normalizeSuiAddress } from '@mysten/sui/utils';
 import { SealClient, SessionKey, EncryptedObject } from '@mysten/seal';
 import type { 
   SealClientOptions,
@@ -289,26 +289,33 @@ export class SealService {
   }
 
   /**
-   * Create transaction for seal_approve (legacy - without app_id)
-   * @deprecated Use createSealApproveTransactionWithAppId for OAuth-style permissions
+   * Create transaction for seal_approve using wallet-based allowlists
+   * Matches Move signature: seal_approve(id: vector<u8>, requesting_wallet: address, ...)
    */
-  async createSealApproveTransaction(id: string, userAddress: string, accessRegistry?: string): Promise<Uint8Array> {
+  async createSealApproveTransaction(
+    id: string,
+    userAddress: string,
+    requestingWallet: string,
+    accessRegistry?: string
+  ): Promise<Uint8Array> {
     const metric = this.startMetric('transaction_creation');
 
     try {
       const tx = new Transaction();
       
       // Use the deployed AccessRegistry ID from environment or parameter
-      const registryId = accessRegistry || process.env.ACCESS_REGISTRY_ID || "0x8088cc36468b53f210696f1c6b1a4de1b1666dd36a7c36f92c394ff1d342f6dd";
-      
-      // CRITICAL FIX: Match SEAL-compliant Move function signature
-      // entry fun seal_approve(id: vector<u8>, registry: &AccessRegistry, clock: &Clock, ctx: &TxContext)
+      const registryId = accessRegistry || process.env.ACCESS_REGISTRY_ID || "0xc2b8a9705516370e245f4d7ce58286ccbb56554edf31d1cc5a02155ac24d43c0";
+      const normalizedWallet = normalizeSuiAddress(requestingWallet);
+
+      // Wallet-based seal_approve call
+      // entry fun seal_approve(id: vector<u8>, requesting_wallet: address, registry: &AccessRegistry, clock: &Clock, ctx: &TxContext)
       tx.moveCall({
         target: `${this.config.packageId}::seal_access_control::seal_approve`,
         arguments: [
-          tx.pure.vector("u8", fromHex(id)), // FIXED: Use fromHex instead of text encoding
-          tx.object(registryId), // AccessRegistry reference
-          tx.object('0x6') // Clock object (system clock)
+          tx.pure.vector("u8", fromHex(id)), // Arg 1: Content ID (SEAL key ID)
+          tx.pure.address(normalizedWallet),  // Arg 2: Requesting wallet address
+          tx.object(registryId),              // Arg 3: AccessRegistry reference
+          tx.object('0x6')                    // Arg 4: Clock object (system clock)
         ]
       });
 
@@ -324,7 +331,8 @@ export class SealService {
         id,
         txSize: txBytes.length,
         registryId,
-        clockId: '0x6'
+        clockId: '0x6',
+        requestingWallet: normalizedWallet
       });
 
       return txBytes;
@@ -337,44 +345,35 @@ export class SealService {
   }
 
   /**
-   * Create transaction for seal_approve with app_id (OAuth-style permissions)
-   * 
-   * This method builds a SEAL approval transaction that includes the requesting
-   * application identifier, enabling OAuth-style permission validation where apps
-   * must be explicitly granted access by users.
-   * 
-   * @param contentId - Content identifier (identity bytes)
-   * @param appId - Requesting application identifier
-   * @param accessRegistry - Optional custom access registry ID
-   * @returns Transaction object for SEAL approval
+   * Build a seal_approve transaction for a specific requesting wallet
    */
-  buildSealApproveTransactionWithAppId(
+  buildSealApproveTransaction(
     contentId: Uint8Array,
-    appId: string,
+    requestingWallet: string,
     accessRegistry?: string
   ): Transaction {
-    const metric = this.startMetric('transaction_creation_with_app_id');
+    const metric = this.startMetric('transaction_creation_wallet');
 
     try {
       const tx = new Transaction();
       
       // Use the deployed AccessRegistry ID from environment or parameter
       const registryId = accessRegistry || process.env.ACCESS_REGISTRY_ID || "0x8088cc36468b53f210696f1c6b1a4de1b1666dd36a7c36f92c394ff1d342f6dd";
+      const normalizedWallet = normalizeSuiAddress(requestingWallet);
       
-      // OAuth-style seal_approve with app_id parameter
-      // entry fun seal_approve(id: vector<u8>, app_id: String, registry: &AccessRegistry, clock: &Clock, ctx: &TxContext)
+      // Wallet-based seal_approve call
       tx.moveCall({
         target: `${this.config.packageId}::seal_access_control::seal_approve`,
         arguments: [
           tx.pure.vector('u8', Array.from(contentId)), // Content identifier
-          tx.pure.string(appId), // Requesting app identifier (OAuth-style)
-          tx.object(registryId), // AccessRegistry reference
-          tx.object('0x6') // Clock object (system clock)
+          tx.pure.address(normalizedWallet),          // Requesting wallet address
+          tx.object(registryId),                      // AccessRegistry reference
+          tx.object('0x6')                            // Clock object (system clock)
         ]
       });
 
       this.completeMetric(metric, true, { 
-        appId,
+        requestingWallet: normalizedWallet,
         contentIdLength: contentId.length,
         registryId,
         clockId: '0x6'
@@ -385,7 +384,7 @@ export class SealService {
     } catch (error) {
       this.completeMetric(metric, false, undefined, error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to create transaction with app_id: ${errorMessage}`);
+      throw new Error(`Failed to create transaction for wallet: ${errorMessage}`);
     }
   }
 

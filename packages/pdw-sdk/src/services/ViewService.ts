@@ -64,6 +64,7 @@ export interface ContentRegistry {
 }
 
 export class ViewService {
+  private static readonly MAX_QUERY_LIMIT = 50;
   private client: SuiClient;
   private config: PDWConfig;
 
@@ -226,7 +227,7 @@ export class ViewService {
    */
   async getMemoryStats(userAddress: string): Promise<MemoryStats> {
     try {
-      const memories = await this.getUserMemories(userAddress, { limit: 1000 });
+  const memories = await this.getUserMemories(userAddress, { limit: ViewService.MAX_QUERY_LIMIT });
       
       const categoryCounts: Record<string, number> = {};
       let totalSize = 0;
@@ -431,7 +432,7 @@ export class ViewService {
       // For now, we'll return empty as this requires additional infrastructure
       // In a real implementation, this would use event queries or an indexing service
       
-      console.warn('findMemoryByContentHash: This method requires event indexing infrastructure');
+  console.debug('findMemoryByContentHash: This method requires event indexing infrastructure');
       return [];
     } catch (error) {
       throw new Error(`Failed to find memory by content hash: ${error}`);

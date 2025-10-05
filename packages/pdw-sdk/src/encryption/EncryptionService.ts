@@ -132,13 +132,15 @@ export class EncryptionService {
   /**
    * Decrypt data using SEAL with session keys via SealService
    * Handles both new binary format (Uint8Array) and legacy base64 format
-   * Now includes app_id for OAuth-style permission validation
+   * Validates wallet-based allowlists during approval flow
    */
   async decrypt(options: SealDecryptionOptions): Promise<Uint8Array> {
     try {
-      // Validate app_id is provided for OAuth-style access control
-      if (!options.appId) {
-        console.warn('No app_id provided for decryption - OAuth permission check will be skipped');
+      // Determine requesting wallet (defaults to the user address)
+      const requestingWallet = options.requestingWallet ?? options.userAddress;
+
+      if (!options.requestingWallet) {
+        console.warn('No requestingWallet provided for decryption - defaulting to user address');
       }
 
       // Get or create session key
@@ -150,10 +152,16 @@ export class EncryptionService {
       // Build access transaction if not provided
       let txBytes = options.signedTxBytes;
       if (!txBytes) {
-        const tx = options.appId
-          ? await this.buildAccessTransactionWithAppId(options.userAddress, options.appId, 'read')
-          : await this.buildAccessTransaction(options.userAddress, 'read');
+        const tx = await this.buildAccessTransactionForWallet(
+          options.userAddress,
+          requestingWallet,
+          'read'
+        );
         txBytes = await tx.build({ client: this.suiClient });
+      }
+
+      if (!txBytes) {
+        throw new Error('Failed to build SEAL approval transaction bytes');
       }
 
       // ✅ CRITICAL: Handle both binary and legacy formats
@@ -178,7 +186,7 @@ export class EncryptionService {
       const decryptResult = await this.sealService.decryptData({
         encryptedObject: encryptedBytes,
         sessionKey: activeSessionKey,
-        txBytes: txBytes
+        txBytes
       });
 
       return decryptResult;
@@ -255,51 +263,38 @@ export class EncryptionService {
 
   /**
    * Build access approval transaction for SEAL key servers (LEGACY)
-   * 
-   * @deprecated Use buildAccessTransactionWithAppId instead for OAuth-style permissions
+   *
+   * @deprecated Use buildAccessTransactionForWallet instead for wallet-based permissions
    */
   async buildAccessTransaction(
     userAddress: string,
     accessType: 'read' | 'write' = 'read'
   ): Promise<Transaction> {
-    console.warn('buildAccessTransaction is deprecated - use buildAccessTransactionWithAppId for OAuth-style permissions');
-    
-    const tx = new Transaction();
+    console.warn('buildAccessTransaction is deprecated - use buildAccessTransactionForWallet for wallet-based permissions');
 
-    tx.moveCall({
-      target: `${this.packageId}::seal_access_control::seal_approve`,
-      arguments: [
-        tx.pure.vector('u8', Array.from(fromHex(userAddress.replace('0x', '')))),
-        tx.pure.string(''), // Empty app_id for legacy compatibility
-        tx.object(this.config.accessRegistryId || ''),
-        tx.object('0x6'), // Clock object
-      ],
-    });
-
-    return tx;
+    return this.buildAccessTransactionForWallet(userAddress, userAddress, accessType);
   }
 
   /**
-   * Build access approval transaction with app_id for OAuth-style permissions
+   * Build access approval transaction for a requesting wallet address
    * Uses CrossContextPermissionService for proper permission validation
-   * 
+   *
    * @param userAddress - User's wallet address (used as SEAL identity)
-   * @param appId - Requesting application identifier
+   * @param requestingWallet - Wallet requesting access
    * @param accessType - Access level (read/write)
    * @returns Transaction for SEAL key server approval
    */
-  async buildAccessTransactionWithAppId(
+  async buildAccessTransactionForWallet(
     userAddress: string,
-    appId: string,
+    requestingWallet: string,
     accessType: 'read' | 'write' = 'read'
   ): Promise<Transaction> {
     // Convert user address to bytes for SEAL identity
     const identityBytes = fromHex(userAddress.replace('0x', ''));
-    
-    // Use CrossContextPermissionService to build seal_approve with app_id
+
     return this.permissionService.buildSealApproveTransaction(
       identityBytes,
-      appId
+      requestingWallet
     );
   }
 

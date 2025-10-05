@@ -11,31 +11,50 @@ export interface CrossContextPermissionConfig {
     packageId: string;
     accessRegistryId: string;
 }
-export interface GrantCrossContextAccessOptions {
-    requestingAppId: string;
-    sourceContextId: string;
+export interface RegisterContextWalletOptions {
+    contextWallet: string;
+    derivationIndex: number;
+    appHint?: string;
+}
+export interface GrantWalletAllowlistOptions {
+    requestingWallet: string;
+    targetWallet: string;
+    scope?: string;
     accessLevel: 'read' | 'write';
     expiresAt: number;
 }
-export interface RevokeCrossContextAccessOptions {
-    requestingAppId: string;
-    sourceContextId: string;
+export interface RevokeWalletAllowlistOptions {
+    requestingWallet: string;
+    targetWallet: string;
+    scope?: string;
 }
-export interface RegisterContextOptions {
-    contextId: string;
-    appId: string;
-}
-export interface CheckCrossContextAccessOptions {
-    requestingAppId: string;
-    sourceContextId: string;
-}
-export interface CrossContextPermission {
-    requestingAppId: string;
-    sourceContextId: string;
+export interface WalletAllowlistPermission {
+    requestingWallet: string;
+    targetWallet: string;
+    scope: string;
     accessLevel: string;
     grantedAt: number;
     expiresAt: number;
     grantedBy: string;
+}
+export interface WalletAllowlistHistoryEvent {
+    timestamp: number;
+    action: 'grant' | 'revoke';
+    requestingWallet: string;
+    targetWallet: string;
+    scope: string;
+    accessLevel: string;
+    expiresAt: number;
+    grantedBy: string;
+}
+export interface WalletAllowlistHistoryFilter {
+    requestingWallet?: string;
+    targetWallet?: string;
+}
+export interface CheckWalletAccessOptions {
+    requestingWallet: string;
+    targetWallet?: string;
+    scope?: string;
 }
 /**
  * Service for managing cross-context permissions
@@ -52,14 +71,14 @@ export declare class CrossContextPermissionService {
      * @param signer - Transaction signer
      * @returns Transaction digest
      */
-    registerContext(options: RegisterContextOptions, signer: Signer): Promise<string>;
+    registerContextWallet(options: RegisterContextWalletOptions, signer: Signer): Promise<string>;
     /**
      * Build transaction to register a context wallet
      *
      * @param options - Context registration options
      * @returns Transaction object
      */
-    buildRegisterContextTransaction(options: RegisterContextOptions): Transaction;
+    buildRegisterContextWalletTransaction(options: RegisterContextWalletOptions): Transaction;
     /**
      * Grant cross-context access permission
      *
@@ -67,14 +86,14 @@ export declare class CrossContextPermissionService {
      * @param signer - Transaction signer
      * @returns Transaction digest
      */
-    grantCrossContextAccess(options: GrantCrossContextAccessOptions, signer: Signer): Promise<string>;
+    grantWalletAllowlistAccess(options: GrantWalletAllowlistOptions, signer: Signer): Promise<string>;
     /**
      * Build transaction to grant cross-context access
      *
      * @param options - Permission grant options
      * @returns Transaction object
      */
-    buildGrantCrossContextAccessTransaction(options: GrantCrossContextAccessOptions): Transaction;
+    buildGrantWalletAllowlistTransaction(options: GrantWalletAllowlistOptions): Transaction;
     /**
      * Revoke cross-context access permission
      *
@@ -82,46 +101,38 @@ export declare class CrossContextPermissionService {
      * @param signer - Transaction signer
      * @returns Transaction digest
      */
-    revokeCrossContextAccess(options: RevokeCrossContextAccessOptions, signer: Signer): Promise<string>;
+    revokeWalletAllowlistAccess(options: RevokeWalletAllowlistOptions, signer: Signer): Promise<string>;
     /**
      * Build transaction to revoke cross-context access
      *
      * @param options - Permission revocation options
      * @returns Transaction object
      */
-    buildRevokeCrossContextAccessTransaction(options: RevokeCrossContextAccessOptions): Transaction;
+    buildRevokeWalletAllowlistTransaction(options: RevokeWalletAllowlistOptions): Transaction;
     /**
-     * Build seal_approve transaction with app_id parameter
+     * Build seal_approve transaction for a requesting wallet address
      *
      * @param contentId - Content identifier (SEAL key ID bytes)
-     * @param requestingAppId - App requesting decryption
+     * @param requestingWallet - Wallet requesting decryption
      * @returns Transaction object
      */
-    buildSealApproveTransaction(contentId: Uint8Array, requestingAppId: string): Transaction;
+    buildSealApproveTransaction(contentId: Uint8Array, requestingWallet: string): Transaction;
     /**
-     * Query cross-context permissions for an app
-     *
-     * Note: This requires querying events or implementing a view function
-     * For now, returns events filtered by app
-     *
-     * @param requestingAppId - App to query permissions for
-     * @param sourceContextId - Optional context to filter by
-     * @returns List of permissions
+     * Query wallet allowlist permissions filtered by requester, target, or scope
      */
-    queryPermissions(requestingAppId: string, sourceContextId?: string): Promise<CrossContextPermission[]>;
+    queryWalletPermissions(options: Partial<CheckWalletAccessOptions>): Promise<WalletAllowlistPermission[]>;
+    listGrantsByTarget(targetWallet: string, scope?: string): Promise<WalletAllowlistPermission[]>;
+    listGrantsByRequester(requestingWallet: string, scope?: string): Promise<WalletAllowlistPermission[]>;
     /**
-     * Check if an app has permission to access a context
-     *
-     * @param options - Check permission options
-     * @returns True if permission exists and is not expired
+     * Determine whether a wallet currently has allowlist permission
      */
-    hasPermission(options: CheckCrossContextAccessOptions): Promise<boolean>;
+    hasWalletPermission(options: CheckWalletAccessOptions): Promise<boolean>;
     /**
-     * Get all contexts that an app has access to
-     *
-     * @param requestingAppId - App to query
-     * @returns List of accessible context IDs
+     * List target wallets this requester can access for an optional scope
      */
-    getAccessibleContexts(requestingAppId: string): Promise<string[]>;
+    getAccessibleWallets(requestingWallet: string, scope?: string): Promise<string[]>;
+    getWalletAllowlistHistory(filter?: WalletAllowlistHistoryFilter): Promise<WalletAllowlistHistoryEvent[]>;
+    private fetchWalletAllowlistEvents;
+    private reduceWalletAllowlistEvents;
 }
 //# sourceMappingURL=CrossContextPermissionService.d.ts.map

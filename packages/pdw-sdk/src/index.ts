@@ -342,11 +342,15 @@ export default {
 export { MainWalletService } from './wallet/MainWalletService';
 export { ContextWalletService } from './wallet/ContextWalletService';
 export { PermissionService } from './access/PermissionService';
+export type { ConsentRepository } from './permissions/ConsentRepository';
+export { FileSystemConsentRepository, InMemoryConsentRepository } from './permissions/ConsentRepository';
 export { AggregationService } from './aggregation/AggregationService';
 export type {
   MainWallet,
   ContextWallet,
   ConsentRequest,
+  ConsentRequestRecord,
+  ConsentStatus,
   AccessGrant,
   CreateMainWalletOptions,
   CreateContextWalletOptions,

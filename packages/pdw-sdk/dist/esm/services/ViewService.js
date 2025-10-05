@@ -142,7 +142,7 @@ export class ViewService {
      */
     async getMemoryStats(userAddress) {
         try {
-            const memories = await this.getUserMemories(userAddress, { limit: 1000 });
+            const memories = await this.getUserMemories(userAddress, { limit: ViewService.MAX_QUERY_LIMIT });
             const categoryCounts = {};
             let totalSize = 0;
             let totalImportance = 0;
@@ -316,7 +316,7 @@ export class ViewService {
             // Note: This would typically require an event-based search or indexing service
             // For now, we'll return empty as this requires additional infrastructure
             // In a real implementation, this would use event queries or an indexing service
-            console.warn('findMemoryByContentHash: This method requires event indexing infrastructure');
+            console.debug('findMemoryByContentHash: This method requires event indexing infrastructure');
             return [];
         }
         catch (error) {
@@ -324,4 +324,5 @@ export class ViewService {
         }
     }
 }
+ViewService.MAX_QUERY_LIMIT = 50;
 //# sourceMappingURL=ViewService.js.map

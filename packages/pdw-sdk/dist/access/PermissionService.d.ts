@@ -9,8 +9,11 @@
  */
 import { SuiClient } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
-import { ConsentRequest, AccessGrant, PermissionScope, RequestConsentOptions, GrantPermissionsOptions, RevokePermissionsOptions } from '../types/wallet.js';
+import type { Signer } from '@mysten/sui/cryptography';
+import { ConsentRequest, ConsentRequestRecord, AccessGrant, PermissionScope, RequestConsentOptions, GrantPermissionsOptions, RevokePermissionsOptions } from '../types/wallet.js';
 import { ContextWalletService } from '../wallet/ContextWalletService.js';
+import { CrossContextPermissionService } from '../services/CrossContextPermissionService';
+import type { ConsentRepository } from '../permissions/ConsentRepository.js';
 /**
  * Configuration for PermissionService
  */
@@ -19,10 +22,16 @@ export interface PermissionServiceConfig {
     suiClient: SuiClient;
     /** Package ID for Move contracts */
     packageId: string;
+    /** Access registry ID for wallet allowlists */
+    accessRegistryId: string;
     /** API URL for backend consent UI */
     apiUrl?: string;
     /** ContextWalletService for validation */
     contextWalletService?: ContextWalletService;
+    /** Optional injected cross-context permission service */
+    crossContextPermissionService?: CrossContextPermissionService;
+    /** Optional repository for consent persistence */
+    consentRepository?: ConsentRepository;
 }
 /**
  * PermissionService handles OAuth-style access control
@@ -32,42 +41,43 @@ export declare class PermissionService {
     private packageId;
     private apiUrl;
     private contextWalletService?;
+    private crossContextPermissions;
+    private pendingConsents;
+    private consentRepository?;
     constructor(config: PermissionServiceConfig);
     /**
      * Request user consent for accessing data
      * @param options - Consent request options
      * @returns Created consent request
      */
-    requestConsent(options: RequestConsentOptions): Promise<ConsentRequest>;
+    requestConsent(options: RequestConsentOptions): Promise<ConsentRequestRecord>;
     /**
      * Grant permissions to an app (user approval)
      * @param userAddress - User granting permissions
      * @param options - Grant options
      * @returns Created access grant
      */
-    grantPermissions(userAddress: string, options: GrantPermissionsOptions): Promise<AccessGrant>;
+    grantPermissions(userAddress: string, options: GrantPermissionsOptions & {
+        signer?: Signer;
+    }): Promise<AccessGrant>;
     /**
      * Revoke permissions from an app
      * @param userAddress - User revoking permissions
      * @param options - Revoke options
      * @returns Success status
      */
-    revokePermissions(userAddress: string, options: RevokePermissionsOptions): Promise<boolean>;
+    revokePermissions(userAddress: string, options: RevokePermissionsOptions & {
+        signer?: Signer;
+    }): Promise<boolean>;
     /**
-     * Check if an app has specific permission
-     * @param appId - Application ID
-     * @param scope - Permission scope to check
-     * @param userAddress - User address for permission validation
-     * @returns True if app has permission
+     * Determine if a requesting wallet currently has permission to access a target wallet
      */
-    checkPermission(appId: string, scope: PermissionScope, userAddress: string): Promise<boolean>;
+    hasWalletPermission(requestingWallet: string, targetWallet: string, scope: PermissionScope): Promise<boolean>;
     /**
-     * Get all access grants for an app
-     * @param appId - Application ID
-     * @param userAddress - User address
-     * @returns Array of access grants
+     * Legacy compatibility method for app-scoped permission checks
+     * Interprets appId as requesting wallet address.
      */
-    getGrantsForApp(appId: string, userAddress: string): Promise<AccessGrant[]>;
+    checkPermission(appId: string, scope: PermissionScope, userAddressOrTargetWallet: string): Promise<boolean>;
     /**
      * Get all access grants by a user
      * @param userAddress - User address
@@ -87,7 +97,7 @@ export declare class PermissionService {
      * @param contextId - Context ID to grant access to
      * @returns Created access grant
      */
-    approveConsent(userAddress: string, consentRequest: ConsentRequest, contextId: string): Promise<AccessGrant>;
+    approveConsent(userAddress: string, consentRequest: ConsentRequest, _contextId: string): Promise<AccessGrant>;
     /**
      * Deny a consent request
      * @param userAddress - User denying the request
@@ -103,9 +113,9 @@ export declare class PermissionService {
     getPermissionAudit(userAddress: string): Promise<Array<{
         timestamp: number;
         action: 'grant' | 'revoke' | 'request' | 'deny';
-        appId: string;
+        requestingWallet: string;
+        targetWallet: string;
         scopes: PermissionScope[];
-        contextId?: string;
     }>>;
     /**
      * Validate OAuth-style permission for SEAL access control
@@ -116,13 +126,9 @@ export declare class PermissionService {
      */
     validateOAuthPermission(walletOwner: string, appId: string, requestedScope: string): Promise<boolean>;
     /**
-     * Create on-chain approval transaction for SEAL
-     * @param userAddress - User creating the approval
-     * @param appId - Application to approve
-     * @param scopes - Permission scopes to approve
-     * @returns Transaction for approval
+     * Build seal_approve transaction for a requesting wallet
      */
-    createApprovalTransaction(userAddress: string, appId: string, scopes: PermissionScope[]): Transaction;
+    createApprovalTransaction(contentId: Uint8Array, requestingWallet: string): Transaction;
     /**
      * Get permission statistics for a user
      * @param userAddress - User address
@@ -141,5 +147,10 @@ export declare class PermissionService {
      * @returns Number of permissions cleaned up
      */
     cleanupExpiredPermissions(userAddress: string): Promise<number>;
+    private buildGrantFromPermissions;
+    private convertPermissionsToGrants;
+    private toPermissionScope;
+    private persistConsentRequest;
+    private updateConsentStatus;
 }
 //# sourceMappingURL=PermissionService.d.ts.map

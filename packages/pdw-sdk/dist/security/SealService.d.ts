@@ -71,23 +71,14 @@ export declare class SealService {
      */
     decryptData(options: DecryptionOptions): Promise<Uint8Array>;
     /**
-     * Create transaction for seal_approve (legacy - without app_id)
-     * @deprecated Use createSealApproveTransactionWithAppId for OAuth-style permissions
+     * Create transaction for seal_approve using wallet-based allowlists
+     * Matches Move signature: seal_approve(id: vector<u8>, requesting_wallet: address, ...)
      */
-    createSealApproveTransaction(id: string, userAddress: string, accessRegistry?: string): Promise<Uint8Array>;
+    createSealApproveTransaction(id: string, userAddress: string, requestingWallet: string, accessRegistry?: string): Promise<Uint8Array>;
     /**
-     * Create transaction for seal_approve with app_id (OAuth-style permissions)
-     *
-     * This method builds a SEAL approval transaction that includes the requesting
-     * application identifier, enabling OAuth-style permission validation where apps
-     * must be explicitly granted access by users.
-     *
-     * @param contentId - Content identifier (identity bytes)
-     * @param appId - Requesting application identifier
-     * @param accessRegistry - Optional custom access registry ID
-     * @returns Transaction object for SEAL approval
+     * Build a seal_approve transaction for a specific requesting wallet
      */
-    buildSealApproveTransactionWithAppId(contentId: Uint8Array, appId: string, accessRegistry?: string): Transaction;
+    buildSealApproveTransaction(contentId: Uint8Array, requestingWallet: string, accessRegistry?: string): Transaction;
     /**
      * Parse encrypted object structure
      */

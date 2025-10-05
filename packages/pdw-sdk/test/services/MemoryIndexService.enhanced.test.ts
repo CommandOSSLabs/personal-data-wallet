@@ -9,35 +9,88 @@
  * - Native C++ HNSW implementation (10-100x faster than pure JS)
  */
 
+import { afterEach, beforeEach, describe, expect, test } from '@jest/globals';
 import { MemoryIndexService, type MemorySearchQuery } from '../../src/services/MemoryIndexService';
-import { StorageService, type MemoryMetadata } from '../../src/services/StorageService';
-import { EmbeddingService } from '../../src/services/EmbeddingService';
+import type { MemoryMetadata, WalrusUploadResult } from '../../src/services/StorageService';
 
-// Mock storage service for testing
-const mockStorageService = {
-  store: jest.fn(),
-  retrieve: jest.fn(),
-  delete: jest.fn()
-} as unknown as StorageService;
+const VECTOR_DIMENSION = 768;
 
-// Mock embedding service for testing
-const mockEmbeddingService = {
-  embedText: jest.fn()
-} as unknown as EmbeddingService;
+const createVector = (dimension: number, seed = 0.5, variance = 0.1) =>
+  Array.from({ length: dimension }, (_, index) => {
+    const value = Math.sin(seed * (index + 1)) * variance + seed;
+    return Number(value.toFixed(6));
+  });
+
+const perturbVector = (vector: number[], delta: number) =>
+  vector.map((value, index) => Number((value + Math.sin((index + 1) * delta) * 0.05).toFixed(6)));
+
+const buildMetadata = (config: {
+  category: string;
+  topic: string;
+  importance: number;
+  createdTimestamp: number;
+  contentType?: string;
+  contentSize?: number;
+  contentHash?: string;
+  embeddingDimension?: number;
+  updatedTimestamp?: number;
+  customMetadata?: Record<string, string>;
+  isEncrypted?: boolean;
+  embeddingBlobId?: string;
+  encryptionType?: string;
+}): MemoryMetadata => ({
+  contentType: config.contentType ?? 'text/plain',
+  contentSize: config.contentSize ?? 1024,
+  contentHash: config.contentHash ?? `hash-${config.category}-${config.topic}`,
+  category: config.category,
+  topic: config.topic,
+  importance: config.importance,
+  embeddingBlobId: config.embeddingBlobId,
+  embeddingDimension: config.embeddingDimension ?? VECTOR_DIMENSION,
+  createdTimestamp: config.createdTimestamp,
+  updatedTimestamp: config.updatedTimestamp,
+  customMetadata: config.customMetadata,
+  isEncrypted: config.isEncrypted,
+  encryptionType: config.encryptionType
+});
+
+class InMemoryWalrusAdapter {
+  private blobs = new Map<string, Uint8Array>();
+  private counter = 0;
+
+  async upload(content: Uint8Array, metadata: MemoryMetadata): Promise<WalrusUploadResult> {
+    const blobId = `test-blob-${++this.counter}`;
+    this.blobs.set(blobId, content);
+    return {
+      blobId,
+      metadata,
+      isEncrypted: false,
+      storageEpochs: 0,
+      uploadTimeMs: 0
+    };
+  }
+}
 
 describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
   let memoryIndexService: MemoryIndexService;
+  let storageAdapter: InMemoryWalrusAdapter;
   const testUserAddress = '0xc5e67f46e1b99b580da3a6cc69acf187d0c08dbe568f8f5a78959079c9d82a15';
 
   beforeEach(() => {
-    memoryIndexService = new MemoryIndexService(mockStorageService, {
+    storageAdapter = new InMemoryWalrusAdapter();
+    memoryIndexService = new MemoryIndexService(storageAdapter as unknown as any, {
       maxElements: 1000,
-      dimension: 768,
+      dimension: VECTOR_DIMENSION,
       efConstruction: 100,
-      m: 8
+      m: 8,
+      batchSize: 50,
+      autoFlushInterval: 10
     });
-    
-    memoryIndexService.initialize(mockEmbeddingService, mockStorageService);
+
+    const hnswInternal = (memoryIndexService as any).hnswService;
+    if (hnswInternal) {
+      hnswInternal.storageService = storageAdapter;
+    }
   });
 
   afterEach(() => {
@@ -46,22 +99,14 @@ describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
 
   describe('Browser-Compatible HNSW Implementation', () => {
     test('should create and initialize browser HNSW index', async () => {
-      const testVector = new Array(768).fill(0).map(() => Math.random());
-      const mockEmbedding = {
-        vector: testVector,
-        model: 'text-embedding-004',
-        usage: { prompt_tokens: 10, total_tokens: 10 }
-      };
+      const testVector = createVector(VECTOR_DIMENSION, 0.42);
 
-      (mockEmbeddingService.embedText as jest.Mock).mockResolvedValue(mockEmbedding);
-
-      const metadata: MemoryMetadata = {
+      const metadata = buildMetadata({
         category: 'test',
         topic: 'HNSW Performance',
         importance: 8,
-        contentType: 'text/plain',
         createdTimestamp: Date.now()
-      };
+      });
 
       const result = await memoryIndexService.indexMemory(
         testUserAddress,
@@ -72,36 +117,39 @@ describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
         testVector
       );
 
+      await memoryIndexService.flush(testUserAddress);
+
       expect(result.indexed).toBe(true);
       expect(result.vectorId).toBeGreaterThan(0);
     });
 
     test('should perform O(log N) semantic search with enhanced features', async () => {
       // Index multiple test memories with diverse content
+      const baseVector = createVector(VECTOR_DIMENSION, 0.8, 0.05);
       const testMemories = [
         {
           id: 'memory-1',
           content: 'Machine learning algorithms for data analysis',
-          vector: new Array(768).fill(0).map(() => Math.random() * 0.1 + 0.8), // High values
-          metadata: { category: 'AI', topic: 'Machine Learning', importance: 9, contentType: 'text/plain', createdTimestamp: Date.now() - 86400000 } as MemoryMetadata
+          vector: perturbVector(baseVector, 0.01),
+          metadata: buildMetadata({ category: 'AI', topic: 'Machine Learning', importance: 9, createdTimestamp: Date.now() - 86400000 })
         },
         {
           id: 'memory-2', 
           content: 'Neural networks and deep learning concepts',
-          vector: new Array(768).fill(0).map(() => Math.random() * 0.1 + 0.75), // Similar high values
-          metadata: { category: 'AI', topic: 'Deep Learning', importance: 8, contentType: 'text/plain', createdTimestamp: Date.now() - 3600000 } as MemoryMetadata
+          vector: perturbVector(baseVector, 0.015),
+          metadata: buildMetadata({ category: 'AI', topic: 'Deep Learning', importance: 8, createdTimestamp: Date.now() - 3600000 })
         },
         {
           id: 'memory-3',
           content: 'Cooking recipes and kitchen techniques',
-          vector: new Array(768).fill(0).map(() => Math.random() * 0.1 - 0.5), // Low/negative values
-          metadata: { category: 'Cooking', topic: 'Recipes', importance: 5, contentType: 'text/plain', createdTimestamp: Date.now() - 172800000 } as MemoryMetadata
+          vector: createVector(VECTOR_DIMENSION, -0.4, 0.05),
+          metadata: buildMetadata({ category: 'Cooking', topic: 'Recipes', importance: 5, createdTimestamp: Date.now() - 172800000 })
         },
         {
           id: 'memory-4',
           content: 'Advanced neural network architectures',
-          vector: new Array(768).fill(0).map(() => Math.random() * 0.1 + 0.78), // Similar to memory-1 & 2
-          metadata: { category: 'AI', topic: 'Neural Networks', importance: 9, contentType: 'text/plain', createdTimestamp: Date.now() - 7200000 } as MemoryMetadata
+          vector: perturbVector(baseVector, 0.02),
+          metadata: buildMetadata({ category: 'AI', topic: 'Neural Networks', importance: 9, createdTimestamp: Date.now() - 7200000 })
         }
       ];
 
@@ -117,15 +165,10 @@ describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
         );
       }
 
+      await memoryIndexService.flush(testUserAddress);
+
       // Create query vector similar to AI/ML content (high values)
-      const queryVector = new Array(768).fill(0).map(() => Math.random() * 0.1 + 0.82);
-      
-      // Mock embedding service for search
-      (mockEmbeddingService.embedText as jest.Mock).mockResolvedValue({
-        vector: queryVector,
-        model: 'text-embedding-004',
-        usage: { prompt_tokens: 5, total_tokens: 5 }
-      });
+      const queryVector = perturbVector(baseVector, 0.03);
 
       const searchQuery: MemorySearchQuery = {
         query: 'machine learning and neural networks',
@@ -135,7 +178,8 @@ describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
         searchMode: 'semantic',
         boostRecent: true,
         diversityFactor: 0.3,
-        categories: ['AI']
+        categories: ['AI'],
+        vector: queryVector
       };
 
       const startTime = performance.now();
@@ -173,18 +217,17 @@ describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
 
     test('should apply diversity filtering to avoid result clustering', async () => {
       // Create similar vectors that would cluster together without diversity
-      const baseVector = new Array(768).fill(0).map(() => Math.random());
+      const baseVector = createVector(VECTOR_DIMENSION, 0.6);
       const similarMemories = Array.from({ length: 5 }, (_, i) => ({
         id: `similar-memory-${i}`,
         content: `Similar content about topic ${i}`,
-        vector: baseVector.map(v => v + (Math.random() - 0.5) * 0.05), // Very similar vectors
-        metadata: {
+        vector: perturbVector(baseVector, 0.01 * (i + 1)),
+        metadata: buildMetadata({
           category: 'Test',
           topic: `Topic ${i}`,
           importance: 7,
-          contentType: 'text/plain',
           createdTimestamp: Date.now() - i * 3600000
-        } as MemoryMetadata
+        })
       }));
 
       // Index all similar memories
@@ -199,19 +242,17 @@ describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
         );
       }
 
-      const queryVector = baseVector.map(v => v + (Math.random() - 0.5) * 0.02);
-      (mockEmbeddingService.embedText as jest.Mock).mockResolvedValue({
-        vector: queryVector,
-        model: 'text-embedding-004',
-        usage: { prompt_tokens: 5, total_tokens: 5 }
-      });
+      await memoryIndexService.flush(testUserAddress);
+
+      const queryVector = perturbVector(baseVector, 0.0025);
 
       // Search with diversity filtering
       const diverseQuery: MemorySearchQuery = {
         query: 'similar content search',
         userAddress: testUserAddress,
         k: 3,
-        diversityFactor: 0.8 // High diversity requirement
+        diversityFactor: 0.8, // High diversity requirement
+        vector: queryVector
       };
 
       const diverseResults = await memoryIndexService.searchMemories(diverseQuery);
@@ -221,7 +262,8 @@ describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
         query: 'similar content search',
         userAddress: testUserAddress,
         k: 3,
-        diversityFactor: 0 // No diversity filtering
+        diversityFactor: 0, // No diversity filtering
+        vector: queryVector
       };
 
       const nonDiverseResults = await memoryIndexService.searchMemories(nonDiverseQuery);
@@ -236,17 +278,17 @@ describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
     });
 
     test('should provide enhanced relevance scoring with multiple factors', async () => {
+      const testVector = createVector(VECTOR_DIMENSION, 0.77);
       const testMemory = {
         id: 'relevance-test',
         content: 'Advanced machine learning techniques for data science',
-        vector: new Array(768).fill(0).map(() => Math.random()),
-        metadata: {
+        vector: testVector,
+        metadata: buildMetadata({
           category: 'AI',
           topic: 'Machine Learning',
-          importance: 9, // High importance
-          contentType: 'text/plain',
+          importance: 9,
           createdTimestamp: Date.now() - 3600000 // 1 hour ago
-        } as MemoryMetadata
+        })
       };
 
       await memoryIndexService.indexMemory(
@@ -258,19 +300,17 @@ describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
         testMemory.vector
       );
 
-      const queryVector = testMemory.vector.map(v => v + (Math.random() - 0.5) * 0.1);
-      (mockEmbeddingService.embedText as jest.Mock).mockResolvedValue({
-        vector: queryVector,
-        model: 'text-embedding-004',
-        usage: { prompt_tokens: 5, total_tokens: 5 }
-      });
+      await memoryIndexService.flush(testUserAddress);
+
+      const queryVector = perturbVector(testVector, 0.012);
 
       const enhancedQuery: MemorySearchQuery = {
         query: 'machine learning techniques',
         userAddress: testUserAddress,
         k: 1,
         categories: ['AI'], // Category match should boost score
-        boostRecent: true   // Recent content should get boost
+        boostRecent: true,  // Recent content should get boost
+        vector: queryVector
       };
 
       const results = await memoryIndexService.searchMemories(enhancedQuery);
@@ -297,31 +337,30 @@ describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
         k: 5
       };
 
-      (mockEmbeddingService.embedText as jest.Mock).mockResolvedValue({
-        vector: new Array(768).fill(0).map(() => Math.random()),
-        model: 'text-embedding-004',
-        usage: { prompt_tokens: 5, total_tokens: 5 }
-      });
+      emptyQuery.vector = createVector(VECTOR_DIMENSION, 0.11);
 
       const emptyResults = await memoryIndexService.searchMemories(emptyQuery);
       expect(emptyResults).toHaveLength(0);
 
       // Test high threshold filtering
-      const testVector = new Array(768).fill(0).map(() => Math.random());
+      const testVector = createVector(VECTOR_DIMENSION, 0.23);
       await memoryIndexService.indexMemory(
         testUserAddress,
         'threshold-test',
         'blob-threshold',
         'Test content for threshold filtering',
-        { category: 'Test', importance: 5, contentType: 'text/plain', createdTimestamp: Date.now() } as MemoryMetadata,
+        buildMetadata({ category: 'Test', topic: 'Threshold', importance: 5, createdTimestamp: Date.now() }),
         testVector
       );
+
+      await memoryIndexService.flush(testUserAddress);
 
       const highThresholdQuery: MemorySearchQuery = {
         query: 'completely different content',
         userAddress: testUserAddress,
         k: 10,
-        threshold: 0.99 // Very high threshold
+        threshold: 0.99, // Very high threshold
+        vector: createVector(VECTOR_DIMENSION, -0.2)
       };
 
       const filteredResults = await memoryIndexService.searchMemories(highThresholdQuery);
@@ -337,36 +376,38 @@ describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
 
       for (const size of testSizes) {
         // Create fresh service for this test size
-        const perfService = new MemoryIndexService(mockStorageService, {
+        const perfStorage = new InMemoryWalrusAdapter();
+        const perfService = new MemoryIndexService(perfStorage as unknown as any, {
           maxElements: size * 2,
           dimension: vectorDimension,
           efConstruction: 50,
-          m: 8
+          m: 8,
+          batchSize: 50,
+          autoFlushInterval: 10
         });
 
-        perfService.initialize(mockEmbeddingService, mockStorageService);
+        const perfHnswInternal = (perfService as any).hnswService;
+        if (perfHnswInternal) {
+          perfHnswInternal.storageService = perfStorage;
+        }
 
         // Index test vectors
         for (let i = 0; i < size; i++) {
-          const vector = new Array(vectorDimension).fill(0).map(() => Math.random());
+          const vector = createVector(vectorDimension, 0.31 + i * 0.001);
           await perfService.indexMemory(
             testUserAddress,
             `perf-memory-${i}`,
             `blob-${i}`,
             `Performance test memory ${i}`,
-            { category: 'Perf', importance: 5, contentType: 'text/plain', createdTimestamp: Date.now() } as MemoryMetadata,
+            buildMetadata({ category: 'Perf', topic: 'Benchmark', importance: 5, createdTimestamp: Date.now() }),
             vector
           );
         }
 
-        // Measure search performance
-        const queryVector = new Array(vectorDimension).fill(0).map(() => Math.random());
-        (mockEmbeddingService.embedText as jest.Mock).mockResolvedValue({
-          vector: queryVector,
-          model: 'text-embedding-004',
-          usage: { prompt_tokens: 5, total_tokens: 5 }
-        });
+        await perfService.flush(testUserAddress);
 
+        // Measure search performance
+        const queryVector = createVector(vectorDimension, 0.27);
         const searchLatencies: number[] = [];
         
         // Perform multiple searches to average latency
@@ -376,7 +417,8 @@ describe('Enhanced MemoryIndexService - Native HNSW (hnswlib-node)', () => {
           await perfService.searchMemories({
             query: `performance test query ${search}`,
             userAddress: testUserAddress,
-            k: 5
+            k: 5,
+            vector: queryVector
           });
           
           const latency = performance.now() - startTime;

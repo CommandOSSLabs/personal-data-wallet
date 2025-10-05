@@ -6,6 +6,7 @@
  */
 
 import { SuiClient } from '@mysten/sui/client';
+import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { 
   AggregatedQueryOptions,
@@ -35,6 +36,7 @@ export interface AggregatedQueryResult {
   /** Query results organized by app context */
   results: Array<{
     contextId: string;
+    targetWallet: string;
     appId: string;
     data: Array<{
       id: string;
@@ -94,41 +96,44 @@ export class AggregationService {
       }
     };
 
-    // Get all contexts for the specified apps
-    const allContexts: Array<{ contextId: string; appId: string }> = [];
-    
-    for (const appId of options.apps) {
-      try {
-        // Derive context ID for this app and user
-        const contextId = await this.deriveContextId(options.userAddress, appId);
-        allContexts.push({ contextId, appId });
-      } catch (error) {
-        console.warn(`Failed to derive context for app ${appId}:`, error);
-      }
-    }
+    const normalizedRequester = normalizeSuiAddress(options.requestingWallet);
+    const normalizedTargets = options.targetWallets?.map(id => id.toLowerCase());
 
-    result.metrics.contextsChecked = allContexts.length;
+    const userContexts = await this.contextWalletService.listUserContexts(options.userAddress);
+    const candidateContexts = normalizedTargets?.length
+      ? userContexts.filter(ctx => {
+          const contextIdLower = ctx.contextId.toLowerCase();
+          const walletIdLower = ctx.id.toLowerCase();
+          return normalizedTargets.includes(contextIdLower) || normalizedTargets.includes(walletIdLower);
+        })
+      : userContexts;
+
+    result.metrics.contextsChecked = candidateContexts.length;
 
     // Check permissions and query allowed contexts
-    for (const { contextId, appId } of allContexts) {
+    for (const context of candidateContexts) {
       try {
         // Check if the requesting entity has permission to access this context
-        const hasPermission = await this.permissionService.checkPermission(
-          appId,
-          options.scope,
-          options.userAddress
+        const hasPermission = await this.permissionService.hasWalletPermission(
+          normalizedRequester,
+          context.id,
+          options.scope
         );
         
         result.metrics.permissionChecks++;
 
         if (!hasPermission) {
-          result.skippedContexts.push(contextId);
+          result.skippedContexts.push(context.id);
           continue;
         }
 
         // Query data from this context
-        const contextData = await this.contextWalletService.listData(contextId, {
-          limit: options.limit ? Math.ceil(options.limit / options.apps.length) : undefined
+        const perContextLimit = options.limit
+          ? Math.ceil(options.limit / Math.max(candidateContexts.length, 1))
+          : undefined;
+
+        const contextData = await this.contextWalletService.listData(context.id, {
+          limit: perContextLimit
         });
 
         // Filter results based on query
@@ -136,18 +141,19 @@ export class AggregationService {
 
         if (filteredData.length > 0) {
           result.results.push({
-            contextId,
-            appId,
+            contextId: context.contextId,
+            targetWallet: context.id,
+            appId: context.appId,
             data: filteredData,
             hasMore: false // TODO: Implement pagination
           });
           
           result.totalResults += filteredData.length;
-          result.queriedContexts.push(contextId);
+          result.queriedContexts.push(context.id);
         }
       } catch (error) {
-        console.error(`Error querying context ${contextId}:`, error);
-        result.skippedContexts.push(contextId);
+        console.error(`Error querying context ${context.id}:`, error);
+        result.skippedContexts.push(context.id);
       }
     }
 
@@ -169,6 +175,7 @@ export class AggregationService {
    * @returns Filtered aggregated results
    */
   async queryWithScopes(
+    requestingWallet: string,
     userAddress: string, 
     query: string, 
     scopes: PermissionScope[]
@@ -177,16 +184,16 @@ export class AggregationService {
     const userContexts = await this.contextWalletService.listUserContexts(userAddress);
     
     // Filter contexts by permission scopes
-    const allowedApps: string[] = [];
+    const allowedWallets: string[] = [];
     
     for (const context of userContexts) {
       let hasAllScopes = true;
       
       for (const scope of scopes) {
-        const hasScope = await this.permissionService.checkPermission(
-          context.appId,
-          scope,
-          userAddress
+        const hasScope = await this.permissionService.hasWalletPermission(
+          requestingWallet,
+          context.id,
+          scope
         );
         
         if (!hasScope) {
@@ -196,15 +203,16 @@ export class AggregationService {
       }
       
       if (hasAllScopes) {
-        allowedApps.push(context.appId);
+        allowedWallets.push(context.id);
       }
     }
 
     return await this.query({
-      apps: allowedApps,
+      requestingWallet,
       userAddress,
       query,
-      scope: scopes[0] // Use first scope as primary
+      scope: scopes[0],
+      targetWallets: allowedWallets
     });
   }
 
@@ -214,12 +222,17 @@ export class AggregationService {
    * @param appIds - Apps to include in statistics
    * @returns Aggregated statistics
    */
-  async getAggregatedStats(userAddress: string, appIds: string[]): Promise<{
+  async getAggregatedStats(userAddress: string, targetWallets: string[]): Promise<{
     totalContexts: number;
     totalItems: number;
     totalSize: number;
     categoryCounts: Record<string, number>;
-    appBreakdown: Record<string, {
+    contextBreakdown: Record<string, {
+      items: number;
+      size: number;
+      lastActivity: number;
+    }>;
+    appBreakdown?: Record<string, {
       items: number;
       size: number;
       lastActivity: number;
@@ -230,6 +243,11 @@ export class AggregationService {
       totalItems: 0,
       totalSize: 0,
       categoryCounts: {} as Record<string, number>,
+      contextBreakdown: {} as Record<string, {
+        items: number;
+        size: number;
+        lastActivity: number;
+      }>,
       appBreakdown: {} as Record<string, {
         items: number;
         size: number;
@@ -237,10 +255,9 @@ export class AggregationService {
       }>
     };
 
-    for (const appId of appIds) {
+    for (const walletId of targetWallets) {
       try {
-        const contextId = await this.deriveContextId(userAddress, appId);
-        const contextStats = await this.contextWalletService.getContextStats(contextId);
+        const contextStats = await this.contextWalletService.getContextStats(walletId);
         
         stats.totalContexts++;
         stats.totalItems += contextStats.itemCount;
@@ -251,14 +268,21 @@ export class AggregationService {
           stats.categoryCounts[category] = (stats.categoryCounts[category] || 0) + count;
         }
         
-        // App breakdown
-        stats.appBreakdown[appId] = {
+        // Context breakdown
+        stats.contextBreakdown[walletId] = {
+          items: contextStats.itemCount,
+          size: contextStats.totalSize,
+          lastActivity: contextStats.lastActivity
+        };
+
+        // Legacy alias
+        stats.appBreakdown[walletId] = {
           items: contextStats.itemCount,
           size: contextStats.totalSize,
           lastActivity: contextStats.lastActivity
         };
       } catch (error) {
-        console.error(`Error getting stats for app ${appId}:`, error);
+        console.error(`Error getting stats for wallet ${walletId}:`, error);
       }
     }
 
@@ -272,42 +296,32 @@ export class AggregationService {
    * @param options - Search options
    * @returns Search results
    */
-  async search(userAddress: string, searchQuery: string, options?: {
-    appIds?: string[];
+  async search(
+    requestingWallet: string,
+    userAddress: string,
+    searchQuery: string,
+    options?: {
+    targetWallets?: string[];
     categories?: string[];
     limit?: number;
     minPermissionScope?: PermissionScope;
   }): Promise<AggregatedQueryResult> {
-    const appIds = options?.appIds || [];
+    const targetWallets = options?.targetWallets ? [...options.targetWallets] : [];
     
-    // If no apps specified, get all user contexts
-    if (appIds.length === 0) {
+    // If no contexts specified, get all user contexts
+    if (targetWallets.length === 0) {
       const userContexts = await this.contextWalletService.listUserContexts(userAddress);
-      appIds.push(...userContexts.map(c => c.appId));
+      targetWallets.push(...userContexts.map(c => c.id));
     }
 
     return await this.query({
-      apps: appIds,
+      requestingWallet,
       userAddress,
       query: searchQuery,
       scope: options?.minPermissionScope || 'read:memories' as PermissionScope,
-      limit: options?.limit
+      limit: options?.limit,
+      targetWallets
     });
-  }
-
-  /**
-   * Derive context ID (helper method)
-   * @private
-   */
-  private async deriveContextId(userAddress: string, appId: string): Promise<string> {
-    // This would normally use MainWalletService.deriveContextId
-    // For now, create a simple deterministic ID
-    const input = `${userAddress}|${appId}`;
-    const encoder = new TextEncoder();
-    const data = encoder.encode(input);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return `0x${hashArray.map(b => b.toString(16).padStart(2, '0')).join('')}`;
   }
 
   /**
