@@ -2,6 +2,7 @@ module pdw::seal_access_control {
     use sui::table::{Self, Table};
     use sui::clock::{Self, Clock};
     use sui::event;
+    use sui::address;
     use std::string::{Self, String};
 
     // ========== Constants ==========
@@ -13,6 +14,10 @@ module pdw::seal_access_control {
     const EInvalidAppId: u64 = 6;
     const EInvalidContextId: u64 = 7;
     const EContextNotFound: u64 = 8;
+    const EWalletNotRegistered: u64 = 9;
+    const EAllowlistNotFound: u64 = 10;
+    const EInvalidScope: u64 = 11;
+    const EContextWalletExists: u64 = 12;
     
     /// Access levels - these are the ONLY valid values
     /// Use exactly these strings when calling access functions
@@ -61,6 +66,26 @@ module pdw::seal_access_control {
         expires_at: u64,
         granted_by: address,
     }
+
+    /// Event emitted when a hierarchical context wallet is registered
+    public struct ContextWalletRegistered has copy, drop {
+        main_wallet: address,
+        context_wallet: address,
+        derivation_index: u64,
+        scope_hint: option::Option<String>,
+        timestamp: u64,
+    }
+
+    /// Event emitted when wallet allowlist grants or revocations occur
+    public struct WalletAllowlistChanged has copy, drop {
+        requester_wallet: address,
+        target_wallet: address,
+        scope: String,
+        access_level: String,
+        granted: bool,
+        expires_at: u64,
+        granted_by: address,
+    }
     
     // ========== Structs ==========
     
@@ -75,11 +100,34 @@ module pdw::seal_access_control {
         context_owners: Table<String, address>,
         /// Maps (context_id, app_id) -> AccessPermission (for cross-context access)
         context_permissions: Table<vector<u8>, AccessPermission>,
+        /// Maps context wallet address -> metadata
+        context_wallets: Table<address, ContextWalletInfo>,
+        /// Maps content_id -> context wallet address (wallet-based contexts)
+        content_contexts: Table<String, address>,
+        /// Maps (requester_wallet, target_wallet, scope) -> WalletAllowlistEntry
+        wallet_allowlist: Table<vector<u8>, WalletAllowlistEntry>,
     }
 
     /// Individual access permission
     public struct AccessPermission has store, drop, copy {
         access_level: String, // "read" or "write"
+        granted_at: u64,
+        expires_at: u64,
+        granted_by: address,
+    }
+
+    /// Information about a derived context wallet owned by a main wallet
+    public struct ContextWalletInfo has store, drop, copy {
+        main_wallet: address,
+        derivation_index: u64,
+        registered_at: u64,
+        app_hint: option::Option<String>,
+    }
+
+    /// Allowlist entry granting wallet-based access to a context wallet
+    public struct WalletAllowlistEntry has store, drop, copy {
+        scope: String,
+        access_level: String,
         granted_at: u64,
         expires_at: u64,
         granted_by: address,
@@ -111,6 +159,9 @@ module pdw::seal_access_control {
             permissions: table::new(ctx),
             context_owners: table::new(ctx),
             context_permissions: table::new(ctx),
+            context_wallets: table::new(ctx),
+            content_contexts: table::new(ctx),
+            wallet_allowlist: table::new(ctx),
         };
         
         // Emit event for tracking registry creation
@@ -139,47 +190,70 @@ module pdw::seal_access_control {
     /// @param ctx: Transaction context
     entry fun seal_approve(
         id: vector<u8>,
-        requesting_app_id: String,
+        requesting_wallet: address,
         registry: &AccessRegistry,
         clock: &Clock,
         ctx: &TxContext
     ) {
         let owner = tx_context::sender(ctx);
-        
-        // Validate app_id is not empty
-        assert!(!string::is_empty(&requesting_app_id), EInvalidAppId);
-        
+
         // Parse the key ID to extract content identifier
-        // The id comes as raw address bytes from SEAL (fromHex), convert to address string
         assert!(id.length() == 32, EInvalidTimestamp);
-        
+
         let content_id = bytes_to_hex_string(id);
-        
-        // Extract context_id from content_id (format: "context_id:content_suffix")
-        let context_id = extract_context_id(&content_id);
-        
-        // Verify owner owns this context
-        assert!(table::contains(&registry.context_owners, context_id), EContextNotFound);
-        let context_owner = *table::borrow(&registry.context_owners, context_id);
-        assert!(context_owner == owner, ENotOwner);
-        
-        // Check if requesting_app is accessing its own context (auto-grant)
-        if (is_own_context(&context_id, &requesting_app_id)) {
-            return // App can always access its own context
+
+        let mut processed = false;
+        let content_id_lookup = clone_string(&content_id);
+        if (table::contains(&registry.content_contexts, content_id_lookup)) {
+            let content_id_for_borrow = clone_string(&content_id);
+            let context_wallet = *table::borrow(&registry.content_contexts, content_id_for_borrow);
+
+            assert!(table::contains(&registry.context_wallets, context_wallet), EWalletNotRegistered);
+            let info = table::borrow(&registry.context_wallets, context_wallet);
+            assert!(info.main_wallet == owner, ENotOwner);
+
+            if (context_wallet == requesting_wallet) {
+                return
+            };
+
+            let read_scope = default_read_scope();
+            if (has_active_wallet_allowlist(registry, requesting_wallet, context_wallet, &read_scope, clock)) {
+                return
+            };
+            let write_scope = default_write_scope();
+            if (has_active_wallet_allowlist(registry, requesting_wallet, context_wallet, &write_scope, clock)) {
+                return
+            };
+
+            if (option::is_some(&info.app_hint)) {
+                let context_id = extract_context_id(&content_id);
+                let app_hint_ref = option::borrow(&info.app_hint);
+                if (has_legacy_context_permission(registry, &context_id, app_hint_ref, clock)) {
+                    return
+                }
+            };
+
+            processed = true;
         };
-        
-        // Check if requesting_app has cross-context permission
-        let key = build_context_permission_key(&context_id, &requesting_app_id);
-        if (table::contains(&registry.context_permissions, key)) {
-            let permission = table::borrow(&registry.context_permissions, key);
-            let current_time = clock::timestamp_ms(clock);
-            
-            if (permission.expires_at > current_time) {
-                return // Valid permission - grant access
-            }
+
+        if (!processed) {
+            let context_id = extract_context_id(&content_id);
+            let context_id_lookup = clone_string(&context_id);
+            assert!(table::contains(&registry.context_owners, context_id_lookup), EContextNotFound);
+            let context_id_for_borrow = clone_string(&context_id);
+            let context_owner = *table::borrow(&registry.context_owners, context_id_for_borrow);
+            assert!(context_owner == owner, ENotOwner);
+
+            if (requesting_wallet == owner) {
+                return
+            };
+
+            let legacy_app = wallet_to_string(requesting_wallet);
+            if (has_legacy_context_permission(registry, &context_id, &legacy_app, clock)) {
+                return
+            };
         };
-        
-        // Access denied - abort per SEAL requirements
+
         abort ENoAccess
     }
 
@@ -207,6 +281,40 @@ module pdw::seal_access_control {
         table::add(&mut registry.owners, content_id, owner);
         
         // Emit event for tracking
+        event::emit(ContentRegistered {
+            content_id,
+            owner,
+            timestamp,
+        });
+    }
+
+    /// Register encrypted content against a context wallet address
+    public entry fun register_content_v2(
+        registry: &mut AccessRegistry,
+        content_id: String,
+        context_wallet: address,
+        clock: &clock::Clock,
+        ctx: &mut tx_context::TxContext
+    ) {
+        let owner = tx_context::sender(ctx);
+        let timestamp = clock::timestamp_ms(clock);
+
+        assert!(table::contains(&registry.context_wallets, context_wallet), EWalletNotRegistered);
+        let context_info = table::borrow(&registry.context_wallets, context_wallet);
+        assert!(context_info.main_wallet == owner, ENotOwner);
+
+    let content_owner_lookup = clone_string(&content_id);
+        assert!(!table::contains(&registry.owners, content_owner_lookup), EContentNotFound);
+
+    let content_owner_key = clone_string(&content_id);
+        table::add(&mut registry.owners, content_owner_key, owner);
+
+    let content_map_key = clone_string(&content_id);
+        assert!(!table::contains(&registry.content_contexts, content_map_key), EContentNotFound);
+
+    let content_map_add_key = clone_string(&content_id);
+        table::add(&mut registry.content_contexts, content_map_add_key, context_wallet);
+
         event::emit(ContentRegistered {
             content_id,
             owner,
@@ -246,6 +354,46 @@ module pdw::seal_access_control {
             context_id,
             app_id,
             owner,
+            timestamp,
+        });
+    }
+
+    /// Register a hierarchical context wallet that is derived from the main wallet
+    public entry fun register_context_wallet(
+        registry: &mut AccessRegistry,
+        context_wallet: address,
+        derivation_index: u64,
+        app_hint: String,
+        clock: &clock::Clock,
+        ctx: &mut tx_context::TxContext
+    ) {
+        let main_wallet = tx_context::sender(ctx);
+        let timestamp = clock::timestamp_ms(clock);
+
+        assert!(!table::contains(&registry.context_wallets, context_wallet), EContextWalletExists);
+
+        let hint_option = if (string::is_empty(&app_hint)) {
+            option::none<String>()
+        } else {
+            option::some<String>(clone_string(&app_hint))
+        };
+
+        let info = ContextWalletInfo {
+            main_wallet,
+            derivation_index,
+            registered_at: timestamp,
+            app_hint: hint_option,
+        };
+
+        let scope_hint = clone_option_string(&info.app_hint);
+
+        table::add(&mut registry.context_wallets, context_wallet, info);
+
+        event::emit(ContextWalletRegistered {
+            main_wallet,
+            context_wallet,
+            derivation_index,
+            scope_hint,
             timestamp,
         });
     }
@@ -445,6 +593,99 @@ module pdw::seal_access_control {
         };
     }
 
+    /// Grant wallet-based allowlist access between two context wallets
+    public entry fun grant_wallet_allowlist_access(
+        registry: &mut AccessRegistry,
+        requester_wallet: address,
+        target_wallet: address,
+        scope: String,
+        access_level: String,
+        expires_at: u64,
+        clock: &clock::Clock,
+        ctx: &mut tx_context::TxContext
+    ) {
+        let owner = tx_context::sender(ctx);
+        let current_time = clock::timestamp_ms(clock);
+
+        assert!(table::contains(&registry.context_wallets, target_wallet), EWalletNotRegistered);
+        let context_info = table::borrow(&registry.context_wallets, target_wallet);
+        assert!(context_info.main_wallet == owner, ENotOwner);
+
+        assert!(!string::is_empty(&scope), EInvalidScope);
+
+        let access_bytes = *string::as_bytes(&access_level);
+        assert!(
+            access_bytes == ACCESS_LEVEL_READ ||
+            access_bytes == ACCESS_LEVEL_WRITE,
+            EInvalidAccessLevel
+        );
+
+        assert!(expires_at > current_time, EInvalidTimestamp);
+
+            let scope_for_key = clone_string(&scope);
+            let scope_for_event = clone_string(&scope);
+            let access_for_event = clone_string(&access_level);
+
+        let entry = WalletAllowlistEntry {
+            scope,
+            access_level,
+            granted_at: current_time,
+            expires_at,
+            granted_by: owner,
+        };
+
+        let remove_key = build_wallet_allowlist_key(requester_wallet, target_wallet, &scope_for_key);
+        if (table::contains(&registry.wallet_allowlist, remove_key)) {
+            let _old_entry = table::remove(&mut registry.wallet_allowlist, remove_key);
+        };
+
+        let add_key = build_wallet_allowlist_key(requester_wallet, target_wallet, &scope_for_key);
+        table::add(&mut registry.wallet_allowlist, add_key, entry);
+
+        event::emit(WalletAllowlistChanged {
+            requester_wallet,
+            target_wallet,
+            scope: scope_for_event,
+            access_level: access_for_event,
+            granted: true,
+            expires_at,
+            granted_by: owner,
+        });
+    }
+
+    /// Revoke wallet-based allowlist access
+    public entry fun revoke_wallet_allowlist_access(
+        registry: &mut AccessRegistry,
+        requester_wallet: address,
+        target_wallet: address,
+        scope: String,
+        ctx: &mut tx_context::TxContext
+    ) {
+        let owner = tx_context::sender(ctx);
+
+        assert!(table::contains(&registry.context_wallets, target_wallet), EWalletNotRegistered);
+        let context_info = table::borrow(&registry.context_wallets, target_wallet);
+        assert!(context_info.main_wallet == owner, ENotOwner);
+
+        let key = build_wallet_allowlist_key(requester_wallet, target_wallet, &scope);
+        if (table::contains(&registry.wallet_allowlist, key)) {
+            let remove_key = build_wallet_allowlist_key(requester_wallet, target_wallet, &scope);
+            let entry = table::remove(&mut registry.wallet_allowlist, remove_key);
+
+            event::emit(WalletAllowlistChanged {
+                requester_wallet,
+                target_wallet,
+                scope,
+                access_level: entry.access_level,
+                granted: false,
+                expires_at: 0,
+                granted_by: owner,
+            });
+        } else {
+            abort EAllowlistNotFound
+        }
+    }
+
     // ========== View Functions ==========
     
     /// Check if a user has access (for off-chain queries)
@@ -544,6 +785,77 @@ module pdw::seal_access_control {
     }
     
     // ========== Helper Functions ==========
+
+    fun default_read_scope(): String {
+        string::utf8(b"read")
+    }
+
+    fun default_write_scope(): String {
+        string::utf8(b"write")
+    }
+
+    fun clone_string(value: &String): String {
+        let bytes = string::as_bytes(value);
+        let mut buffer = vector::empty<u8>();
+        let mut i = 0;
+        let len = vector::length(bytes);
+        while (i < len) {
+            vector::push_back(&mut buffer, *vector::borrow(bytes, i));
+            i = i + 1;
+        };
+        string::utf8(buffer)
+    }
+
+    fun wallet_to_string(wallet: address): String {
+        let bytes = address::to_bytes(wallet);
+        bytes_to_hex_string(bytes)
+    }
+
+    fun has_active_wallet_allowlist(
+        registry: &AccessRegistry,
+        requesting_wallet: address,
+        target_wallet: address,
+        scope: &String,
+        clock: &clock::Clock
+    ): bool {
+        let key = build_wallet_allowlist_key(requesting_wallet, target_wallet, scope);
+        if (table::contains(&registry.wallet_allowlist, key)) {
+            let borrow_key = build_wallet_allowlist_key(requesting_wallet, target_wallet, scope);
+            let entry = table::borrow(&registry.wallet_allowlist, borrow_key);
+            let current_time = clock::timestamp_ms(clock);
+            if (entry.expires_at > current_time) {
+                return true
+            }
+        };
+        false
+    }
+
+    fun has_legacy_context_permission(
+        registry: &AccessRegistry,
+        context_id: &String,
+        app_id: &String,
+        clock: &clock::Clock
+    ): bool {
+        let key = build_context_permission_key(context_id, app_id);
+        if (table::contains(&registry.context_permissions, key)) {
+            let borrow_key = build_context_permission_key(context_id, app_id);
+            let permission = table::borrow(&registry.context_permissions, borrow_key);
+            let current_time = clock::timestamp_ms(clock);
+            if (permission.expires_at > current_time) {
+                return true
+            }
+        };
+        false
+    }
+
+    fun clone_option_string(opt: &option::Option<String>): option::Option<String> {
+        if (option::is_some(opt)) {
+            let value_ref = option::borrow(opt);
+            option::some<String>(clone_string(value_ref))
+        } else {
+            option::none<String>()
+        }
+    }
     
     /// Build a unique key for permission storage
     /// Combines content_id bytes with user address bytes to create a unique identifier
@@ -555,6 +867,21 @@ module pdw::seal_access_control {
         let mut key = *string::as_bytes(&content_id);
         let user_bytes = sui::address::to_bytes(user);
         vector::append(&mut key, user_bytes);
+        key
+    }
+
+    fun build_wallet_allowlist_key(requesting_wallet: address, target_wallet: address, scope: &String): vector<u8> {
+        let mut key = address::to_bytes(requesting_wallet);
+        let target_bytes = address::to_bytes(target_wallet);
+        vector::append(&mut key, target_bytes);
+        vector::push_back(&mut key, 58);
+        let scope_bytes = string::as_bytes(scope);
+        let mut i = 0;
+        let scope_len = vector::length(scope_bytes);
+        while (i < scope_len) {
+            vector::push_back(&mut key, *vector::borrow(scope_bytes, i));
+            i = i + 1;
+        };
         key
     }
     
@@ -598,53 +925,6 @@ module pdw::seal_access_control {
         
         // If no separator found, return the whole string as context_id
         *content_id
-    }
-    
-    /// Check if app is accessing its own context
-    /// Context IDs are formatted as: hash(owner + app_id + salt)
-    /// For simplicity, we check if context_id contains app_id
-    /// 
-    /// @param context_id: Context identifier
-    /// @param app_id: Application identifier
-    /// @return: True if this is the app's own context
-    fun is_own_context(context_id: &String, app_id: &String): bool {
-        // In practice, the context_id is derived deterministically from app_id
-        // For now, we use a simple string matching approach
-        // TODO: Improve this with proper context derivation validation
-        string::as_bytes(context_id) == string::as_bytes(app_id) ||
-        contains_substring(string::as_bytes(context_id), string::as_bytes(app_id))
-    }
-    
-    /// Helper function to check if haystack contains needle
-    fun contains_substring(haystack: &vector<u8>, needle: &vector<u8>): bool {
-        let haystack_len = vector::length(haystack);
-        let needle_len = vector::length(needle);
-        
-        if (needle_len > haystack_len) {
-            return false
-        };
-        
-        let mut i = 0;
-        while (i <= haystack_len - needle_len) {
-            let mut j = 0;
-            let mut found = true;
-            
-            while (j < needle_len) {
-                if (*vector::borrow(haystack, i + j) != *vector::borrow(needle, j)) {
-                    found = false;
-                    break
-                };
-                j = j + 1;
-            };
-            
-            if (found) {
-                return true
-            };
-            
-            i = i + 1;
-        };
-        
-        false
     }
     
     /// Convert bytes to hex string with 0x prefix

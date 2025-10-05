@@ -48,15 +48,15 @@ Purpose: make AI agents productive inside the SDK by pointing to the right files
 
 **Object Type**: `0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob`
 
-### ⚠️ WALRUS TESTNET INFRASTRUCTURE ISSUE (BLOCKING PRODUCTION)
-**CURRENT STATUS**: Walrus storage integration is code-complete but blocked by testnet SSL certificate expiration:
+### ✅ WALRUS TESTNET INFRASTRUCTURE STATUS
+**CURRENT STATUS**: Walrus storage integration is code-complete and live testnet uploads now succeed:
 - **✅ StorageService**: Complete rewrite using client extension pattern with upload relay
 - **✅ Upload Relay Integration**: Uses `https://upload-relay.testnet.walrus.space` for reliable uploads
 - **✅ Network Configuration**: Added `undici` Agent with 60-second timeouts as per official examples
 - **✅ Proper Attributes**: Fixed metadata to use Walrus `attributes` parameter correctly
 - **✅ Real Implementation**: Uses actual private keys from `.env.test` with WAL tokens
-- **❌ Network Failure**: Walrus storage nodes have expired SSL certificates (`CERT_HAS_EXPIRED`)
-- **⏸️ Production Blocked**: Cannot proceed until Walrus testnet infrastructure is fixed
+- **✅ Network Restored**: Testnet storage nodes renewed SSL certificates; uploads/downloads verified operational
+- **📌 Monitor**: Keep an eye on future certificate expirations and report regressions to Walrus team promptly
 
 **Comprehensive Test Status**: 
 - **✅ Code Quality**: All major issues resolved, build successful
@@ -84,6 +84,15 @@ Purpose: make AI agents productive inside the SDK by pointing to the right files
 - **3rd Party Integration**: Any app can create contexts for users (with signature)
 - **Cross-Context Access**: Apps can read other contexts with explicit user permission grants
 
+### 🚧 In Flight: Hierarchical Wallet SEAL Access Control Redesign
+- **Objective**: Replace app_id-scoped permissions with wallet-based allowlists that align with SEAL IBE identities.
+- **Wallet Hierarchy**: Main wallet acts as administrator; per-app context wallets derived via Sui Kit HD paths (target: `m/44'/784'/0'/0/app_index`).
+- **Move Contract Changes**: `seal_access_control.move` will transition to `address` identities, add allowlist tables for `(requester_wallet, target_wallet, scope, expiry)` and emit audit events for grants/revocations.
+- **SDK Updates**: `SealService` will manage per-context session keys, new wallet manager under `src/wallet/` handles deterministic derivation, and a permissions module under `src/permissions/` orchestrates allowlist transactions.
+- **Backend Alignment**: `backend/src/infrastructure/seal/seal.service.ts` will proxy allowlist requests, coordinate main-wallet approvals, and cache permission state.
+- **Migration Strategy**: Maintain temporary compatibility layer to honor legacy `app_id` ciphertexts while registering new context wallet addresses and replaying permissions.
+- **Testing Requirements**: Add integration suites to validate allowlist enforcement, hierarchical derivation, and cross-context aggregation with SEAL key servers.
+
 **Key Files**:
 - **Move Contract**: smart-contract/sources/wallet.move (dynamic fields, entry functions, events)
 - **SDK Services**: packages/pdw-sdk/src/wallet/{MainWalletService,ContextWalletService}.ts
@@ -105,6 +114,8 @@ Purpose: make AI agents productive inside the SDK by pointing to the right files
 - Generated types: `src/generated/pdw/{memory,seal_access_control,wallet}.ts`
 - Codegen config/scripts: `sui-codegen.config.ts`, `scripts/{fix-codegen-paths.js,verify-deployment.js}`
 - Examples/tests: `examples/*.ts`, `test/*.ts`
+  - ⚠️ **Active Constraint**: During the current demo-hardening sprint, all source edits must stay within `packages/pdw-sdk/*`. Treat frontend/backend adjustments as out-of-scope and capture follow-ups instead of patching them directly.
+  - **PDW Chat Demo**: lives in `packages/pdw-sdk/examples/pdw-chat-demo/`, is intentionally independent from the root frontend/backend codebase, and must remain fully runnable—keep its backend/frontend builds green and verify the README steps.
 
 **Legacy/Deprecated Files** (do not use):
 - `src/storage/{WalrusService,WalrusStorageService,StorageManager}.ts` - Use `services/StorageService` instead

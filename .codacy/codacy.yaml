@@ -1,4 +1,2 @@
-runtimes:
-    - dart@3.7.2
 tools:
-    - dartanalyzer@3.7.2
+    - trivy@0.66.0
