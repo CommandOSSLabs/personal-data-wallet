@@ -1,4 +1,4 @@
-import type { GeminiAIService } from '@personal-data-wallet/sdk/dist/services/GeminiAIService.js';
+import type { GeminiAIService } from 'personal-data-wallet-sdk/dist/services/GeminiAIService.js';
 import type { PdwClient } from './pdw-client.js';
 
 export interface MemoryRecordInput {

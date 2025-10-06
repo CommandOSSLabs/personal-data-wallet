@@ -18,7 +18,7 @@
     "@mysten/seal": "^0.6.0",
     "@mysten/sui": "^1.38.0",
     "@mysten/walrus": "^0.7.0",
-    "@personal-data-wallet/sdk": "file:../../../",
+    "personal-data-wallet-sdk": "^0.1.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^4.19.2",

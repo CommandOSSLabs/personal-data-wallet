@@ -1,29 +1,27 @@
 import { SuiClient } from '@mysten/sui/client';
-import { PersonalDataWallet } from '@personal-data-wallet/sdk/dist/client/PersonalDataWallet.js';
+import { PersonalDataWallet } from 'personal-data-wallet-sdk/dist/client/PersonalDataWallet.js';
 let cachedClient = null;
 let cachedConsentRepository;
 export async function createPdwClient(config, options = {}) {
-    if (cachedClient) {
-        if (options.consentRepository && options.consentRepository !== cachedConsentRepository) {
-            // Check if setConsentRepository method exists before calling
-            if (typeof cachedClient.setConsentRepository === 'function') {
-                cachedClient.setConsentRepository(options.consentRepository);
-                cachedConsentRepository = options.consentRepository;
-            }
-        }
+    // Don't use cache if consent repository changes, since we pass it during initialization
+    if (cachedClient && options.consentRepository === cachedConsentRepository) {
         return cachedClient;
     }
-    const client = new SuiClient({ url: config.suiRpcUrl });
-    const pdw = client.$extend(PersonalDataWallet.asClientExtension({
-        packageId: config.pdwPackageId,
-        accessRegistryId: config.pdwAccessRegistryId,
-        apiUrl: config.pdwApiUrl,
-        consentRepository: options.consentRepository,
-    }));
-    if (options.consentRepository) {
-        pdw.setConsentRepository(options.consentRepository);
+    try {
+        const client = new SuiClient({ url: config.suiRpcUrl });
+        const pdw = client.$extend(PersonalDataWallet.asClientExtension({
+            packageId: config.pdwPackageId,
+            accessRegistryId: config.pdwAccessRegistryId,
+            apiUrl: config.pdwApiUrl,
+            consentRepository: options.consentRepository,
+        }));
+        // Cache the extended client (which contains the pdw property)
+        cachedClient = pdw;
         cachedConsentRepository = options.consentRepository;
+        return pdw;
     }
-    cachedClient = pdw;
-    return pdw;
+    catch (error) {
+        console.error('Failed to create PDW client:', error);
+        throw new Error(`PDW client creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
 }

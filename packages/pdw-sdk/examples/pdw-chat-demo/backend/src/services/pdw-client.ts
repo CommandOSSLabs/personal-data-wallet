@@ -1,6 +1,6 @@
 import { SuiClient } from '@mysten/sui/client';
-import { PersonalDataWallet } from '@personal-data-wallet/sdk/dist/client/PersonalDataWallet.js';
-import type { ConsentRepository } from '@personal-data-wallet/sdk';
+import { PersonalDataWallet } from 'personal-data-wallet-sdk/dist/client/PersonalDataWallet.js';
+import type { ConsentRepository } from 'personal-data-wallet-sdk';
 import type { AppConfig } from '../config/env.js';
 
 export type PdwClient = InstanceType<typeof PersonalDataWallet>;
@@ -17,19 +17,24 @@ export async function createPdwClient(
     return cachedClient;
   }
 
-  const client = new SuiClient({ url: config.suiRpcUrl });
-  const pdw = (client as any).$extend(
-    PersonalDataWallet.asClientExtension({
-      packageId: config.pdwPackageId,
-      accessRegistryId: config.pdwAccessRegistryId,
-      apiUrl: config.pdwApiUrl,
-      consentRepository: options.consentRepository,
-    })
-  );
+  try {
+    const client = new SuiClient({ url: config.suiRpcUrl });
+    const pdw = (client as any).$extend(
+      PersonalDataWallet.asClientExtension({
+        packageId: config.pdwPackageId,
+        accessRegistryId: config.pdwAccessRegistryId,
+        apiUrl: config.pdwApiUrl,
+        consentRepository: options.consentRepository,
+      })
+    );
 
-  cachedClient = pdw.pdw;
-  cachedConsentRepository = options.consentRepository;
+    // Cache the extended client (which contains the pdw property)
+    cachedClient = pdw;
+    cachedConsentRepository = options.consentRepository;
 
-  cachedClient = pdw;
-  return pdw;
+    return pdw;
+  } catch (error) {
+    console.error('Failed to create PDW client:', error);
+    throw new Error(`PDW client creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }

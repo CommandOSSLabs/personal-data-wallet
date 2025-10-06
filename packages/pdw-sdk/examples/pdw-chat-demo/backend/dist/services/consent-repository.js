@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { FileSystemConsentRepository } from '@personal-data-wallet/sdk';
+import { FileSystemConsentRepository } from 'personal-data-wallet-sdk';
 let cachedRepository;
 let cachedPath;
 export function getConsentRepository(config) {

@@ -1,24 +1,33 @@
 # syntax=docker/dockerfile:1
 
-# Force cache bust on Railway: 2025-01-06-v4-clean-build
-ARG CACHE_BUST=2025-01-06-v4-clean-build
+# PDW Chat Demo Backend Dockerfile
+# This version works from the backend directory context
 
-FROM node:20-slim AS builder
+FROM node:20 AS builder
 
 WORKDIR /app
 
-# Copy only the SDK workspace so local file dependencies resolve correctly
-COPY packages/pdw-sdk ./packages/pdw-sdk
+# Install Python and build tools for native dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
-# Build the SDK first
-WORKDIR /app/packages/pdw-sdk
-RUN npm ci
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies (this will use the published npm package)
+RUN npm ci --include=dev
+
+# Copy source code
+COPY src ./src
+COPY tsconfig.json ./tsconfig.json
+
+# Build the application
 RUN npm run build
 
-# Now build the backend
-WORKDIR /app/packages/pdw-sdk/examples/pdw-chat-demo/backend
-RUN npm ci
-RUN npm run build
+# Remove dev dependencies
 RUN npm prune --omit=dev
 
 FROM node:20-slim AS runner
@@ -27,15 +36,28 @@ ENV NODE_ENV=production
 
 WORKDIR /app
 
-# Copy the entire packages directory to maintain file: dependency structure
-COPY --from=builder /app/packages ./packages
+# Create necessary directories
+RUN mkdir -p /app/storage/consents && \
+    chmod -R 755 /app/storage
 
-WORKDIR /app/packages/pdw-sdk/examples/pdw-chat-demo/backend
+# Copy built application and dependencies
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
 
-# Copy migrations from builder (not build context)
-COPY --from=builder /app/packages/pdw-sdk/examples/pdw-chat-demo/backend/src/db/migrations ./src/db/migrations
+# Copy source migrations (needed for runtime)
+COPY --from=builder /app/src/db/migrations ./src/db/migrations
 
+# Copy entrypoint script
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh
+
+# Create non-root user
+RUN groupadd -r pdwuser && useradd -r -g pdwuser pdwuser && \
+    chown -R pdwuser:pdwuser /app/storage
+
+# Switch to non-root user
+USER pdwuser
 
 EXPOSE 4000
 

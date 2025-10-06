@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import type { ConsentRepository, ConsentRequest, PermissionScope } from '@personal-data-wallet/sdk';
+import type { ConsentRepository, ConsentRequest, PermissionScope } from 'personal-data-wallet-sdk';
 
 import type { PdwClient } from '../services/pdw-client.js';
 

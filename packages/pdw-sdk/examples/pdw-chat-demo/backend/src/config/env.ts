@@ -28,7 +28,18 @@ const envSchema = z
     const databaseSsl =
       sslValue === 'true' ||
       sslValue === '1' ||
-      (sslValue === undefined && env.NODE_ENV === 'production');
+      (sslValue === undefined && env.NODE_ENV === 'production') ||
+      // Railway and most cloud providers require SSL in production
+      (env.DATABASE_URL && env.DATABASE_URL.includes('railway.internal'));
+
+    // Set default PDW_API_URL if not provided (for Railway deployment)
+    const defaultPdwApiUrl = env.NODE_ENV === 'production' && !env.PDW_API_URL
+      ? `https://personal-data-wallet-backend-production.up.railway.app/pdw`
+      : env.PDW_API_URL;
+
+    // Set default consent storage path
+    const defaultConsentStoragePath = env.PDW_CONSENT_STORAGE_PATH ||
+      (env.NODE_ENV === 'production' ? '/app/storage/consents/requests.json' : './storage/consents/requests.json');
 
     return {
       nodeEnv: env.NODE_ENV,
@@ -38,13 +49,13 @@ const envSchema = z
       suiRpcUrl: env.SUI_RPC_URL,
       pdwPackageId: env.PDW_PACKAGE_ID,
       pdwAccessRegistryId: env.PDW_ACCESS_REGISTRY_ID,
-      pdwApiUrl: env.PDW_API_URL,
-      pdwContextAppId: env.PDW_CONTEXT_APP_ID,
-      pdwConsentStoragePath: env.PDW_CONSENT_STORAGE_PATH,
+      pdwApiUrl: defaultPdwApiUrl,
+      pdwContextAppId: env.PDW_CONTEXT_APP_ID || 'pdw-chat-demo',
+      pdwConsentStoragePath: defaultConsentStoragePath,
       geminiApiKey: env.GEMINI_API_KEY,
       geminiModel: env.GEMINI_MODEL,
       geminiEmbeddingModel: env.GEMINI_EMBEDDING_MODEL,
-      walrusUploadRelay: env.WALRUS_UPLOAD_RELAY,
+      walrusUploadRelay: env.WALRUS_UPLOAD_RELAY || 'https://upload-relay.testnet.walrus.space',
       walrusStorageEpochs: env.WALRUS_STORAGE_EPOCHS ?? 3,
       walrusStorageTimeout: env.WALRUS_STORAGE_TIMEOUT ?? 60_000,
       logLevel: env.LOG_LEVEL ?? 'info',

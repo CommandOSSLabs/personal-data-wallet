@@ -152,7 +152,7 @@ async function checkWalrus(relay) {
 async function main() {
     const config = loadConfig();
     const checks = [
-        checkPostgres(config.databaseUrl, config.databaseSsl),
+        checkPostgres(config.databaseUrl, Boolean(config.databaseSsl)),
         checkSuiRpc(config.suiRpcUrl),
         checkGemini(config.geminiApiKey, config.geminiModel),
         checkWalrus(config.walrusUploadRelay),

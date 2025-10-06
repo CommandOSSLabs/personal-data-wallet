@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import cors from 'cors';
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { GeminiAIService as PdwGeminiAIService } from '@personal-data-wallet/sdk/dist/services/GeminiAIService.js';
+import { GeminiAIService as PdwGeminiAIService } from 'personal-data-wallet-sdk/dist/services/GeminiAIService.js';
 import { loadConfig } from './config/env.js';
 import { ensureDatabaseConnection } from './db/data-source.js';
 import { createChatRouter } from './routes/chat-routes.js';
@@ -35,12 +35,78 @@ async function bootstrap() {
   app.use(cors());
   app.use(express.json());
 
-  app.get('/health', (_req: Request, res: Response) => {
-    res.json({
-      status: 'ok',
-      pdwConnected: true,
+  app.get('/health', async (_req: Request, res: Response) => {
+    const healthCheck = {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
       nodeEnv: config.nodeEnv,
-    });
+      version: process.env.npm_package_version || '1.0.0',
+      uptime: process.uptime(),
+      services: {
+        database: 'unknown',
+        pdw: 'unknown',
+        gemini: 'unknown',
+        walrus: 'unknown'
+      }
+    };
+
+    try {
+      // Check database connection
+      try {
+        await dataSource.query('SELECT 1');
+        healthCheck.services.database = 'connected';
+      } catch (error) {
+        healthCheck.services.database = 'error';
+        healthCheck.status = 'degraded';
+      }
+
+      // Check PDW client
+      try {
+        // Simple check - just verify client is initialized
+        if (pdw) {
+          healthCheck.services.pdw = 'initialized';
+        }
+      } catch (error) {
+        healthCheck.services.pdw = 'error';
+        healthCheck.status = 'degraded';
+      }
+
+      // Check Gemini service
+      try {
+        if (geminiAI && config.geminiApiKey) {
+          healthCheck.services.gemini = 'configured';
+        } else {
+          healthCheck.services.gemini = 'not_configured';
+        }
+      } catch (error) {
+        healthCheck.services.gemini = 'error';
+        healthCheck.status = 'degraded';
+      }
+
+      // Check Walrus service
+      try {
+        if (config.walrusUploadRelay) {
+          healthCheck.services.walrus = 'configured';
+        } else {
+          healthCheck.services.walrus = 'not_configured';
+        }
+      } catch (error) {
+        healthCheck.services.walrus = 'error';
+        healthCheck.status = 'degraded';
+      }
+
+      const statusCode = healthCheck.status === 'healthy' ? 200 : 503;
+      res.status(statusCode).json(healthCheck);
+
+    } catch (error) {
+      console.error('Health check failed:', error);
+      res.status(503).json({
+        status: 'unhealthy',
+        timestamp: new Date().toISOString(),
+        error: error instanceof Error ? error.message : 'Unknown error',
+        services: healthCheck.services
+      });
+    }
   });
 
   app.get('/pdw/memories', async (req: Request, res: Response) => {

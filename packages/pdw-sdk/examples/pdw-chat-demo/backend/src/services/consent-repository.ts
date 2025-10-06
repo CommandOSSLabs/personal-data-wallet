@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
-import type { ConsentRepository } from '@personal-data-wallet/sdk';
-import { FileSystemConsentRepository } from '@personal-data-wallet/sdk';
+import type { ConsentRepository } from 'personal-data-wallet-sdk';
+import { FileSystemConsentRepository } from 'personal-data-wallet-sdk';
 
 import type { AppConfig } from '../config/env.js';
 
