@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1
+
+# Standalone PDW Chat Demo Backend Dockerfile
+# This version works from project root (for Railway deployment)
+
+FROM node:20 AS builder
+
+WORKDIR /app
+
+# Install Python and build tools for native dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy package files and SDK tarball from backend directory
+COPY packages/pdw-sdk/examples/pdw-chat-demo/backend/package*.json ./
+COPY packages/pdw-sdk/examples/pdw-chat-demo/backend/personal-data-wallet-sdk-0.1.0.tgz ./
+
+# Install dependencies (this will use the local tarball)
+RUN npm ci --include=dev
+
+# Copy source code from backend directory
+COPY packages/pdw-sdk/examples/pdw-chat-demo/backend/src ./src
+COPY packages/pdw-sdk/examples/pdw-chat-demo/backend/tsconfig.json ./tsconfig.json
+
+# Build the application
+RUN npm run build
+
+# Remove dev dependencies
+RUN npm prune --omit=dev
+
+FROM node:20-slim AS runner
+
+ENV NODE_ENV=production
+
+WORKDIR /app
+
+# Create necessary directories
+RUN mkdir -p /app/storage/consents && \
+    chmod -R 755 /app/storage
+
+# Copy built application and dependencies
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+
+# Copy source migrations (needed for runtime)
+COPY --from=builder /app/src/db/migrations ./src/db/migrations
+
+# Copy entrypoint script from backend directory
+COPY packages/pdw-sdk/examples/pdw-chat-demo/backend/docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
+
+# Create non-root user
+RUN groupadd -r pdwuser && useradd -r -g pdwuser pdwuser && \
+    chown -R pdwuser:pdwuser /app/storage
+
+# Switch to non-root user
+USER pdwuser
+
+EXPOSE 4000
+
+CMD ["./docker-entrypoint.sh"]
