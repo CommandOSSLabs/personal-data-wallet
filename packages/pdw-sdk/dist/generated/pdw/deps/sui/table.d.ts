@@ -20,7 +20,7 @@
  * assert!(&table1 != &table2);
  * ```
  */
-import { MoveStruct } from '../../../utils/index';
+import { MoveStruct } from '../../../utils/index.js';
 export declare const Table: MoveStruct<{
     /** the ID of this table */
     id: MoveStruct<{

@@ -56,11 +56,11 @@ exports.Table = void 0;
  * assert!(&table1 != &table2);
  * ```
  */
-const index_1 = require("../../../utils/index");
+const index_js_1 = require("../../../utils/index.js");
 const bcs_1 = require("@mysten/sui/bcs");
-const object = __importStar(require("./object"));
+const object = __importStar(require("./object.js"));
 const $moduleName = '0x2::table';
-exports.Table = new index_1.MoveStruct({ name: `${$moduleName}::Table`, fields: {
+exports.Table = new index_js_1.MoveStruct({ name: `${$moduleName}::Table`, fields: {
         /** the ID of this table */
         id: object.UID,
         /** the number of key-value pairs in the table */

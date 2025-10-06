@@ -1067,7 +1067,21 @@
       "source_index": 16,
       "index": 16,
       "doc": " Create a new currency type `T` as and return the `TreasuryCap` for\n `T` to the caller. Can only be called with a `one-time-witness`\n type, ensuring that there's only one `TreasuryCap` per `T`.",
-      "attributes": [],
+      "attributes": [
+        {
+          "Parameterized": [
+            "deprecated",
+            [
+              {
+                "Assigned": [
+                  "note",
+                  "Use `coin_registry::new_currency_with_otw` instead"
+                ]
+              }
+            ]
+          ]
+        }
+      ],
       "visibility": "Public",
       "entry": false,
       "type_parameters": [
@@ -1194,7 +1208,31 @@
       "source_index": 17,
       "index": 17,
       "doc": " This creates a new currency, via `create_currency`, but with an extra capability that\n allows for specific addresses to have their coins frozen. When an address is added to the\n deny list, it is immediately unable to interact with the currency's coin as input objects.\n Additionally at the start of the next epoch, they will be unable to receive the currency's\n coin.\n The `allow_global_pause` flag enables an additional API that will cause all addresses to\n be denied. Note however, that this doesn't affect per-address entries of the deny list and\n will not change the result of the \"contains\" APIs.",
-      "attributes": [],
+      "attributes": [
+        {
+          "Parameterized": [
+            "allow",
+            [
+              {
+                "Name": "deprecated_usage"
+              }
+            ]
+          ]
+        },
+        {
+          "Parameterized": [
+            "deprecated",
+            [
+              {
+                "Assigned": [
+                  "note",
+                  "Use `coin_registry::new_currency_with_otw` with `make_regulated` instead"
+                ]
+              }
+            ]
+          ]
+        }
+      ],
       "visibility": "Public",
       "entry": false,
       "type_parameters": [
@@ -2943,9 +2981,253 @@
         }
       ]
     },
-    "supply": {
+    "destroy_metadata": {
       "source_index": 40,
       "index": 40,
+      "doc": " Destroy legacy `CoinMetadata` object",
+      "attributes": [],
+      "visibility": "Package",
+      "entry": false,
+      "type_parameters": [
+        {
+          "name": "T",
+          "constraints": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "metadata",
+          "type_": {
+            "Datatype": {
+              "module": {
+                "address": "sui",
+                "name": "coin"
+              },
+              "name": "CoinMetadata",
+              "type_arguments": [
+                {
+                  "phantom": true,
+                  "argument": {
+                    "NamedTypeParameter": "T"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "return_": []
+    },
+    "deny_cap_id": {
+      "source_index": 41,
+      "index": 41,
+      "doc": null,
+      "attributes": [],
+      "visibility": "Package",
+      "entry": false,
+      "type_parameters": [
+        {
+          "name": "T",
+          "constraints": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "metadata",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "sui",
+                    "name": "coin"
+                  },
+                  "name": "RegulatedCoinMetadata",
+                  "type_arguments": [
+                    {
+                      "phantom": true,
+                      "argument": {
+                        "NamedTypeParameter": "T"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": [
+        {
+          "Datatype": {
+            "module": {
+              "address": "sui",
+              "name": "object"
+            },
+            "name": "ID",
+            "type_arguments": []
+          }
+        }
+      ]
+    },
+    "new_deny_cap_v2": {
+      "source_index": 42,
+      "index": 42,
+      "doc": null,
+      "attributes": [],
+      "visibility": "Package",
+      "entry": false,
+      "type_parameters": [
+        {
+          "name": "T",
+          "constraints": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "allow_global_pause",
+          "type_": "bool"
+        },
+        {
+          "name": "ctx",
+          "type_": {
+            "Reference": [
+              true,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "sui",
+                    "name": "tx_context"
+                  },
+                  "name": "TxContext",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": [
+        {
+          "Datatype": {
+            "module": {
+              "address": "sui",
+              "name": "coin"
+            },
+            "name": "DenyCapV2",
+            "type_arguments": [
+              {
+                "phantom": true,
+                "argument": {
+                  "NamedTypeParameter": "T"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "new_treasury_cap": {
+      "source_index": 43,
+      "index": 43,
+      "doc": null,
+      "attributes": [],
+      "visibility": "Package",
+      "entry": false,
+      "type_parameters": [
+        {
+          "name": "T",
+          "constraints": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "ctx",
+          "type_": {
+            "Reference": [
+              true,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "sui",
+                    "name": "tx_context"
+                  },
+                  "name": "TxContext",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": [
+        {
+          "Datatype": {
+            "module": {
+              "address": "sui",
+              "name": "coin"
+            },
+            "name": "TreasuryCap",
+            "type_arguments": [
+              {
+                "phantom": true,
+                "argument": {
+                  "NamedTypeParameter": "T"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "allow_global_pause": {
+      "source_index": 44,
+      "index": 44,
+      "doc": null,
+      "attributes": [],
+      "visibility": "Package",
+      "entry": false,
+      "type_parameters": [
+        {
+          "name": "T",
+          "constraints": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "cap",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "sui",
+                    "name": "coin"
+                  },
+                  "name": "DenyCapV2",
+                  "type_arguments": [
+                    {
+                      "phantom": true,
+                      "argument": {
+                        "NamedTypeParameter": "T"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": [
+        "bool"
+      ]
+    },
+    "supply": {
+      "source_index": 45,
+      "index": 45,
       "doc": null,
       "attributes": [],
       "visibility": "Public",
@@ -3009,10 +3291,20 @@
       ]
     },
     "create_regulated_currency": {
-      "source_index": 41,
-      "index": 41,
+      "source_index": 46,
+      "index": 46,
       "doc": " This creates a new currency, via `create_currency`, but with an extra capability that\n allows for specific addresses to have their coins frozen. Those addresses cannot interact\n with the coin as input objects.",
       "attributes": [
+        {
+          "Parameterized": [
+            "allow",
+            [
+              {
+                "Name": "deprecated_usage"
+              }
+            ]
+          ]
+        },
         {
           "Parameterized": [
             "deprecated",
@@ -3020,7 +3312,7 @@
               {
                 "Assigned": [
                   "note",
-                  "For new coins, use `create_regulated_currency_v2`. To migrate existing regulated currencies, migrate with `migrate_regulated_currency_to_v2`"
+                  "For new coins, use `new_currency_with_otw` and use `make_regulated`. To migrate existing regulated currencies, migrate with `migrate_regulated_currency_to_v2` and then use migration functions in `coin_registry`"
                 ]
               }
             ]
@@ -3167,8 +3459,8 @@
       ]
     },
     "deny_list_add": {
-      "source_index": 42,
-      "index": 42,
+      "source_index": 47,
+      "index": 47,
       "doc": " Adds the given address to the deny list, preventing it\n from interacting with the specified coin type as an input to a transaction.",
       "attributes": [
         {
@@ -3263,8 +3555,8 @@
       "return_": []
     },
     "deny_list_remove": {
-      "source_index": 43,
-      "index": 43,
+      "source_index": 48,
+      "index": 48,
       "doc": " Removes an address from the deny list.\n Aborts with `ENotFrozen` if the address is not already in the list.",
       "attributes": [
         {
@@ -3359,8 +3651,8 @@
       "return_": []
     },
     "deny_list_contains": {
-      "source_index": 44,
-      "index": 44,
+      "source_index": 49,
+      "index": 49,
       "doc": " Returns true iff the given address is denied for the given coin type. It will\n return false if given a non-coin type.",
       "attributes": [
         {

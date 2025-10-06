@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: pdw-chat-postgres
+    environment:
+      POSTGRES_DB: pdw_chat_demo
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pdw_chat_demo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pdw-network
+
+  # Backend API
+  backend:
+    build:
+      context: ../../../
+      dockerfile: packages/pdw-sdk/examples/pdw-chat-demo/Dockerfile
+    container_name: pdw-chat-backend
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/pdw_chat_demo
+      DATABASE_SSL: false
+      SUI_RPC_URL: ${SUI_RPC_URL:-https://fullnode.testnet.sui.io:443}
+      PDW_PACKAGE_ID: ${PDW_PACKAGE_ID}
+      PDW_ACCESS_REGISTRY_ID: ${PDW_ACCESS_REGISTRY_ID}
+      PDW_API_URL: http://localhost:4000/pdw
+      PDW_CONTEXT_APP_ID: pdw-chat-demo
+      PDW_CONSENT_STORAGE_PATH: /app/storage/consents/requests.json
+      WALRUS_UPLOAD_RELAY: ${WALRUS_UPLOAD_RELAY:-https://upload-relay.testnet.walrus.space}
+      WALRUS_STORAGE_EPOCHS: ${WALRUS_STORAGE_EPOCHS:-3}
+      WALRUS_STORAGE_TIMEOUT: ${WALRUS_STORAGE_TIMEOUT:-60000}
+      SEAL_KEY_SERVER_IDS: ${SEAL_KEY_SERVER_IDS}
+      SEAL_PACKAGE_ID: ${SEAL_PACKAGE_ID}
+      SEAL_MODULE_NAME: seal_access_control
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-text-embedding-004}
+      LOG_LEVEL: debug
+      SKIP_BLOCKCHAIN_OPERATIONS: ${SKIP_BLOCKCHAIN_OPERATIONS:-false}
+      SKIP_ENCRYPTION: ${SKIP_ENCRYPTION:-false}
+    ports:
+      - "4000:4000"
+    volumes:
+      - backend_storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - pdw-network
+    restart: unless-stopped
+
+  # Frontend Application
+  frontend:
+    build:
+      context: ../../../
+      dockerfile: packages/pdw-sdk/examples/pdw-chat-demo/frontend/Dockerfile
+    container_name: pdw-chat-frontend
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_PDW_BACKEND_URL: http://localhost:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - pdw-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  backend_storage:
+    driver: local
+
+networks:
+  pdw-network:
+    driver: bridge

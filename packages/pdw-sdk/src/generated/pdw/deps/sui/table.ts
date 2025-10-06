@@ -23,9 +23,9 @@
  * ```
  */
 
-import { MoveStruct } from '../../../utils/index';
+import { MoveStruct } from '../../../utils/index.js';
 import { bcs } from '@mysten/sui/bcs';
-import * as object from './object';
+import * as object from './object.js';
 const $moduleName = '0x2::table';
 export const Table = new MoveStruct({ name: `${$moduleName}::Table`, fields: {
         /** the ID of this table */

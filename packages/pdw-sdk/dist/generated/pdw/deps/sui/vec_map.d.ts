@@ -2,7 +2,7 @@
  * THIS FILE IS GENERATED AND SHOULD NOT BE MANUALLY MODIFIED *
  **************************************************************/
 import { type BcsType } from '@mysten/sui/bcs';
-import { MoveStruct } from '../../../utils/index';
+import { MoveStruct } from '../../../utils/index.js';
 /** An entry in the map */
 export declare function Entry<K extends BcsType<any>, V extends BcsType<any>>(...typeParameters: [
     K,

@@ -6,11 +6,11 @@ exports.VecMap = VecMap;
  * THIS FILE IS GENERATED AND SHOULD NOT BE MANUALLY MODIFIED *
  **************************************************************/
 const bcs_1 = require("@mysten/sui/bcs");
-const index_1 = require("../../../utils/index");
+const index_js_1 = require("../../../utils/index.js");
 const $moduleName = '0x2::vec_map';
 /** An entry in the map */
 function Entry(...typeParameters) {
-    return new index_1.MoveStruct({ name: `${$moduleName}::Entry<${typeParameters[0].name}, ${typeParameters[1].name}>`, fields: {
+    return new index_js_1.MoveStruct({ name: `${$moduleName}::Entry<${typeParameters[0].name}, ${typeParameters[1].name}>`, fields: {
             key: typeParameters[0],
             value: typeParameters[1]
         } });
@@ -25,7 +25,7 @@ function Entry(...typeParameters) {
  * also be handwritten.
  */
 function VecMap(...typeParameters) {
-    return new index_1.MoveStruct({ name: `${$moduleName}::VecMap<${typeParameters[0].name}, ${typeParameters[1].name}>`, fields: {
+    return new index_js_1.MoveStruct({ name: `${$moduleName}::VecMap<${typeParameters[0].name}, ${typeParameters[1].name}>`, fields: {
             contents: bcs_1.bcs.vector(Entry(typeParameters[0], typeParameters[1]))
         } });
 }

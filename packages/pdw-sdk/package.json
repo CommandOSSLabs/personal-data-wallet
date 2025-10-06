@@ -1,5 +1,5 @@
 {
-  "name": "@personal-data-wallet/sdk",
+  "name": "personal-data-wallet-sdk",
   "version": "0.1.0",
   "description": "TypeScript SDK for Personal Data Wallet - Decentralized memory system with AI embeddings, HNSW vector search, SEAL encryption and Walrus storage",
   "main": "dist/index.js",
@@ -24,7 +24,7 @@
     "verify:quick": "npx jest test/simple-config.test.ts && npm run verify:deployment",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
-    "prepublishOnly": "npm run build"
+    "_prepublishOnly": "npm run build"
   },
   "keywords": [
     "sui",

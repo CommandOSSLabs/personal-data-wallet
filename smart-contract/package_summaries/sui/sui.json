@@ -42,6 +42,9 @@
             "allow",
             [
               {
+                "Name": "deprecated_usage"
+              },
+              {
                 "Name": "unused_function"
               }
             ]

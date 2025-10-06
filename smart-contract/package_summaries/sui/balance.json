@@ -15,7 +15,11 @@
     },
     {
       "address": "sui",
-      "name": "accumulator"
+      "name": "funds_accumulator"
+    },
+    {
+      "address": "sui",
+      "name": "object"
     },
     {
       "address": "sui",
@@ -542,9 +546,224 @@
       ],
       "return_": []
     },
-    "create_staking_rewards": {
+    "send_funds": {
       "source_index": 10,
       "index": 10,
+      "doc": " Send a `Balance` to an address's funds accumulator.",
+      "attributes": [],
+      "visibility": "Package",
+      "entry": false,
+      "type_parameters": [
+        {
+          "name": "T",
+          "constraints": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "balance",
+          "type_": {
+            "Datatype": {
+              "module": {
+                "address": "sui",
+                "name": "balance"
+              },
+              "name": "Balance",
+              "type_arguments": [
+                {
+                  "phantom": true,
+                  "argument": {
+                    "NamedTypeParameter": "T"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "recipient",
+          "type_": "address"
+        }
+      ],
+      "return_": []
+    },
+    "redeem_funds": {
+      "source_index": 11,
+      "index": 11,
+      "doc": " Redeem a `Withdrawal<Balance<T>>` to get the underlying `Balance<T>` from an address's funds\n accumulator.",
+      "attributes": [],
+      "visibility": "Package",
+      "entry": false,
+      "type_parameters": [
+        {
+          "name": "T",
+          "constraints": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "withdrawal",
+          "type_": {
+            "Datatype": {
+              "module": {
+                "address": "sui",
+                "name": "funds_accumulator"
+              },
+              "name": "Withdrawal",
+              "type_arguments": [
+                {
+                  "phantom": true,
+                  "argument": {
+                    "Datatype": {
+                      "module": {
+                        "address": "sui",
+                        "name": "balance"
+                      },
+                      "name": "Balance",
+                      "type_arguments": [
+                        {
+                          "phantom": true,
+                          "argument": {
+                            "NamedTypeParameter": "T"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "return_": [
+        {
+          "Datatype": {
+            "module": {
+              "address": "sui",
+              "name": "balance"
+            },
+            "name": "Balance",
+            "type_arguments": [
+              {
+                "phantom": true,
+                "argument": {
+                  "NamedTypeParameter": "T"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "withdraw_funds_from_object": {
+      "source_index": 12,
+      "index": 12,
+      "doc": " Create a `Withdrawal<Balance<T>>` from an object to withdraw funds from it.",
+      "attributes": [],
+      "visibility": "Package",
+      "entry": false,
+      "type_parameters": [
+        {
+          "name": "T",
+          "constraints": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "obj",
+          "type_": {
+            "Reference": [
+              true,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "sui",
+                    "name": "object"
+                  },
+                  "name": "UID",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "value",
+          "type_": "u64"
+        }
+      ],
+      "return_": [
+        {
+          "Datatype": {
+            "module": {
+              "address": "sui",
+              "name": "funds_accumulator"
+            },
+            "name": "Withdrawal",
+            "type_arguments": [
+              {
+                "phantom": true,
+                "argument": {
+                  "Datatype": {
+                    "module": {
+                      "address": "sui",
+                      "name": "balance"
+                    },
+                    "name": "Balance",
+                    "type_arguments": [
+                      {
+                        "phantom": true,
+                        "argument": {
+                          "NamedTypeParameter": "T"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "create_supply_internal": {
+      "source_index": 13,
+      "index": 13,
+      "doc": null,
+      "attributes": [],
+      "visibility": "Package",
+      "entry": false,
+      "type_parameters": [
+        {
+          "name": "T",
+          "constraints": []
+        }
+      ],
+      "parameters": [],
+      "return_": [
+        {
+          "Datatype": {
+            "module": {
+              "address": "sui",
+              "name": "balance"
+            },
+            "name": "Supply",
+            "type_arguments": [
+              {
+                "phantom": true,
+                "argument": {
+                  "NamedTypeParameter": "T"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "create_staking_rewards": {
+      "source_index": 14,
+      "index": 14,
       "doc": " CAUTION: this function creates a `Balance` without increasing the supply.\n It should only be called by the epoch change system txn to create staking rewards,\n and nowhere else.",
       "attributes": [
         {
@@ -611,8 +830,8 @@
       ]
     },
     "destroy_storage_rebates": {
-      "source_index": 11,
-      "index": 11,
+      "source_index": 15,
+      "index": 15,
       "doc": " CAUTION: this function destroys a `Balance` without decreasing the supply.\n It should only be called by the epoch change system txn to destroy storage rebates,\n and nowhere else.",
       "attributes": [
         {
@@ -677,8 +896,8 @@
       "return_": []
     },
     "destroy_supply": {
-      "source_index": 12,
-      "index": 12,
+      "source_index": 16,
+      "index": 16,
       "doc": " Destroy a `Supply` preventing any further minting and burning.",
       "attributes": [],
       "visibility": "Package",
@@ -716,8 +935,8 @@
       ]
     },
     "send_to_account": {
-      "source_index": 13,
-      "index": 13,
+      "source_index": 17,
+      "index": 17,
       "doc": null,
       "attributes": [
         {
@@ -768,8 +987,8 @@
       "return_": []
     },
     "withdraw_from_account": {
-      "source_index": 14,
-      "index": 14,
+      "source_index": 18,
+      "index": 18,
       "doc": null,
       "attributes": [
         {

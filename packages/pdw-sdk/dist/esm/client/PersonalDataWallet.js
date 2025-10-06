@@ -19,7 +19,7 @@ var _PersonalDataWallet_client, _PersonalDataWallet_config, _PersonalDataWallet_
 import { MemoryService } from '../memory/MemoryService';
 import { ChatService } from '../chat/ChatService';
 import { StorageService } from '../services/StorageService';
-import { EncryptionService } from '../services/EncryptionService';
+import { EncryptionService } from '../encryption/EncryptionService';
 import { TransactionService } from '../transactions/TransactionService';
 import { ViewService } from '../view/ViewService';
 import { MainWalletService } from '../wallet/MainWalletService';
@@ -62,7 +62,9 @@ export class PersonalDataWallet {
         __classPrivateFieldSet(this, _PersonalDataWallet_contextWallet, new ContextWalletService({
             suiClient: client.client || client,
             packageId: __classPrivateFieldGet(this, _PersonalDataWallet_config, "f").packageId || '',
-            mainWalletService: __classPrivateFieldGet(this, _PersonalDataWallet_mainWallet, "f")
+            mainWalletService: __classPrivateFieldGet(this, _PersonalDataWallet_mainWallet, "f"),
+            storageService: __classPrivateFieldGet(this, _PersonalDataWallet_storage, "f"),
+            encryptionService: __classPrivateFieldGet(this, _PersonalDataWallet_encryption, "f")
         }), "f");
         __classPrivateFieldSet(this, _PersonalDataWallet_permission, new PermissionService({
             suiClient: client.client || client,
@@ -83,6 +85,9 @@ export class PersonalDataWallet {
         this.getMemoryContext = __classPrivateFieldGet(this, _PersonalDataWallet_memory, "f").getMemoryContext.bind(__classPrivateFieldGet(this, _PersonalDataWallet_memory, "f"));
         this.uploadToStorage = __classPrivateFieldGet(this, _PersonalDataWallet_storage, "f").upload.bind(__classPrivateFieldGet(this, _PersonalDataWallet_storage, "f"));
         this.retrieveFromStorage = __classPrivateFieldGet(this, _PersonalDataWallet_storage, "f").retrieve.bind(__classPrivateFieldGet(this, _PersonalDataWallet_storage, "f"));
+    }
+    setConsentRepository(repository) {
+        __classPrivateFieldGet(this, _PersonalDataWallet_permission, "f").setConsentRepository(repository);
     }
     // Transaction builders
     get tx() {

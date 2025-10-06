@@ -8,17 +8,19 @@ import type { ClientWithCoreApi, PDWConfig } from '../types';
 import { MemoryService } from '../memory/MemoryService';
 import { ChatService } from '../chat/ChatService';
 import { StorageService } from '../services/StorageService';
-import { EncryptionService } from '../services/EncryptionService';
+import { EncryptionService } from '../encryption/EncryptionService';
 import { TransactionService } from '../transactions/TransactionService';
 import { ViewService } from '../view/ViewService';
 import { MainWalletService } from '../wallet/MainWalletService';
 import { ContextWalletService } from '../wallet/ContextWalletService';
 import { PermissionService } from '../access/PermissionService';
 import { AggregationService } from '../aggregation/AggregationService';
+import type { ConsentRepository } from '../permissions/ConsentRepository';
 export interface PersonalDataWalletExtension {
     createMemory: MemoryService['createMemory'];
     searchMemories: MemoryService['searchMemories'];
     getMemoryContext: MemoryService['getMemoryContext'];
+    setConsentRepository: (repository?: ConsentRepository) => void;
     uploadToStorage: StorageService['upload'];
     retrieveFromStorage: StorageService['retrieve'];
     tx: {
@@ -106,6 +108,7 @@ export declare class PersonalDataWallet {
     getMemoryContext: MemoryService['getMemoryContext'];
     uploadToStorage: StorageService['upload'];
     retrieveFromStorage: StorageService['retrieve'];
+    setConsentRepository(repository?: ConsentRepository): void;
     get tx(): {
         createMemoryRecord: (options: import("../types").CreateMemoryRecordTxOptions) => import("@mysten/sui/dist/cjs/transactions").Transaction;
         updateMemoryMetadata: (options: import("../types").UpdateMemoryMetadataTxOptions) => import("@mysten/sui/dist/cjs/transactions").Transaction;

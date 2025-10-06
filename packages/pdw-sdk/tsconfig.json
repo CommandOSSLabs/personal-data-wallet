@@ -24,7 +24,11 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "exactOptionalPropertyTypes": false,
-    "noUncheckedIndexedAccess": false
+    "noUncheckedIndexedAccess": false,
+    "baseUrl": "./src",
+    "paths": {
+      "~root/*": ["./generated/pdw/*"]
+    }
   },
   "include": [
     "src/**/*"

@@ -388,6 +388,14 @@ export class PermissionService {
             this.pendingConsents.set(record.requestId, { ...record });
         }
     }
+    /**
+     * Swap the consent persistence backend at runtime.
+     * Useful for applications that want to wire a custom repository after
+     * the service has been constructed (e.g., demos supplying a filesystem store).
+     */
+    setConsentRepository(repository) {
+        this.consentRepository = repository;
+    }
     async updateConsentStatus(params) {
         const normalizedRequester = normalizeSuiAddress(params.requesterWallet);
         const normalizedTarget = normalizeSuiAddress(params.targetWallet);

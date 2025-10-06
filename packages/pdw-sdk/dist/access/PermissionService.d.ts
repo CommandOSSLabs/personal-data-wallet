@@ -151,6 +151,12 @@ export declare class PermissionService {
     private convertPermissionsToGrants;
     private toPermissionScope;
     private persistConsentRequest;
+    /**
+     * Swap the consent persistence backend at runtime.
+     * Useful for applications that want to wire a custom repository after
+     * the service has been constructed (e.g., demos supplying a filesystem store).
+     */
+    setConsentRepository(repository?: ConsentRepository): void;
     private updateConsentStatus;
 }
 //# sourceMappingURL=PermissionService.d.ts.map
