@@ -174,7 +174,7 @@ async function checkWalrus(relay?: string): Promise<CheckResult | null> {
 async function main() {
   const config = loadConfig();
   const checks: Array<Promise<CheckResult | null>> = [
-    checkPostgres(config.databaseUrl, config.databaseSsl),
+    checkPostgres(config.databaseUrl, Boolean(config.databaseSsl)),
     checkSuiRpc(config.suiRpcUrl),
     checkGemini(config.geminiApiKey, config.geminiModel),
     checkWalrus(config.walrusUploadRelay),
