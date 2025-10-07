@@ -1,21 +1,25 @@
 /**
- * Storage Module
- * 
- * PRODUCTION: Uses services/StorageService.ts with writeBlobFlow pattern
- * LEGACY: Old storage services remain for compatibility during transition
+ * Storage Module - DEPRECATED
+ *
+ * ⚠️ DEPRECATION NOTICE:
+ * This directory is being phased out. Use services/StorageService instead.
+ *
+ * Migration Guide:
+ * - WalrusStorageService → services/StorageService
+ * - StorageManager → services/StorageService
+ * - StorageService (legacy) → services/StorageService
+ *
+ * These exports are maintained for backward compatibility during Phase 1A refactoring.
  */
 
-// PRODUCTION - Use services/StorageService.ts instead
-export { StorageService as LegacyStorageService } from './StorageService';
-
-// LEGACY SERVICES - Will be deprecated once transition complete
-export { WalrusStorageService } from './WalrusStorageService';
-export { StorageManager } from './StorageManager';
-// WalrusTestAdapter is disabled due to API incompatibility with new StorageService
-// export { WalrusTestAdapter } from './WalrusTestAdapter';
-
-// Export production service from services directory
+// PRODUCTION SERVICE - Use this instead of legacy services
 export { StorageService } from '../services/StorageService';
+
+// DEPRECATED LEGACY SERVICES - Kept for backward compatibility only
+/** @deprecated Use services/StorageService instead. Will be removed in Phase 1B. */
+export { WalrusStorageService } from './WalrusStorageService';
+/** @deprecated Use services/StorageService instead. Will be removed in Phase 1B. */
+export { StorageManager } from './StorageManager';
 
 export type {
   WalrusConfig,
