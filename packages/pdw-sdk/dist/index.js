@@ -15,8 +15,22 @@
  * @version 1.0.0
  * @author Personal Data Wallet Team
  */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.VERSION = exports.AggregationService = exports.InMemoryConsentRepository = exports.FileSystemConsentRepository = exports.PermissionService = exports.ContextWalletService = exports.MainWalletService = exports.SDK = exports.QuickStartConfigs = exports.SDK_NAME = exports.SDK_VERSION = exports.Config = exports.ConfigurationHelper = exports.MemoryDecryptionPipeline = exports.MemoryRetrievalService = exports.BlockchainManager = exports.SuiService = exports.StorageManager = exports.WalrusStorageService = exports.KnowledgeGraphManager = exports.GraphService = exports.MemoryProcessingCache = exports.BatchingService = exports.BatchManager = exports.HnswIndexService = exports.VectorManager = exports.EmbeddingService = exports.PipelineManager = exports.MemoryPipeline = void 0;
+exports.VERSION = exports.AggregationService = exports.InMemoryConsentRepository = exports.FileSystemConsentRepository = exports.PermissionService = exports.ContextWalletService = exports.MainWalletService = exports.SDK = exports.QuickStartConfigs = exports.SDK_NAME = exports.SDK_VERSION = exports.Config = exports.ConfigurationHelper = exports.MemoryDecryptionPipeline = exports.MemoryRetrievalService = exports.KnowledgeGraphManager = exports.GraphService = exports.MemoryProcessingCache = exports.BatchingService = exports.BatchManager = exports.HnswIndexService = exports.VectorManager = exports.EncryptionService = exports.SealService = exports.BlockchainManager = exports.SuiService = exports.StorageManager = exports.WalrusStorageService = exports.VectorService = exports.MemoryService = exports.CrossContextPermissionService = exports.ChatService = exports.BatchService = exports.TransactionService = exports.ViewService = exports.MemoryIndexService = exports.ClassifierService = exports.QueryService = exports.GeminiAIService = exports.EmbeddingService = exports.StorageService = exports.PipelineManager = exports.MemoryPipeline = void 0;
 exports.createQuickStartPipeline = createQuickStartPipeline;
 exports.createPipelineManager = createPipelineManager;
 // Core pipeline - the main entry point
@@ -26,9 +40,51 @@ Object.defineProperty(exports, "PipelineManager", { enumerable: true, get: funct
 // Import for internal use
 const MemoryPipeline_1 = require("./pipeline/MemoryPipeline");
 const PipelineManager_1 = require("./pipeline/PipelineManager");
-// Individual service modules
-var embedding_1 = require("./embedding");
-Object.defineProperty(exports, "EmbeddingService", { enumerable: true, get: function () { return embedding_1.EmbeddingService; } });
+// ==================== SERVICES ====================
+// Business logic services
+var StorageService_1 = require("./services/StorageService");
+Object.defineProperty(exports, "StorageService", { enumerable: true, get: function () { return StorageService_1.StorageService; } });
+var EmbeddingService_1 = require("./services/EmbeddingService");
+Object.defineProperty(exports, "EmbeddingService", { enumerable: true, get: function () { return EmbeddingService_1.EmbeddingService; } });
+var GeminiAIService_1 = require("./services/GeminiAIService");
+Object.defineProperty(exports, "GeminiAIService", { enumerable: true, get: function () { return GeminiAIService_1.GeminiAIService; } });
+var QueryService_1 = require("./services/QueryService");
+Object.defineProperty(exports, "QueryService", { enumerable: true, get: function () { return QueryService_1.QueryService; } });
+var ClassifierService_1 = require("./services/ClassifierService");
+Object.defineProperty(exports, "ClassifierService", { enumerable: true, get: function () { return ClassifierService_1.ClassifierService; } });
+var MemoryIndexService_1 = require("./services/MemoryIndexService");
+Object.defineProperty(exports, "MemoryIndexService", { enumerable: true, get: function () { return MemoryIndexService_1.MemoryIndexService; } });
+var ViewService_1 = require("./services/ViewService");
+Object.defineProperty(exports, "ViewService", { enumerable: true, get: function () { return ViewService_1.ViewService; } });
+var TransactionService_1 = require("./services/TransactionService");
+Object.defineProperty(exports, "TransactionService", { enumerable: true, get: function () { return TransactionService_1.TransactionService; } });
+var BatchService_1 = require("./services/BatchService");
+Object.defineProperty(exports, "BatchService", { enumerable: true, get: function () { return BatchService_1.BatchService; } });
+var ChatService_1 = require("./services/ChatService");
+Object.defineProperty(exports, "ChatService", { enumerable: true, get: function () { return ChatService_1.ChatService; } });
+var CrossContextPermissionService_1 = require("./services/CrossContextPermissionService");
+Object.defineProperty(exports, "CrossContextPermissionService", { enumerable: true, get: function () { return CrossContextPermissionService_1.CrossContextPermissionService; } });
+var MemoryService_1 = require("./services/MemoryService");
+Object.defineProperty(exports, "MemoryService", { enumerable: true, get: function () { return MemoryService_1.MemoryService; } });
+var VectorService_1 = require("./services/VectorService");
+Object.defineProperty(exports, "VectorService", { enumerable: true, get: function () { return VectorService_1.VectorService; } });
+// ==================== INFRASTRUCTURE ====================
+// External integrations (use these instead of old paths)
+var walrus_1 = require("./infrastructure/walrus");
+Object.defineProperty(exports, "WalrusStorageService", { enumerable: true, get: function () { return walrus_1.WalrusStorageService; } });
+Object.defineProperty(exports, "StorageManager", { enumerable: true, get: function () { return walrus_1.StorageManager; } });
+var sui_1 = require("./infrastructure/sui");
+Object.defineProperty(exports, "SuiService", { enumerable: true, get: function () { return sui_1.SuiService; } });
+Object.defineProperty(exports, "BlockchainManager", { enumerable: true, get: function () { return sui_1.BlockchainManager; } });
+var seal_1 = require("./infrastructure/seal");
+Object.defineProperty(exports, "SealService", { enumerable: true, get: function () { return seal_1.SealService; } });
+var seal_2 = require("./infrastructure/seal");
+Object.defineProperty(exports, "EncryptionService", { enumerable: true, get: function () { return seal_2.EncryptionService; } });
+// ==================== CORE ====================
+// Core interfaces and base classes
+__exportStar(require("./core/interfaces"), exports);
+// ==================== UTILITIES ====================
+// Vector indexing and batch processing
 var vector_1 = require("./vector");
 Object.defineProperty(exports, "VectorManager", { enumerable: true, get: function () { return vector_1.VectorManager; } });
 Object.defineProperty(exports, "HnswIndexService", { enumerable: true, get: function () { return vector_1.HnswIndexService; } });
@@ -39,12 +95,6 @@ Object.defineProperty(exports, "MemoryProcessingCache", { enumerable: true, get:
 var graph_1 = require("./graph");
 Object.defineProperty(exports, "GraphService", { enumerable: true, get: function () { return graph_1.GraphService; } });
 Object.defineProperty(exports, "KnowledgeGraphManager", { enumerable: true, get: function () { return graph_1.KnowledgeGraphManager; } });
-var storage_1 = require("./storage");
-Object.defineProperty(exports, "WalrusStorageService", { enumerable: true, get: function () { return storage_1.WalrusStorageService; } });
-Object.defineProperty(exports, "StorageManager", { enumerable: true, get: function () { return storage_1.StorageManager; } });
-var blockchain_1 = require("./blockchain");
-Object.defineProperty(exports, "SuiService", { enumerable: true, get: function () { return blockchain_1.SuiService; } });
-Object.defineProperty(exports, "BlockchainManager", { enumerable: true, get: function () { return blockchain_1.BlockchainManager; } });
 // Memory retrieval, analytics, and decryption
 var retrieval_1 = require("./retrieval");
 Object.defineProperty(exports, "MemoryRetrievalService", { enumerable: true, get: function () { return retrieval_1.MemoryRetrievalService; } });

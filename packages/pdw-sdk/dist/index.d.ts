@@ -19,12 +19,27 @@ export type { PipelineConfig, PipelineExecution, PipelineMetrics, PipelineManage
 import { MemoryPipeline } from './pipeline/MemoryPipeline';
 import { PipelineManager } from './pipeline/PipelineManager';
 import type { PipelineConfig, PipelineManagerConfig } from './pipeline';
-export { EmbeddingService } from './embedding';
+export { StorageService } from './services/StorageService';
+export { EmbeddingService } from './services/EmbeddingService';
+export { GeminiAIService } from './services/GeminiAIService';
+export { QueryService } from './services/QueryService';
+export { ClassifierService } from './services/ClassifierService';
+export { MemoryIndexService } from './services/MemoryIndexService';
+export { ViewService } from './services/ViewService';
+export { TransactionService } from './services/TransactionService';
+export { BatchService } from './services/BatchService';
+export { ChatService } from './services/ChatService';
+export { CrossContextPermissionService } from './services/CrossContextPermissionService';
+export { MemoryService } from './services/MemoryService';
+export { VectorService } from './services/VectorService';
+export { WalrusStorageService, StorageManager } from './infrastructure/walrus';
+export { SuiService, BlockchainManager } from './infrastructure/sui';
+export { SealService } from './infrastructure/seal';
+export { EncryptionService } from './infrastructure/seal';
+export * from './core/interfaces';
 export { VectorManager, HnswIndexService } from './vector';
 export { BatchManager, BatchingService, MemoryProcessingCache } from './batch';
 export { GraphService, KnowledgeGraphManager } from './graph';
-export { WalrusStorageService, StorageManager } from './storage';
-export { SuiService, BlockchainManager } from './blockchain';
 export { MemoryRetrievalService, MemoryDecryptionPipeline } from './retrieval';
 export type { UnifiedMemoryQuery, UnifiedMemoryResult, RetrievalStats, RetrievalContext, KeyServerConfig, DecryptionConfig, DecryptionRequest, DecryptionResult, BatchDecryptionResult } from './retrieval';
 export { ConfigurationHelper, Config } from './config';
@@ -33,8 +48,10 @@ export type { Memory, ProcessedMemory, EmbeddingResult, EmbeddingConfig } from '
 export type { VectorSearchResult, HNSWIndexConfig } from './vector';
 export type { CacheConfig, CacheMetrics } from './batch';
 export type { Entity, Relationship, KnowledgeGraph } from './graph';
-export type { WalrusUploadResult, WalrusRetrievalResult, StorageResult, MemoryMetadata } from './storage';
-export type { MemoryRecord, TransactionResult, OwnershipVerification, BlockchainStats } from './blockchain';
+export type { WalrusUploadResult, WalrusRetrievalResult, MemoryMetadata } from './infrastructure/walrus/WalrusStorageService';
+export type { StorageResult } from './infrastructure/walrus/StorageManager';
+export type { MemoryRecord, TransactionResult } from './infrastructure/sui/SuiService';
+export type { OwnershipVerification, BlockchainStats } from './infrastructure/sui/BlockchainManager';
 /**
  * SDK Version Information
  */

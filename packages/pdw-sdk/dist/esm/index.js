@@ -19,13 +19,35 @@ export { MemoryPipeline, PipelineManager } from './pipeline';
 // Import for internal use
 import { MemoryPipeline } from './pipeline/MemoryPipeline';
 import { PipelineManager } from './pipeline/PipelineManager';
-// Individual service modules
-export { EmbeddingService } from './embedding';
+// ==================== SERVICES ====================
+// Business logic services
+export { StorageService } from './services/StorageService';
+export { EmbeddingService } from './services/EmbeddingService';
+export { GeminiAIService } from './services/GeminiAIService';
+export { QueryService } from './services/QueryService';
+export { ClassifierService } from './services/ClassifierService';
+export { MemoryIndexService } from './services/MemoryIndexService';
+export { ViewService } from './services/ViewService';
+export { TransactionService } from './services/TransactionService';
+export { BatchService } from './services/BatchService';
+export { ChatService } from './services/ChatService';
+export { CrossContextPermissionService } from './services/CrossContextPermissionService';
+export { MemoryService } from './services/MemoryService';
+export { VectorService } from './services/VectorService';
+// ==================== INFRASTRUCTURE ====================
+// External integrations (use these instead of old paths)
+export { WalrusStorageService, StorageManager } from './infrastructure/walrus';
+export { SuiService, BlockchainManager } from './infrastructure/sui';
+export { SealService } from './infrastructure/seal';
+export { EncryptionService } from './infrastructure/seal';
+// ==================== CORE ====================
+// Core interfaces and base classes
+export * from './core/interfaces';
+// ==================== UTILITIES ====================
+// Vector indexing and batch processing
 export { VectorManager, HnswIndexService } from './vector';
 export { BatchManager, BatchingService, MemoryProcessingCache } from './batch';
 export { GraphService, KnowledgeGraphManager } from './graph';
-export { WalrusStorageService, StorageManager } from './storage';
-export { SuiService, BlockchainManager } from './blockchain';
 // Memory retrieval, analytics, and decryption
 export { MemoryRetrievalService, MemoryDecryptionPipeline } from './retrieval';
 // Configuration management
