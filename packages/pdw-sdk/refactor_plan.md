@@ -86,23 +86,22 @@
 **Status**: ✅ Complete - See `PHASE_1D_RESULTS.md`
 **Note**: Expected duplicates (ChatIntegrationService, MemoryChatService) not found
 
-#### **Phase 1E: Consolidate Wallet Services**
-- [ ] Keep `src/wallet/MainWalletService.ts` ✅ (Dynamic fields)
-- [ ] Keep `src/wallet/ContextWalletService.ts` ✅ (Context management)
-- [ ] Remove `src/services/WalletIntegrationService.ts` (Legacy)
-- [ ] Remove `src/wallet/WalletManager.ts` (Old manager)
-- [ ] Update import references
+#### **Phase 1E: Consolidate Wallet Services** ✅ COMPLETE
+- [x] Keep `src/wallet/MainWalletService.ts` ✅ (Dynamic fields, public API)
+- [x] Keep `src/wallet/ContextWalletService.ts` ✅ (Context management, public API)
+- [x] Remove `src/services/WalletManagementService.ts` (Legacy, not used)
+- [x] Update services/index.ts export
 
-**Expected Reduction**: -2 files, -~60KB
+**Actual Reduction**: -1 file, -~13KB
+**Status**: ✅ Complete - See `PHASE_1E_1F_RESULTS.md`
 
-#### **Phase 1F: Clean Up Index Files**
-- [ ] Remove `src/index-clean.ts` (Experimental)
-- [ ] Remove `src/legacy-index.ts` (Backward compatibility)
-- [ ] Keep only `src/index.ts` (Main entry)
-- [ ] Keep only `src/services/index.ts` (Service exports)
-- [ ] Update package.json exports
+#### **Phase 1F: Clean Up Index Files** ✅ COMPLETE
+- [x] Remove `src/index-clean.ts` (Experimental, not used)
+- [x] Keep `src/index.ts` (Main entry point)
+- [x] Verify package.json references
 
-**Expected Reduction**: -2 files, -~20KB
+**Actual Reduction**: -1 file, -~3KB
+**Status**: ✅ Complete - See `PHASE_1E_1F_RESULTS.md`
 
 ### **Phase 2: Directory Restructuring** 📋 PLANNED
 **Timeline**: Week 2  
