@@ -99,7 +99,7 @@ describe('Walrus SDK Example Replica', () => {
   }, 120000); // 2 minute timeout for network operations
 
   test('should handle StorageService integration', async () => {
-    const { StorageService } = await import('../src/storage/StorageService');
+    const { StorageService } = await import('../src/services/StorageService');
     
     // Test our StorageService with proper configuration
     const storageService = new StorageService({

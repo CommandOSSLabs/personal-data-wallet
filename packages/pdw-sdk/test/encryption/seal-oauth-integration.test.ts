@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll } from '@jest/globals';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { fromHex } from '@mysten/sui/utils';
-import { EncryptionService } from '../../src/encryption/EncryptionService';
+import { EncryptionService } from '../../src/services/EncryptionService';
 import { CrossContextPermissionService } from '../../src/services/CrossContextPermissionService';
 import type { PDWConfig } from '../../src/types';
 import dotenv from 'dotenv';

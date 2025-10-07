@@ -62,8 +62,8 @@ describe('KnowledgeGraphManager', () => {
     });
 
     graphService = new GraphService({
-      aiService,
-      embeddingService
+      geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY,
+      enableEmbeddings: true
     }, embeddingService);
 
     graphManager = new KnowledgeGraphManager(graphService);

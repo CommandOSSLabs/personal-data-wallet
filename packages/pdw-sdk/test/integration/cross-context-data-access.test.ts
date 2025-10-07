@@ -23,7 +23,7 @@ import { MainWalletService } from '../../src/wallet/MainWalletService';
 import { CrossContextPermissionService } from '../../src/services/CrossContextPermissionService';
 import { AggregationService } from '../../src/aggregation/AggregationService';
 import { PermissionService } from '../../src/access/PermissionService';
-import { EncryptionService } from '../../src/encryption/EncryptionService';
+import { EncryptionService } from '../../src/services/EncryptionService';
 import { StorageService } from '../../src/services/StorageService';
 
 // Load test environment
