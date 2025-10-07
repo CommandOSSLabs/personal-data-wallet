@@ -1,8 +1,8 @@
 "use strict";
 /**
- * Core Module - Barrel Export
+ * Core Interfaces - Barrel Export
  *
- * Re-exports all core types, interfaces, and base classes for the PDW SDK.
+ * Exports all core interfaces and base classes for the PDW SDK.
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -19,8 +19,5 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-// Re-export core interfaces and base classes
-__exportStar(require("./interfaces"), exports);
-// Re-export types
-__exportStar(require("./types"), exports);
+__exportStar(require("./IService"), exports);
 //# sourceMappingURL=index.js.map

@@ -1,4 +1,11 @@
 /**
+ * Core Module - Barrel Export
+ *
+ * Re-exports all core types, interfaces, and base classes for the PDW SDK.
+ */
+export * from './interfaces';
+export * from './types';
+/**
  * Core TypeScript types for Personal Data Wallet SDK
  */
 import type { Transaction, TransactionArgument } from '@mysten/sui/transactions';
