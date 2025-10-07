@@ -17,7 +17,7 @@
 import { SealClient, SessionKey } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import { fromHex, toHex } from '@mysten/sui/utils';
-import { EncryptionService } from '../encryption/EncryptionService';
+import { EncryptionService } from '../services/EncryptionService';
 import { StorageManager } from '../storage/StorageManager';
 import { UnifiedMemoryResult } from '../retrieval/MemoryRetrievalService';
 

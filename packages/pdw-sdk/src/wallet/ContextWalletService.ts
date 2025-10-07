@@ -19,7 +19,7 @@ import {
 } from '../types/wallet';
 import { MainWalletService } from './MainWalletService.js';
 import { StorageService } from '../services/StorageService.js';
-import { EncryptionService } from '../encryption/EncryptionService.js';
+import { EncryptionService } from '../services/EncryptionService.js';
 
 /**
  * Configuration for ContextWalletService

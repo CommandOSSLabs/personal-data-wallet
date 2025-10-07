@@ -6,10 +6,10 @@
  */
 
 import type { ClientWithCoreApi, PDWConfig } from '../types';
-import { MemoryService } from '../memory/MemoryService';
+import { MemoryService } from '../services/MemoryService';
 import { ChatService } from '../chat/ChatService';
 import { StorageService } from '../services/StorageService';
-import { EncryptionService } from '../encryption/EncryptionService';
+import { EncryptionService } from '../services/EncryptionService';
 import { TransactionService } from '../transactions/TransactionService';
 import { ViewService } from '../view/ViewService';
 import { MainWalletService } from '../wallet/MainWalletService';
