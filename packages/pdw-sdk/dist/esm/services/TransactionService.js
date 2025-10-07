@@ -318,16 +318,18 @@ export class TransactionService {
                     });
                     break;
                 case 'grantAccess':
-                    AccessModule.grantAccess({
-                        tx,
-                        ...operation.options,
-                    });
+                    // Legacy function removed - use grantWalletAllowlistAccess instead
+                    AccessModule.grantWalletAllowlistAccess({
+                        package: this.config.packageId,
+                        arguments: operation.options,
+                    })(tx);
                     break;
                 case 'revokeAccess':
-                    AccessModule.revokeAccess({
-                        tx,
-                        ...operation.options,
-                    });
+                    // Legacy function removed - use revokeWalletAllowlistAccess instead
+                    AccessModule.revokeWalletAllowlistAccess({
+                        package: this.config.packageId,
+                        arguments: operation.options,
+                    })(tx);
                     break;
                 default:
                     console.warn(`Unknown operation type: ${operation.type}`);

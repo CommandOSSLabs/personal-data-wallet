@@ -1,6 +1,6 @@
 {
   "name": "personal-data-wallet-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "TypeScript SDK for Personal Data Wallet - Decentralized memory system with AI embeddings, HNSW vector search, SEAL encryption and Walrus storage",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",

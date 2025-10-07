@@ -217,50 +217,81 @@ async function runMemoryWorkflowWithSeal() {
       console.log(`   Identity: ${encryptedData.identity}\n`);
     }
 
-    // Step 4.5: Register Content for SEAL Access Control (if using real SEAL)
+    // Step 4.5: Register Context Wallet and Content for SEAL Access Control (if using real SEAL)
     if (useRealSeal && encryptedData) {
-      console.log('📝 STEP 4.5: Register Content for Access Control');
-      console.log('------------------------------------------------');
-      
+      console.log('📝 STEP 4.5: Register Context Wallet and Content for Access Control');
+      console.log('----------------------------------------------------------------------');
+
       try {
-        console.log('🔄 Registering content ownership in AccessRegistry...');
-        
-        // Create transaction to register content
-        const tx = new Transaction();
-        tx.moveCall({
-          target: `${packageId}::seal_access_control::register_content`,
+        // Step 4.5a: Register context wallet first
+        console.log('🔄 Step 4.5a: Registering context wallet...');
+
+        const contextWalletTx = new Transaction();
+        contextWalletTx.moveCall({
+          target: `${packageId}::seal_access_control::register_context_wallet`,
           arguments: [
-            tx.object(process.env.ACCESS_REGISTRY_ID!),
-            tx.pure.string(userAddress), // Content ID = user address (identity used in SEAL)
-            tx.object('0x6') // Clock object
+            contextWalletTx.object(process.env.ACCESS_REGISTRY_ID!),
+            contextWalletTx.pure.address(userAddress), // Use main wallet as context wallet for testing
+            contextWalletTx.pure.u64(0), // Derivation index
+            contextWalletTx.pure.string('pdw-test'), // App hint
+            contextWalletTx.object('0x6') // Clock object
           ]
         });
-        
-        // Sign and execute transaction
-        const result = await suiClient.signAndExecuteTransaction({
-          transaction: tx,
+
+        const contextWalletResult = await suiClient.signAndExecuteTransaction({
+          transaction: contextWalletTx,
           signer: keypair,
           options: {
             showEffects: true,
             showEvents: true
           }
         });
-        
+
+        console.log(`✅ Context wallet registered:`);
+        console.log(`   Transaction: ${contextWalletResult.digest}`);
+        console.log(`   Context Wallet: ${userAddress}`);
+        console.log(`   Main Wallet: ${userAddress}`);
+        console.log(`   Status: ${contextWalletResult.effects?.status?.status}`);
+
+        // Step 4.5b: Register content to context wallet
+        console.log('🔄 Step 4.5b: Registering content to context wallet...');
+
+        const contentTx = new Transaction();
+        contentTx.moveCall({
+          target: `${packageId}::seal_access_control::register_content`,
+          arguments: [
+            contentTx.object(process.env.ACCESS_REGISTRY_ID!),
+            contentTx.pure.string(userAddress), // Content ID = user address (identity used in SEAL)
+            contentTx.pure.address(userAddress), // Context wallet (same as main for self-access)
+            contentTx.object('0x6') // Clock object
+          ]
+        });
+
+        const contentResult = await suiClient.signAndExecuteTransaction({
+          transaction: contentTx,
+          signer: keypair,
+          options: {
+            showEffects: true,
+            showEvents: true
+          }
+        });
+
         console.log(`✅ Content registered successfully:`);
-        console.log(`   Transaction: ${result.digest}`);
+        console.log(`   Transaction: ${contentResult.digest}`);
         console.log(`   Content ID: ${userAddress}`);
+        console.log(`   Context Wallet: ${userAddress}`);
         console.log(`   Owner: ${userAddress}`);
-        console.log(`   Status: ${result.effects?.status?.status}`);
-        
-        if (result.events && result.events.length > 0) {
-          console.log(`   Events emitted: ${result.events.length}`);
+        console.log(`   Status: ${contentResult.effects?.status?.status}`);
+
+        if (contentResult.events && contentResult.events.length > 0) {
+          console.log(`   Events emitted: ${contentResult.events.length}`);
         }
-        
+
       } catch (error) {
         console.log('⚠️  Content registration failed:', (error as Error).message);
-        console.log('   Note: Content may already be registered or transaction failed');
+        console.log('   Note: Wallet/content may already be registered, which is expected for repeated runs');
       }
-      
+
       console.log('');
     }
 
@@ -581,10 +612,19 @@ async function runMemoryWorkflowWithSeal() {
     if (useRealSeal && retrievedData.sealData) {
       try {
         console.log('🔄 Creating approval transaction for SEAL decryption...');
-        
+
         // Create the SEAL approval transaction bytes (not signed)
         const sealServiceRef = retrievedData.sealData.sealService;
-        const approvalTxBytes = await sealServiceRef.createSealApproveTransaction(userAddress, userAddress);
+
+        // ✅ FIX: Provide all required parameters
+        // - id: Content identifier (must match encryption ID - userAddress in this case)
+        // - userAddress: User's wallet address
+        // - requestingWallet: Wallet requesting access (same as user for self-access)
+        const approvalTxBytes = await sealServiceRef.createSealApproveTransaction(
+          userAddress,  // id: Content identifier (matches encryption)
+          userAddress,  // userAddress: User's wallet
+          userAddress   // requestingWallet: Wallet requesting access
+        );
         console.log(`✅ Created SEAL approval transaction bytes (${approvalTxBytes.length} bytes)`);
         
         console.log('🔄 Using approval transaction bytes for SEAL decryption...');

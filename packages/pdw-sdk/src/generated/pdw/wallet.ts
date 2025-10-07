@@ -17,7 +17,7 @@
 import { MoveStruct, normalizeMoveArguments, type RawTransactionArgument } from '../utils/index.js';
 import { bcs } from '@mysten/sui/bcs';
 import { type Transaction } from '@mysten/sui/transactions';
-import * as object from './deps/sui/object.js';
+import * as object from '~root/deps/sui/object.js';
 const $moduleName = '@local-pkg/pdw::wallet';
 export const MainWallet = new MoveStruct({ name: `${$moduleName}::MainWallet`, fields: {
         id: object.UID,

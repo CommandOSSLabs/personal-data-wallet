@@ -1,0 +1,1304 @@
+{
+  "id": {
+    "address": "pdw",
+    "name": "wallet"
+  },
+  "doc": " Wallet management module for Personal Data Wallet\n \n This module provides core wallet identity management including:\n - Main wallet creation and management\n - App-specific context wallet creation via dynamic fields\n - Deterministic context ID derivation for app isolation\n - Cross-context permissions (read-only, no delete)",
+  "immediate_dependencies": [
+    {
+      "address": "std",
+      "name": "option"
+    },
+    {
+      "address": "std",
+      "name": "string"
+    },
+    {
+      "address": "std",
+      "name": "vector"
+    },
+    {
+      "address": "sui",
+      "name": "bcs"
+    },
+    {
+      "address": "sui",
+      "name": "dynamic_object_field"
+    },
+    {
+      "address": "sui",
+      "name": "event"
+    },
+    {
+      "address": "sui",
+      "name": "hash"
+    },
+    {
+      "address": "sui",
+      "name": "object"
+    },
+    {
+      "address": "sui",
+      "name": "transfer"
+    },
+    {
+      "address": "sui",
+      "name": "tx_context"
+    }
+  ],
+  "attributes": [],
+  "functions": {
+    "init": {
+      "source_index": 0,
+      "index": 0,
+      "doc": " Initialize the wallet registry (called once during package deployment)",
+      "attributes": [],
+      "visibility": "Private",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "ctx",
+          "type_": {
+            "Reference": [
+              true,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "sui",
+                    "name": "tx_context"
+                  },
+                  "name": "TxContext",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": []
+    },
+    "create_main_wallet": {
+      "source_index": 1,
+      "index": 1,
+      "doc": " Create a new main wallet for a user\n Each user should call this once to establish their identity",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "ctx",
+          "type_": {
+            "Reference": [
+              true,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "sui",
+                    "name": "tx_context"
+                  },
+                  "name": "TxContext",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": [
+        {
+          "Datatype": {
+            "module": {
+              "address": "pdw",
+              "name": "wallet"
+            },
+            "name": "MainWallet",
+            "type_arguments": []
+          }
+        }
+      ]
+    },
+    "create_context_wallet": {
+      "source_index": 2,
+      "index": 2,
+      "doc": " Create a context wallet for a specific app (stores as dynamic field)\n This can be called by 3rd party apps to create their context\n Links to the user's main wallet for identity verification",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": true,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "main_wallet",
+          "type_": {
+            "Reference": [
+              true,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "MainWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "app_id",
+          "type_": {
+            "Datatype": {
+              "module": {
+                "address": "std",
+                "name": "string"
+              },
+              "name": "String",
+              "type_arguments": []
+            }
+          }
+        },
+        {
+          "name": "ctx",
+          "type_": {
+            "Reference": [
+              true,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "sui",
+                    "name": "tx_context"
+                  },
+                  "name": "TxContext",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": []
+    },
+    "get_context_wallet": {
+      "source_index": 3,
+      "index": 3,
+      "doc": " Get context wallet by app_id (returns reference)",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "main_wallet",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "MainWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "app_id",
+          "type_": {
+            "Datatype": {
+              "module": {
+                "address": "std",
+                "name": "string"
+              },
+              "name": "String",
+              "type_arguments": []
+            }
+          }
+        }
+      ],
+      "return_": [
+        {
+          "Reference": [
+            false,
+            {
+              "Datatype": {
+                "module": {
+                  "address": "pdw",
+                  "name": "wallet"
+                },
+                "name": "ContextWallet",
+                "type_arguments": []
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "get_context_wallet_mut": {
+      "source_index": 4,
+      "index": 4,
+      "doc": " Get mutable context wallet by app_id (for updates)",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "main_wallet",
+          "type_": {
+            "Reference": [
+              true,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "MainWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "app_id",
+          "type_": {
+            "Datatype": {
+              "module": {
+                "address": "std",
+                "name": "string"
+              },
+              "name": "String",
+              "type_arguments": []
+            }
+          }
+        },
+        {
+          "name": "ctx",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "sui",
+                    "name": "tx_context"
+                  },
+                  "name": "TxContext",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": [
+        {
+          "Reference": [
+            true,
+            {
+              "Datatype": {
+                "module": {
+                  "address": "pdw",
+                  "name": "wallet"
+                },
+                "name": "ContextWallet",
+                "type_arguments": []
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "context_exists": {
+      "source_index": 5,
+      "index": 5,
+      "doc": " Check if context wallet exists for app",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "main_wallet",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "MainWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "app_id",
+          "type_": {
+            "Datatype": {
+              "module": {
+                "address": "std",
+                "name": "string"
+              },
+              "name": "String",
+              "type_arguments": []
+            }
+          }
+        }
+      ],
+      "return_": [
+        "bool"
+      ]
+    },
+    "derive_context_id": {
+      "source_index": 6,
+      "index": 6,
+      "doc": " Derive a deterministic context ID for app isolation\n Uses: keccak256(owner_address || app_id || context_salt)\n Returns the hash bytes (not an address, used as identifier)",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "main_wallet",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "MainWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "app_id",
+          "type_": {
+            "Datatype": {
+              "module": {
+                "address": "std",
+                "name": "string"
+              },
+              "name": "String",
+              "type_arguments": []
+            }
+          }
+        }
+      ],
+      "return_": [
+        {
+          "vector": "u8"
+        }
+      ]
+    },
+    "compute_context_id": {
+      "source_index": 7,
+      "index": 7,
+      "doc": " Internal: Compute context ID hash",
+      "attributes": [],
+      "visibility": "Private",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "main_wallet",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "MainWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "app_id",
+          "type_": {
+            "Datatype": {
+              "module": {
+                "address": "std",
+                "name": "string"
+              },
+              "name": "String",
+              "type_arguments": []
+            }
+          }
+        }
+      ],
+      "return_": [
+        {
+          "vector": "u8"
+        }
+      ]
+    },
+    "set_policy_ref": {
+      "source_index": 8,
+      "index": 8,
+      "doc": " Update policy reference for a context wallet",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "context_wallet",
+          "type_": {
+            "Reference": [
+              true,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "ContextWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy_ref",
+          "type_": {
+            "Datatype": {
+              "module": {
+                "address": "std",
+                "name": "string"
+              },
+              "name": "String",
+              "type_arguments": []
+            }
+          }
+        },
+        {
+          "name": "ctx",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "sui",
+                    "name": "tx_context"
+                  },
+                  "name": "TxContext",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": []
+    },
+    "add_permission": {
+      "source_index": 9,
+      "index": 9,
+      "doc": " Add permission to context wallet",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "context_wallet",
+          "type_": {
+            "Reference": [
+              true,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "ContextWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "type_": {
+            "Datatype": {
+              "module": {
+                "address": "std",
+                "name": "string"
+              },
+              "name": "String",
+              "type_arguments": []
+            }
+          }
+        },
+        {
+          "name": "ctx",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "sui",
+                    "name": "tx_context"
+                  },
+                  "name": "TxContext",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": []
+    },
+    "generate_context_salt": {
+      "source_index": 10,
+      "index": 10,
+      "doc": " Generate context salt for deterministic context ID derivation",
+      "attributes": [],
+      "visibility": "Private",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "owner",
+          "type_": "address"
+        },
+        {
+          "name": "epoch",
+          "type_": "u64"
+        }
+      ],
+      "return_": [
+        {
+          "vector": "u8"
+        }
+      ]
+    },
+    "get_main_wallet_info": {
+      "source_index": 11,
+      "index": 11,
+      "doc": " Get main wallet details",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "wallet",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "MainWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": [
+        "address",
+        "address",
+        "u64",
+        "u64"
+      ]
+    },
+    "get_context_wallet_info": {
+      "source_index": 12,
+      "index": 12,
+      "doc": " Get context wallet details",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "wallet",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "ContextWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": [
+        "address",
+        {
+          "Datatype": {
+            "module": {
+              "address": "std",
+              "name": "string"
+            },
+            "name": "String",
+            "type_arguments": []
+          }
+        },
+        {
+          "vector": "u8"
+        },
+        "address",
+        "address",
+        "u64"
+      ]
+    },
+    "get_context_id": {
+      "source_index": 13,
+      "index": 13,
+      "doc": " Get context ID from context wallet",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "wallet",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "ContextWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": [
+        {
+          "vector": "u8"
+        }
+      ]
+    },
+    "has_permission": {
+      "source_index": 14,
+      "index": 14,
+      "doc": " Check if context wallet has specific permission",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "wallet",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "ContextWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "type_": {
+            "Datatype": {
+              "module": {
+                "address": "std",
+                "name": "string"
+              },
+              "name": "String",
+              "type_arguments": []
+            }
+          }
+        }
+      ],
+      "return_": [
+        "bool"
+      ]
+    },
+    "get_permissions": {
+      "source_index": 15,
+      "index": 15,
+      "doc": " Get all permissions for context wallet",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "wallet",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "ContextWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": [
+        {
+          "vector": {
+            "Datatype": {
+              "module": {
+                "address": "std",
+                "name": "string"
+              },
+              "name": "String",
+              "type_arguments": []
+            }
+          }
+        }
+      ]
+    },
+    "get_policy_ref": {
+      "source_index": 16,
+      "index": 16,
+      "doc": " Get policy reference",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "wallet",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "ContextWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": [
+        {
+          "Datatype": {
+            "module": {
+              "address": "std",
+              "name": "option"
+            },
+            "name": "Option",
+            "type_arguments": [
+              {
+                "phantom": false,
+                "argument": {
+                  "Datatype": {
+                    "module": {
+                      "address": "std",
+                      "name": "string"
+                    },
+                    "name": "String",
+                    "type_arguments": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "get_context_salt": {
+      "source_index": 17,
+      "index": 17,
+      "doc": " Get context salt from main wallet",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "wallet",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "MainWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": [
+        {
+          "vector": "u8"
+        }
+      ]
+    },
+    "log_context_access": {
+      "source_index": 18,
+      "index": 18,
+      "doc": " Log context access (for audit trail)\n Can be called by apps when they access context data",
+      "attributes": [],
+      "visibility": "Public",
+      "entry": false,
+      "type_parameters": [],
+      "parameters": [
+        {
+          "name": "context_wallet",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "pdw",
+                    "name": "wallet"
+                  },
+                  "name": "ContextWallet",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "operation",
+          "type_": {
+            "Datatype": {
+              "module": {
+                "address": "std",
+                "name": "string"
+              },
+              "name": "String",
+              "type_arguments": []
+            }
+          }
+        },
+        {
+          "name": "ctx",
+          "type_": {
+            "Reference": [
+              false,
+              {
+                "Datatype": {
+                  "module": {
+                    "address": "sui",
+                    "name": "tx_context"
+                  },
+                  "name": "TxContext",
+                  "type_arguments": []
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "return_": []
+    }
+  },
+  "structs": {
+    "MainWallet": {
+      "index": 0,
+      "doc": " Main wallet identity for users\n Each user should have exactly one MainWallet",
+      "attributes": [],
+      "abilities": [
+        "Key",
+        "Store"
+      ],
+      "type_parameters": [],
+      "fields": {
+        "positional_fields": false,
+        "fields": {
+          "id": {
+            "index": 0,
+            "doc": null,
+            "type_": {
+              "Datatype": {
+                "module": {
+                  "address": "sui",
+                  "name": "object"
+                },
+                "name": "UID",
+                "type_arguments": []
+              }
+            }
+          },
+          "owner": {
+            "index": 1,
+            "doc": null,
+            "type_": "address"
+          },
+          "created_at": {
+            "index": 2,
+            "doc": null,
+            "type_": "u64"
+          },
+          "context_salt": {
+            "index": 3,
+            "doc": null,
+            "type_": {
+              "vector": "u8"
+            }
+          },
+          "version": {
+            "index": 4,
+            "doc": null,
+            "type_": "u64"
+          }
+        }
+      }
+    },
+    "ContextWallet": {
+      "index": 1,
+      "doc": " App-specific context wallet\n Users can have multiple ContextWallets for different apps\n Stored as dynamic fields on MainWallet for easy lookup",
+      "attributes": [],
+      "abilities": [
+        "Key",
+        "Store"
+      ],
+      "type_parameters": [],
+      "fields": {
+        "positional_fields": false,
+        "fields": {
+          "id": {
+            "index": 0,
+            "doc": null,
+            "type_": {
+              "Datatype": {
+                "module": {
+                  "address": "sui",
+                  "name": "object"
+                },
+                "name": "UID",
+                "type_arguments": []
+              }
+            }
+          },
+          "app_id": {
+            "index": 1,
+            "doc": null,
+            "type_": {
+              "Datatype": {
+                "module": {
+                  "address": "std",
+                  "name": "string"
+                },
+                "name": "String",
+                "type_arguments": []
+              }
+            }
+          },
+          "owner": {
+            "index": 2,
+            "doc": null,
+            "type_": "address"
+          },
+          "context_id": {
+            "index": 3,
+            "doc": null,
+            "type_": {
+              "vector": "u8"
+            }
+          },
+          "main_wallet_id": {
+            "index": 4,
+            "doc": null,
+            "type_": "address"
+          },
+          "policy_ref": {
+            "index": 5,
+            "doc": null,
+            "type_": {
+              "Datatype": {
+                "module": {
+                  "address": "std",
+                  "name": "option"
+                },
+                "name": "Option",
+                "type_arguments": [
+                  {
+                    "phantom": false,
+                    "argument": {
+                      "Datatype": {
+                        "module": {
+                          "address": "std",
+                          "name": "string"
+                        },
+                        "name": "String",
+                        "type_arguments": []
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "created_at": {
+            "index": 6,
+            "doc": null,
+            "type_": "u64"
+          },
+          "permissions": {
+            "index": 7,
+            "doc": null,
+            "type_": {
+              "vector": {
+                "Datatype": {
+                  "module": {
+                    "address": "std",
+                    "name": "string"
+                  },
+                  "name": "String",
+                  "type_arguments": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "WalletRegistry": {
+      "index": 2,
+      "doc": " Registry to track main wallets by owner",
+      "attributes": [],
+      "abilities": [
+        "Key"
+      ],
+      "type_parameters": [],
+      "fields": {
+        "positional_fields": false,
+        "fields": {
+          "id": {
+            "index": 0,
+            "doc": null,
+            "type_": {
+              "Datatype": {
+                "module": {
+                  "address": "sui",
+                  "name": "object"
+                },
+                "name": "UID",
+                "type_arguments": []
+              }
+            }
+          },
+          "wallets": {
+            "index": 1,
+            "doc": null,
+            "type_": {
+              "vector": "address"
+            }
+          }
+        }
+      }
+    },
+    "MainWalletCreated": {
+      "index": 3,
+      "doc": " Events",
+      "attributes": [],
+      "abilities": [
+        "Copy",
+        "Drop"
+      ],
+      "type_parameters": [],
+      "fields": {
+        "positional_fields": false,
+        "fields": {
+          "wallet_id": {
+            "index": 0,
+            "doc": null,
+            "type_": "address"
+          },
+          "owner": {
+            "index": 1,
+            "doc": null,
+            "type_": "address"
+          },
+          "created_at": {
+            "index": 2,
+            "doc": null,
+            "type_": "u64"
+          }
+        }
+      }
+    },
+    "ContextWalletCreated": {
+      "index": 4,
+      "doc": null,
+      "attributes": [],
+      "abilities": [
+        "Copy",
+        "Drop"
+      ],
+      "type_parameters": [],
+      "fields": {
+        "positional_fields": false,
+        "fields": {
+          "wallet_id": {
+            "index": 0,
+            "doc": null,
+            "type_": "address"
+          },
+          "app_id": {
+            "index": 1,
+            "doc": null,
+            "type_": {
+              "Datatype": {
+                "module": {
+                  "address": "std",
+                  "name": "string"
+                },
+                "name": "String",
+                "type_arguments": []
+              }
+            }
+          },
+          "context_id": {
+            "index": 2,
+            "doc": null,
+            "type_": {
+              "vector": "u8"
+            }
+          },
+          "owner": {
+            "index": 3,
+            "doc": null,
+            "type_": "address"
+          },
+          "main_wallet_id": {
+            "index": 4,
+            "doc": null,
+            "type_": "address"
+          },
+          "created_at": {
+            "index": 5,
+            "doc": null,
+            "type_": "u64"
+          }
+        }
+      }
+    },
+    "ContextWalletAccessed": {
+      "index": 5,
+      "doc": null,
+      "attributes": [],
+      "abilities": [
+        "Copy",
+        "Drop"
+      ],
+      "type_parameters": [],
+      "fields": {
+        "positional_fields": false,
+        "fields": {
+          "context_id": {
+            "index": 0,
+            "doc": null,
+            "type_": {
+              "vector": "u8"
+            }
+          },
+          "app_id": {
+            "index": 1,
+            "doc": null,
+            "type_": {
+              "Datatype": {
+                "module": {
+                  "address": "std",
+                  "name": "string"
+                },
+                "name": "String",
+                "type_arguments": []
+              }
+            }
+          },
+          "accessed_by": {
+            "index": 2,
+            "doc": null,
+            "type_": "address"
+          },
+          "operation": {
+            "index": 3,
+            "doc": null,
+            "type_": {
+              "Datatype": {
+                "module": {
+                  "address": "std",
+                  "name": "string"
+                },
+                "name": "String",
+                "type_arguments": []
+              }
+            }
+          },
+          "timestamp": {
+            "index": 4,
+            "doc": null,
+            "type_": "u64"
+          }
+        }
+      }
+    }
+  },
+  "enums": {}
+}
