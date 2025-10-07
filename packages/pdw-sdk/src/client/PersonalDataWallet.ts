@@ -7,7 +7,7 @@
 
 import type { ClientWithCoreApi, PDWConfig } from '../types';
 import { MemoryService } from '../services/MemoryService';
-import { ChatService } from '../chat/ChatService';
+import { ChatService } from '../services/ChatService';
 import { StorageService } from '../services/StorageService';
 import { EncryptionService } from '../services/EncryptionService';
 import { TransactionService } from '../services/TransactionService';
