@@ -129,7 +129,7 @@ export function CreateMemory() {
 
     // Create SEAL client
     const sealClient = new SealClient({
-      suiClient: client,
+      suiClient: client as any,
       serverConfigs: serverObjectIds.map((id) => ({
         objectId: id,
         weight: 1,
@@ -162,7 +162,7 @@ export function CreateMemory() {
     }
 
     return encryptedBytes;
-t  };
+  };
 
   // Upload single blob to Walrus
   const uploadToWalrus = async (data: Uint8Array): Promise<string> => {

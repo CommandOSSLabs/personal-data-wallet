@@ -22,7 +22,6 @@ export async function POST(request: NextRequest) {
 
     // Use Gemini to analyze the content
     const genAI = new GoogleGenAI({ apiKey });
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
 
     const prompt = `Analyze the following text and provide:
 1. Category: Choose ONE from these categories: ${categories.join(', ')}
@@ -37,9 +36,11 @@ Respond in this exact JSON format:
   "reason": "brief explanation"
 }`;
 
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    const responseText = response.text().trim();
+    const result = await genAI.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt
+    });
+    const responseText = (result.text || result.toString()).trim();
 
     // Parse JSON response
     let analysis;

@@ -59,7 +59,7 @@ export function RetrieveMemory() {
       ];
 
       const sealClient = new SealClient({
-        suiClient: client,
+        suiClient: client as any,
         serverConfigs: serverObjectIds.map((id) => ({ objectId: id, weight: 1 })),
         verifyKeyServers: false,
       });
@@ -71,7 +71,7 @@ export function RetrieveMemory() {
         address: account.address,
         packageId: pdwPackageId,
         ttlMin: 10,
-        suiClient: client,
+        suiClient: client as any,
       });
       console.log('✅ Session key created');
 

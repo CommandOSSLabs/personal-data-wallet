@@ -53,7 +53,7 @@ export function MemoryList() {
     ];
 
     sharedSealClient = new SealClient({
-      suiClient: client,
+      suiClient: client as any,
       serverConfigs: serverObjectIds.map((id) => ({ objectId: id, weight: 1 })),
       verifyKeyServers: false,
     });
@@ -63,7 +63,7 @@ export function MemoryList() {
       address: account.address,
       packageId: pdwPackageId,
       ttlMin: 10,
-      suiClient: client,
+      suiClient: client as any,
     });
 
     // Sign personal message ONCE
