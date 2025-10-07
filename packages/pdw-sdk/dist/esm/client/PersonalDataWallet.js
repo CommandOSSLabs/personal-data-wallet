@@ -16,11 +16,11 @@ var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (
     return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
 };
 var _PersonalDataWallet_client, _PersonalDataWallet_config, _PersonalDataWallet_apiClient, _PersonalDataWallet_transactions, _PersonalDataWallet_view, _PersonalDataWallet_memory, _PersonalDataWallet_chat, _PersonalDataWallet_storage, _PersonalDataWallet_encryption, _PersonalDataWallet_mainWallet, _PersonalDataWallet_contextWallet, _PersonalDataWallet_permission, _PersonalDataWallet_aggregation;
-import { MemoryService } from '../memory/MemoryService';
-import { ChatService } from '../chat/ChatService';
+import { MemoryService } from '../services/MemoryService';
+import { ChatService } from '../services/ChatService';
 import { StorageService } from '../services/StorageService';
-import { EncryptionService } from '../encryption/EncryptionService';
-import { TransactionService } from '../transactions/TransactionService';
+import { EncryptionService } from '../services/EncryptionService';
+import { TransactionService } from '../services/TransactionService';
 import { ViewService } from '../view/ViewService';
 import { MainWalletService } from '../wallet/MainWalletService';
 import { ContextWalletService } from '../wallet/ContextWalletService';

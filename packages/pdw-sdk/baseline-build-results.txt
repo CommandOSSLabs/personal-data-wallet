@@ -1,0 +1,44 @@
+
+> personal-data-wallet-sdk@0.1.0 build
+> npm run codegen && npm run build:ts
+
+
+> personal-data-wallet-sdk@0.1.0 codegen
+> sui-ts-codegen generate && node scripts/fix-codegen-paths.js
+
+[note] Dependencies on Bridge, MoveStdlib, Sui, and SuiSystem are automatically added, but this feature is disabled for your package because you have explicitly included dependencies on Sui. Consider removing these dependencies from Move.toml.
+UPDATING GIT DEPENDENCY https://github.com/MystenLabs/sui.git
+From https://github.com/MystenLabs/sui
+   7ca340637..6a4995a41  bella-ciao                -> origin/bella-ciao
+ + 95163fe2a...012aa32cb mlogan-ab-api             -> origin/mlogan-ab-api  (forced update)
+ * [new tag]             sui_v1.59.0_1759808595_ci -> sui_v1.59.0_1759808595_ci
+Failed to resolve dependencies for package 'PDW'
+
+Caused by:
+    0: Fetching 'Sui'
+    1: Failed to reset to latest Git state 'framework/testnet' for package 'Sui', to skip set --skip-fetch-latest-git-deps | Exit status: exit code: 128
+Command failed, Error: Command failed: sui move summary
+    at genericNodeError (node:internal/errors:983:15)
+    at wrappedFn (node:internal/errors:537:14)
+    at checkExecSyncError (node:child_process:882:11)
+    at execSync (node:child_process:954:15)
+    at Object.generate (C:\Users\DrBrand\project\CommandOSS\personal_data_wallet\packages\pdw-sdk\node_modules\@mysten\codegen\dist\cjs\cli\commands\generate\impl.js:53:52)
+    at async Ee (C:\Users\DrBrand\project\CommandOSS\personal_data_wallet\packages\pdw-sdk\node_modules\@stricli\core\dist\index.cjs:7:33)
+    at async Cn (C:\Users\DrBrand\project\CommandOSS\personal_data_wallet\packages\pdw-sdk\node_modules\@stricli\core\dist\index.cjs:23:672)
+    at async main (C:\Users\DrBrand\project\CommandOSS\personal_data_wallet\packages\pdw-sdk\node_modules\@mysten\codegen\dist\cjs\bin\cli.js:25:3)
+🔧 Fixing Windows path separators in generated files...
+  ⚪ No changes needed: src\generated\pdw\deps\sui\object.ts
+  ⚪ No changes needed: src\generated\pdw\deps\sui\table.ts
+  ⚪ No changes needed: src\generated\pdw\deps\sui\vec_map.ts
+  ⚪ No changes needed: src\generated\pdw\memory.ts
+  ⚪ No changes needed: src\generated\pdw\seal_access_control.ts
+  ⚪ No changes needed: src\generated\pdw\wallet.ts
+  ⚪ No changes needed: src\generated\utils\index.ts
+
+🎉 Fixed 0 files with Windows path separator issues
+
+⚪ No fixes needed
+
+> personal-data-wallet-sdk@0.1.0 build:ts
+> tsc && tsc -p tsconfig.esm.json
+

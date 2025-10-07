@@ -3,8 +3,8 @@
  **************************************************************/
 import { MoveStruct, normalizeMoveArguments } from '../utils/index.js';
 import { bcs } from '@mysten/sui/bcs';
-import * as object from '~root/deps/sui/object.js';
-import * as table from '~root/deps/sui/table.js';
+import * as object from './deps/sui/object.js';
+import * as table from './deps/sui/table.js';
 const $moduleName = '@local-pkg/pdw::seal_access_control';
 export const RegistryCreated = new MoveStruct({ name: `${$moduleName}::RegistryCreated`, fields: {
         registry_id: bcs.Address,

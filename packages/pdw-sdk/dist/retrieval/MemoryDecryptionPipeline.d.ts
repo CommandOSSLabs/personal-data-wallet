@@ -14,7 +14,7 @@
  * - 🌍 Environment-based configuration
  */
 import { SessionKey } from '@mysten/seal';
-import { EncryptionService } from '../encryption/EncryptionService';
+import { EncryptionService } from '../services/EncryptionService';
 import { StorageManager } from '../storage/StorageManager';
 import { UnifiedMemoryResult } from '../retrieval/MemoryRetrievalService';
 export interface KeyServerConfig {

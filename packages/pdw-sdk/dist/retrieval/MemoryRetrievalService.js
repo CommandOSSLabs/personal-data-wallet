@@ -22,7 +22,7 @@ const VectorManager_1 = require("../vector/VectorManager");
 const KnowledgeGraphManager_1 = require("../graph/KnowledgeGraphManager");
 const StorageManager_1 = require("../storage/StorageManager");
 const BlockchainManager_1 = require("../blockchain/BlockchainManager");
-const EncryptionService_1 = require("../encryption/EncryptionService");
+const EncryptionService_1 = require("../services/EncryptionService");
 const BatchManager_1 = require("../batch/BatchManager");
 const MemoryDecryptionPipeline_1 = require("./MemoryDecryptionPipeline");
 /**

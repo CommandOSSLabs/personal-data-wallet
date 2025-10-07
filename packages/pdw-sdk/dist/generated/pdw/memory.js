@@ -61,8 +61,8 @@ exports.getCustomMetadata = getCustomMetadata;
  **************************************************************/
 const index_js_1 = require("../utils/index.js");
 const bcs_1 = require("@mysten/sui/bcs");
-const vec_map = __importStar(require("~root/deps/sui/vec_map.js"));
-const object = __importStar(require("~root/deps/sui/object.js"));
+const vec_map = __importStar(require("./deps/sui/vec_map.js"));
+const object = __importStar(require("./deps/sui/object.js"));
 const $moduleName = '@local-pkg/pdw::memory';
 exports.MemoryCreated = new index_js_1.MoveStruct({ name: `${$moduleName}::MemoryCreated`, fields: {
         id: bcs_1.bcs.Address,

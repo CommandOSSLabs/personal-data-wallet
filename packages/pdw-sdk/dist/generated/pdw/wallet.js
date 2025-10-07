@@ -65,7 +65,7 @@ exports.logContextAccess = logContextAccess;
  */
 const index_js_1 = require("../utils/index.js");
 const bcs_1 = require("@mysten/sui/bcs");
-const object = __importStar(require("~root/deps/sui/object.js"));
+const object = __importStar(require("./deps/sui/object.js"));
 const $moduleName = '@local-pkg/pdw::wallet';
 exports.MainWallet = new index_js_1.MoveStruct({ name: `${$moduleName}::MainWallet`, fields: {
         id: object.UID,

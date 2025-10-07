@@ -11,7 +11,6 @@ export { MemoryIndexService } from './MemoryIndexService';
 export { QueryService } from './QueryService';
 export { ClassifierService } from './ClassifierService';
 export { CrossContextPermissionService } from './CrossContextPermissionService';
-export { WalletManagementService } from './WalletManagementService';
 export { GraphService, KnowledgeGraphManager } from '../graph';
 export { GeminiAIService } from './GeminiAIService';
 export { StorageService } from './StorageService';

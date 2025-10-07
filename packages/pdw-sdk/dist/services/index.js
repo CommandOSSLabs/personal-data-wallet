@@ -6,7 +6,7 @@
  * following clean architecture principles and consistent naming.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TransactionService = exports.ViewService = exports.EncryptionService = exports.StorageService = exports.GeminiAIService = exports.KnowledgeGraphManager = exports.GraphService = exports.WalletManagementService = exports.CrossContextPermissionService = exports.ClassifierService = exports.QueryService = exports.MemoryIndexService = exports.VectorService = exports.BatchService = exports.MemoryService = void 0;
+exports.TransactionService = exports.ViewService = exports.EncryptionService = exports.StorageService = exports.GeminiAIService = exports.KnowledgeGraphManager = exports.GraphService = exports.CrossContextPermissionService = exports.ClassifierService = exports.QueryService = exports.MemoryIndexService = exports.VectorService = exports.BatchService = exports.MemoryService = void 0;
 // Core Services (Consolidated - No Duplicates)
 var MemoryService_1 = require("./MemoryService");
 Object.defineProperty(exports, "MemoryService", { enumerable: true, get: function () { return MemoryService_1.MemoryService; } });
@@ -24,8 +24,6 @@ Object.defineProperty(exports, "ClassifierService", { enumerable: true, get: fun
 // Cross-Context Permission Services (OAuth-style app permissions)
 var CrossContextPermissionService_1 = require("./CrossContextPermissionService");
 Object.defineProperty(exports, "CrossContextPermissionService", { enumerable: true, get: function () { return CrossContextPermissionService_1.CrossContextPermissionService; } });
-var WalletManagementService_1 = require("./WalletManagementService");
-Object.defineProperty(exports, "WalletManagementService", { enumerable: true, get: function () { return WalletManagementService_1.WalletManagementService; } });
 // Graph Services (Knowledge Graph and Entity Management)
 var graph_1 = require("../graph");
 Object.defineProperty(exports, "GraphService", { enumerable: true, get: function () { return graph_1.GraphService; } });

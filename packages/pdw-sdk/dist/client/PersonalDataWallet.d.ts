@@ -5,11 +5,11 @@
  * Provides a composable API for memory management, chat, storage, and encryption.
  */
 import type { ClientWithCoreApi, PDWConfig } from '../types';
-import { MemoryService } from '../memory/MemoryService';
-import { ChatService } from '../chat/ChatService';
+import { MemoryService } from '../services/MemoryService';
+import { ChatService } from '../services/ChatService';
 import { StorageService } from '../services/StorageService';
-import { EncryptionService } from '../encryption/EncryptionService';
-import { TransactionService } from '../transactions/TransactionService';
+import { EncryptionService } from '../services/EncryptionService';
+import { TransactionService } from '../services/TransactionService';
 import { ViewService } from '../view/ViewService';
 import { MainWalletService } from '../wallet/MainWalletService';
 import { ContextWalletService } from '../wallet/ContextWalletService';

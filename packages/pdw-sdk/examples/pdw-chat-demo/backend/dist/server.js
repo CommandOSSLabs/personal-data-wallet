@@ -147,8 +147,8 @@ async function bootstrap() {
     });
     app.use('/chat', createChatRouter(chatService));
     app.use('/pdw/consents', createConsentRouter(pdw, consentRepository));
-    app.listen(config.port, () => {
-        console.log(`PDW chat backend listening on http://localhost:${config.port}`);
+    app.listen(config.port, '0.0.0.0', () => {
+        console.log(`PDW chat backend listening on http://0.0.0.0:${config.port}`);
     });
 }
 bootstrap().catch((error) => {

@@ -19,11 +19,11 @@ var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (
 var _PersonalDataWallet_client, _PersonalDataWallet_config, _PersonalDataWallet_apiClient, _PersonalDataWallet_transactions, _PersonalDataWallet_view, _PersonalDataWallet_memory, _PersonalDataWallet_chat, _PersonalDataWallet_storage, _PersonalDataWallet_encryption, _PersonalDataWallet_mainWallet, _PersonalDataWallet_contextWallet, _PersonalDataWallet_permission, _PersonalDataWallet_aggregation;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PersonalDataWallet = void 0;
-const MemoryService_1 = require("../memory/MemoryService");
-const ChatService_1 = require("../chat/ChatService");
+const MemoryService_1 = require("../services/MemoryService");
+const ChatService_1 = require("../services/ChatService");
 const StorageService_1 = require("../services/StorageService");
-const EncryptionService_1 = require("../encryption/EncryptionService");
-const TransactionService_1 = require("../transactions/TransactionService");
+const EncryptionService_1 = require("../services/EncryptionService");
+const TransactionService_1 = require("../services/TransactionService");
 const ViewService_1 = require("../view/ViewService");
 const MainWalletService_1 = require("../wallet/MainWalletService");
 const ContextWalletService_1 = require("../wallet/ContextWalletService");

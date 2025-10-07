@@ -54,8 +54,8 @@ exports.cleanupExpiredPermission = cleanupExpiredPermission;
  **************************************************************/
 const index_js_1 = require("../utils/index.js");
 const bcs_1 = require("@mysten/sui/bcs");
-const object = __importStar(require("~root/deps/sui/object.js"));
-const table = __importStar(require("~root/deps/sui/table.js"));
+const object = __importStar(require("./deps/sui/object.js"));
+const table = __importStar(require("./deps/sui/table.js"));
 const $moduleName = '@local-pkg/pdw::seal_access_control';
 exports.RegistryCreated = new index_js_1.MoveStruct({ name: `${$moduleName}::RegistryCreated`, fields: {
         registry_id: bcs_1.bcs.Address,

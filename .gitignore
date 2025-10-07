@@ -50,6 +50,9 @@ backend/dist
 
 # Walrus executable
 walrus.exe
+.walrus
+
 
 #Ignore vscode AI rules
 .github\instructions\codacy.instructions.md
+.codacy

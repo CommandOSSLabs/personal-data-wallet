@@ -19,7 +19,7 @@ import { VectorManager } from '../vector/VectorManager';
 import { KnowledgeGraphManager } from '../graph/KnowledgeGraphManager';
 import { StorageManager } from '../storage/StorageManager';
 import { BlockchainManager } from '../blockchain/BlockchainManager';
-import { EncryptionService } from '../encryption/EncryptionService';
+import { EncryptionService } from '../services/EncryptionService';
 import { BatchManager } from '../batch/BatchManager';
 import { DecryptionConfig } from './MemoryDecryptionPipeline';
 export interface UnifiedMemoryQuery {
