@@ -1,22 +1,16 @@
 /**
  * Storage Module - DEPRECATED
  *
- * ⚠️ DEPRECATION NOTICE:
- * This directory is being phased out. Use services/StorageService instead.
+ * @deprecated Import from '@personal-data-wallet/sdk/infrastructure/walrus' instead
+ * This file now re-exports from the infrastructure module for backward compatibility.
  *
- * Migration Guide:
- * - WalrusStorageService → services/StorageService
- * - StorageManager → services/StorageService
- * - StorageService (legacy) → services/StorageService
- *
- * These exports are maintained for backward compatibility during Phase 1A refactoring.
+ * Migration guide:
+ * - Old: import { WalrusStorageService } from '@personal-data-wallet/sdk/storage'
+ * - New: import { WalrusStorageService } from '@personal-data-wallet/sdk/infrastructure/walrus'
  */
+export { WalrusStorageService, StorageManager } from '../infrastructure/walrus';
 export { StorageService } from '../services/StorageService';
-/** @deprecated Use services/StorageService instead. Will be removed in Phase 1B. */
-export { WalrusStorageService } from './WalrusStorageService';
-/** @deprecated Use services/StorageService instead. Will be removed in Phase 1B. */
-export { StorageManager } from './StorageManager';
-export type { WalrusConfig, MemoryMetadata, WalrusUploadResult, WalrusRetrievalResult, BlobInfo, WalrusStats } from './WalrusStorageService';
-export type { StorageManagerConfig, StorageResult, RetrievalOptions, StorageBatchOperation, StorageBatchResult, StorageStats } from './StorageManager';
+export type { WalrusConfig, MemoryMetadata, WalrusUploadResult, WalrusRetrievalResult, BlobInfo, WalrusStats } from '../infrastructure/walrus/WalrusStorageService';
+export type { StorageManagerConfig, StorageResult, RetrievalOptions, StorageBatchOperation, StorageBatchResult, StorageStats } from '../infrastructure/walrus/StorageManager';
 export type { StorageServiceConfig, BlobUploadOptions, FileUploadOptions } from '../services/StorageService';
 //# sourceMappingURL=index.d.ts.map

@@ -1,13 +1,18 @@
 /**
- * Blockchain Module
- * 
- * Comprehensive Sui blockchain integration for memory ownership records,
- * transaction batching, and decentralized metadata management.
+ * Blockchain Module - DEPRECATED
+ *
+ * @deprecated Import from '@personal-data-wallet/sdk/infrastructure/sui' instead
+ * This file now re-exports from the infrastructure module for backward compatibility.
+ *
+ * Migration guide:
+ * - Old: import { SuiService } from '@personal-data-wallet/sdk/blockchain'
+ * - New: import { SuiService } from '@personal-data-wallet/sdk/infrastructure/sui'
  */
 
-export { SuiService } from './SuiService';
-export { BlockchainManager } from './BlockchainManager';
+// Re-export from infrastructure for backward compatibility
+export { SuiService, BlockchainManager } from '../infrastructure/sui';
 
+// Re-export types from infrastructure
 export type {
   SuiConfig,
   MemoryRecord,
@@ -16,7 +21,7 @@ export type {
   TransactionResult,
   BatchTransaction,
   SuiStats
-} from './SuiService';
+} from '../infrastructure/sui/SuiService';
 
 export type {
   BlockchainManagerConfig,
@@ -25,4 +30,4 @@ export type {
   BlockchainOperation,
   OwnershipVerification,
   BlockchainStats
-} from './BlockchainManager';
+} from '../infrastructure/sui/BlockchainManager';

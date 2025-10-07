@@ -1,14 +1,18 @@
 "use strict";
 /**
- * Blockchain Module
+ * Blockchain Module - DEPRECATED
  *
- * Comprehensive Sui blockchain integration for memory ownership records,
- * transaction batching, and decentralized metadata management.
+ * @deprecated Import from '@personal-data-wallet/sdk/infrastructure/sui' instead
+ * This file now re-exports from the infrastructure module for backward compatibility.
+ *
+ * Migration guide:
+ * - Old: import { SuiService } from '@personal-data-wallet/sdk/blockchain'
+ * - New: import { SuiService } from '@personal-data-wallet/sdk/infrastructure/sui'
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BlockchainManager = exports.SuiService = void 0;
-var SuiService_1 = require("./SuiService");
-Object.defineProperty(exports, "SuiService", { enumerable: true, get: function () { return SuiService_1.SuiService; } });
-var BlockchainManager_1 = require("./BlockchainManager");
-Object.defineProperty(exports, "BlockchainManager", { enumerable: true, get: function () { return BlockchainManager_1.BlockchainManager; } });
+// Re-export from infrastructure for backward compatibility
+var sui_1 = require("../infrastructure/sui");
+Object.defineProperty(exports, "SuiService", { enumerable: true, get: function () { return sui_1.SuiService; } });
+Object.defineProperty(exports, "BlockchainManager", { enumerable: true, get: function () { return sui_1.BlockchainManager; } });
 //# sourceMappingURL=index.js.map
