@@ -145,6 +145,6 @@ export { PermissionService } from './access/PermissionService';
 export type { ConsentRepository } from './permissions/ConsentRepository';
 export { FileSystemConsentRepository, InMemoryConsentRepository } from './permissions/ConsentRepository';
 export { AggregationService } from './aggregation/AggregationService';
-export type { MainWallet, ContextWallet, ConsentRequest, ConsentRequestRecord, ConsentStatus, AccessGrant, CreateMainWalletOptions, CreateContextWalletOptions, DeriveContextIdOptions, RotateKeysOptions, RotateKeysResult, PermissionScope, RequestConsentOptions, GrantPermissionsOptions, RevokePermissionsOptions, AggregatedQueryOptions, PermissionScopes } from './types/wallet';
+export type { MainWallet, ContextWallet, ConsentRequest, ConsentRequestRecord, ConsentStatus, AccessGrant, CreateMainWalletOptions, CreateContextWalletOptions, DeriveContextIdOptions, RotateKeysOptions, RotateKeysResult, PermissionScope, RequestConsentOptions, GrantPermissionsOptions, RevokePermissionsOptions, AggregatedQueryOptions, PermissionScopes } from './core/types/wallet';
 export declare const VERSION = "1.0.0";
 //# sourceMappingURL=index.d.ts.map

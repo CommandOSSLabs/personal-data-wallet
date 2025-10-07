@@ -363,7 +363,7 @@ export type {
   RevokePermissionsOptions,
   AggregatedQueryOptions,
   PermissionScopes
-} from './types/wallet';
+} from './core/types/wallet';
 
 // Legacy version for compatibility
 export const VERSION = '1.0.0';

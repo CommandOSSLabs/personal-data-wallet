@@ -2,29 +2,28 @@
 /**
  * Wallet Architecture Types for Personal Data Wallet SDK
  *
- * Defines the TypeScript interfaces for the wallet system including:
- * - Main wallet (per user identity)
- * - Context wallets (per app per user)
- * - Access control and permissions
- * - Cross-app consent and grants
+ * @deprecated This module is deprecated. Import from '@personal-data-wallet/sdk/core/types/wallet' instead.
+ * This file now re-exports from the core module for backward compatibility.
+ *
+ * Migration guide:
+ * - Old: import { MainWallet } from '@personal-data-wallet/sdk/types/wallet'
+ * - New: import { MainWallet } from '@personal-data-wallet/sdk/core/types/wallet'
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PermissionScopes = void 0;
-/**
- * Permission scope constants for OAuth-style access control
- */
-exports.PermissionScopes = {
-    /** Can decrypt and read user's memory data */
-    READ_MEMORIES: 'read:memories',
-    /** Can create/modify memory entries */
-    WRITE_MEMORIES: 'write:memories',
-    /** Can access user settings/preferences */
-    READ_PREFERENCES: 'read:preferences',
-    /** Can modify user settings */
-    WRITE_PREFERENCES: 'write:preferences',
-    /** Can list user's app contexts */
-    READ_CONTEXTS: 'read:contexts',
-    /** Can create new contexts for user */
-    WRITE_CONTEXTS: 'write:contexts',
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
+Object.defineProperty(exports, "__esModule", { value: true });
+// Re-export all wallet types from core for backward compatibility
+__exportStar(require("../core/types/wallet"), exports);
 //# sourceMappingURL=wallet.js.map
