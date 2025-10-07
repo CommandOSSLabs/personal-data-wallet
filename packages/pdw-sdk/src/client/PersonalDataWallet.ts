@@ -10,7 +10,7 @@ import { MemoryService } from '../services/MemoryService';
 import { ChatService } from '../chat/ChatService';
 import { StorageService } from '../services/StorageService';
 import { EncryptionService } from '../services/EncryptionService';
-import { TransactionService } from '../transactions/TransactionService';
+import { TransactionService } from '../services/TransactionService';
 import { ViewService } from '../view/ViewService';
 import { MainWalletService } from '../wallet/MainWalletService';
 import { ContextWalletService } from '../wallet/ContextWalletService';
