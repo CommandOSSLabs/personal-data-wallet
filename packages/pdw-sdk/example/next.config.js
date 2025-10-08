@@ -1,6 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  experimental: {
+    serverComponentsExternalPackages: ['@mysten/walrus', '@mysten/walrus-wasm'],
+  },
+  generateBuildId: async () => {
+    return 'build-' + Date.now();
+  },
   webpack: (config, { isServer }) => {
     config.externals.push('pino-pretty', 'encoding');
 

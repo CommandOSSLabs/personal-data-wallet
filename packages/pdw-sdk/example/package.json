@@ -16,6 +16,7 @@
     "@mysten/walrus": "^0.7.1",
     "@tanstack/react-query": "^5.90.2",
     "buffer": "^6.0.3",
+    "claude": "^0.1.2",
     "next": "14.2.5",
     "personal-data-wallet-sdk": "file:..",
     "react": "^18.3.1",
