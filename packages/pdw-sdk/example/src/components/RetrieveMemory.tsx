@@ -1,10 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useCurrentAccount, useSuiClient, useSignPersonalMessage } from '@mysten/dapp-kit';
-import { Transaction } from '@mysten/sui/transactions';
-import { SealClient, SessionKey } from '@mysten/seal';
-import { fromHex, toHex } from '@mysten/sui/utils';
+import { ClientMemoryManager } from 'personal-data-wallet-sdk/dist/client/ClientMemoryManager';
 
 export function RetrieveMemory() {
   const account = useCurrentAccount();
@@ -16,115 +14,15 @@ export function RetrieveMemory() {
   const [status, setStatus] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const walrusAggregator = process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR || '';
-  // Use YOUR PDW package ID
-  const pdwPackageId = process.env.NEXT_PUBLIC_PACKAGE_ID || '';
-
-  const fetchAndDecryptContent = async (blobId: string): Promise<string> => {
-    try {
-      if (!account?.address) {
-        throw new Error('No wallet connected');
-      }
-
-      console.log('🐳 Step 1: Retrieving from Walrus...');
-      console.log('📥 Blob ID:', blobId);
-      setStatus('Retrieving from Walrus...');
-
-      // Fetch encrypted content from Walrus
-      const url = `${walrusAggregator}/v1/blobs/${blobId}`;
-      console.log('🌐 Fetching:', url);
-
-      const response = await fetch(url);
-      console.log('📡 Response status:', response.status);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Walrus retrieval failed:', errorText);
-        throw new Error('Failed to fetch content');
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      const encryptedData = new Uint8Array(arrayBuffer);
-      console.log('✅ Retrieved', encryptedData.length, 'bytes from Walrus');
-      console.log('📊 Retrieved first 50 bytes:', Array.from(encryptedData.slice(0, 50)));
-      console.log('📊 Retrieved last 20 bytes:', Array.from(encryptedData.slice(-20)));
-
-      console.log('🔓 Step 2: Decrypting with SEAL...');
-      setStatus('Creating session key...');
-
-      // Decrypt with SEAL
-      const serverObjectIds = [
-        '0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75',
-        '0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8'
-      ];
-
-      const sealClient = new SealClient({
-        suiClient: client as any,
-        serverConfigs: serverObjectIds.map((id) => ({ objectId: id, weight: 1 })),
-        verifyKeyServers: false,
-      });
-      console.log('✅ SEAL client initialized');
-
-      // Create session key
-      console.log('🔑 Creating session key...');
-      const sessionKey = await SessionKey.create({
-        address: account.address,
-        packageId: pdwPackageId,
-        ttlMin: 10,
-        suiClient: client as any,
-      });
-      console.log('✅ Session key created');
-
-      // Sign personal message
-      console.log('✍️ Signing personal message...');
-      const personalMessage = sessionKey.getPersonalMessage();
-      setStatus('Signing personal message...');
-
-      const signatureResult = await signPersonalMessage({ message: personalMessage });
-      await sessionKey.setPersonalMessageSignature(signatureResult.signature);
-      console.log('✅ Message signed');
-
-      // Build seal_approve transaction
-      console.log('🔐 Building seal_approve transaction...');
-      setStatus('Building access control transaction...');
-
-      const tx = new Transaction();
-      const addressHex = account.address.startsWith('0x') ? account.address.slice(2) : account.address;
-      const idBytes = fromHex(addressHex);
-
-      tx.moveCall({
-        target: `${pdwPackageId}::seal_access_control::seal_approve`,
-        arguments: [
-          tx.pure.vector('u8', Array.from(idBytes)),
-          tx.pure.address(account.address),
-          tx.object(process.env.NEXT_PUBLIC_ACCESS_REGISTRY_ID || ''),
-          tx.object('0x6'),
-        ],
-      });
-
-      const txBytes = await tx.build({ client, onlyTransactionKind: true });
-      console.log('✅ Transaction built');
-
-      // Decrypt
-      console.log('🔓 Decrypting data...');
-      setStatus('Decrypting with SEAL...');
-
-      const decryptedData = await sealClient.decrypt({
-        data: encryptedData,
-        sessionKey,
-        txBytes,
-      });
-      console.log('✅ Decryption successful:', decryptedData.length, 'bytes');
-
-      // Parse decrypted JSON
-      const decryptedString = new TextDecoder().decode(decryptedData);
-      const parsed = JSON.parse(decryptedString);
-      return JSON.stringify(parsed, null, 2);
-    } catch (error) {
-      console.error('Failed to decrypt content:', error);
-      throw error;
-    }
-  };
+  // Initialize ClientMemoryManager
+  const memoryManager = useMemo(() => {
+    return new ClientMemoryManager({
+      packageId: process.env.NEXT_PUBLIC_PACKAGE_ID || '',
+      accessRegistryId: process.env.NEXT_PUBLIC_ACCESS_REGISTRY_ID || '',
+      walrusAggregator: process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR || '',
+      geminiApiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY || '',
+    });
+  }, []);
 
   const handleRetrieve = async () => {
     console.log('\n🔍 ========== Starting Memory Retrieval ==========');
@@ -146,14 +44,23 @@ export function RetrieveMemory() {
     setDecryptedContent('');
 
     try {
-      const decryptedJson = await fetchAndDecryptContent(blobId);
-      setDecryptedContent(decryptedJson);
+      const memoryData = await memoryManager.retrieveMemory({
+        blobId,
+        account,
+        signPersonalMessage: signPersonalMessage as any,
+        client: client as any,
+        onProgress: (status) => {
+          console.log('📍', status);
+          setStatus(status);
+        }
+      });
+
+      console.log('🎉 ========== Retrieval Complete ==========');
+      setDecryptedContent(JSON.stringify(memoryData, null, 2));
       setStatus('Successfully decrypted!');
-      console.log('🎉 ========== Retrieval Complete ==========\n');
     } catch (error: any) {
       console.error('❌ ========== Error retrieving memory ==========');
       console.error(error);
-      console.error('Stack:', error.stack);
       setStatus(`Error: ${error.message}`);
       setDecryptedContent('');
     } finally {

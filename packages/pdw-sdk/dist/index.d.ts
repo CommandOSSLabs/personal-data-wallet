@@ -156,6 +156,8 @@ declare const _default: {
     };
 };
 export default _default;
+export { ClientMemoryManager } from './client/ClientMemoryManager';
+export type { ClientMemoryManagerConfig, CreateMemoryOptions as ClientCreateMemoryOptions, RetrieveMemoryOptions as ClientRetrieveMemoryOptions, BatchRetrieveMemoriesOptions as ClientBatchRetrieveMemoriesOptions, BatchRetrieveResult as ClientBatchRetrieveResult, ClientMemoryMetadata } from './client/ClientMemoryManager';
 export { MainWalletService } from './wallet/MainWalletService';
 export { ContextWalletService } from './wallet/ContextWalletService';
 export { PermissionService } from './access/PermissionService';

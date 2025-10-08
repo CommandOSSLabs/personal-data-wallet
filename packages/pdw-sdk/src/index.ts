@@ -371,6 +371,17 @@ export default {
   SDK
 };
 
+// Client-side memory management for React dApps
+export { ClientMemoryManager } from './client/ClientMemoryManager';
+export type {
+  ClientMemoryManagerConfig,
+  CreateMemoryOptions as ClientCreateMemoryOptions,
+  RetrieveMemoryOptions as ClientRetrieveMemoryOptions,
+  BatchRetrieveMemoriesOptions as ClientBatchRetrieveMemoriesOptions,
+  BatchRetrieveResult as ClientBatchRetrieveResult,
+  ClientMemoryMetadata
+} from './client/ClientMemoryManager';
+
 // Wallet architecture components
 export { MainWalletService } from './wallet/MainWalletService';
 export { ContextWalletService } from './wallet/ContextWalletService';

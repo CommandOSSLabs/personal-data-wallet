@@ -1,17 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useCurrentAccount, useSuiClient, useSignPersonalMessage } from '@mysten/dapp-kit';
-import { SealClient, SessionKey } from '@mysten/seal';
-import { Transaction } from '@mysten/sui/transactions';
-import { fromHex } from '@mysten/sui/utils';
+import { ClientMemoryManager } from 'personal-data-wallet-sdk/dist/client/ClientMemoryManager';
 
 interface Memory {
   id: string;
   category: string;
   vectorId: number;
   blobId: string;
-  content?: string; // Raw content text (before encryption)
+  content?: string;
   metadata: {
     contentType: string;
     contentSize: number;
@@ -31,93 +29,74 @@ export function MemoryList() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [decryptionStatus, setDecryptionStatus] = useState('');
 
-  const walletRegistryId = process.env.NEXT_PUBLIC_WALLET_REGISTRY_ID || '';
-  const pdwPackageId = process.env.NEXT_PUBLIC_PACKAGE_ID || '';
-  const walrusAggregator = process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR || '';
+  const packageId = process.env.NEXT_PUBLIC_PACKAGE_ID || '';
 
-  // Shared session for batch decryption
-  let sharedSessionKey: SessionKey | null = null;
-  let sharedTxBytes: Uint8Array | null = null;
-  let sharedSealClient: SealClient | null = null;
-
-  const initializeSession = async () => {
-    if (!account?.address) throw new Error('No wallet connected');
-
-    console.log('🔑 Initializing shared session for batch decryption...');
-
-    // Create SEAL client (reusable)
-    const serverObjectIds = [
-      '0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75',
-      '0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8'
-    ];
-
-    sharedSealClient = new SealClient({
-      suiClient: client as any,
-      serverConfigs: serverObjectIds.map((id) => ({ objectId: id, weight: 1 })),
-      verifyKeyServers: false,
+  // Initialize ClientMemoryManager
+  const memoryManager = useMemo(() => {
+    return new ClientMemoryManager({
+      packageId: process.env.NEXT_PUBLIC_PACKAGE_ID || '',
+      accessRegistryId: process.env.NEXT_PUBLIC_ACCESS_REGISTRY_ID || '',
+      walrusAggregator: process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR || '',
+      geminiApiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY || '',
     });
+  }, []);
 
-    // Create session key (reusable)
-    sharedSessionKey = await SessionKey.create({
-      address: account.address,
-      packageId: pdwPackageId,
-      ttlMin: 10,
-      suiClient: client as any,
-    });
+  const batchDecryptMemories = async (memoriesToDecrypt: Memory[]): Promise<void> => {
+    if (!account) {
+      console.error('No account connected');
+      return;
+    }
 
-    // Sign personal message ONCE
-    const personalMessage = sharedSessionKey.getPersonalMessage();
-    const signatureResult = await signPersonalMessage({ message: personalMessage });
-    await sharedSessionKey.setPersonalMessageSignature(signatureResult.signature);
+    if (memoriesToDecrypt.length === 0) {
+      return;
+    }
 
-    // Build seal_approve transaction ONCE
-    const tx = new Transaction();
-    const addressHex = account.address.startsWith('0x') ? account.address.slice(2) : account.address;
-    const idBytes = fromHex(addressHex);
-
-    tx.moveCall({
-      target: `${pdwPackageId}::seal_access_control::seal_approve`,
-      arguments: [
-        tx.pure.vector('u8', Array.from(idBytes)),
-        tx.pure.address(account.address),
-        tx.object(process.env.NEXT_PUBLIC_ACCESS_REGISTRY_ID || ''),
-        tx.object('0x6'),
-      ],
-    });
-
-    sharedTxBytes = await tx.build({ client, onlyTransactionKind: true });
-    console.log('✅ Session initialized - will reuse for all decryptions');
-  };
-
-  const fetchAndDecryptContent = async (blobId: string): Promise<string> => {
     try {
-      if (!sharedSealClient || !sharedSessionKey || !sharedTxBytes) {
-        return 'Session not initialized';
-      }
+      const blobIds = memoriesToDecrypt.map(m => m.blobId);
 
-      // Fetch encrypted content from Walrus
-      const url = `${walrusAggregator}/v1/blobs/${blobId}`;
-      const response = await fetch(url);
-      if (!response.ok) return 'Failed to fetch content';
+      console.log('🔓 Starting batch decryption with SINGLE signature...');
+      setDecryptionStatus('Initializing decryption (sign once)...');
 
-      const arrayBuffer = await response.arrayBuffer();
-      const encryptedData = new Uint8Array(arrayBuffer);
-
-      // Decrypt using shared session (NO SIGNING!)
-      const decryptedData = await sharedSealClient.decrypt({
-        data: encryptedData,
-        sessionKey: sharedSessionKey,
-        txBytes: sharedTxBytes,
+      // Batch decrypt with SINGLE signature
+      const results = await memoryManager.batchRetrieveMemories({
+        blobIds,
+        account,
+        signPersonalMessage: signPersonalMessage as any,
+        client: client as any,
+        onProgress: (status, current, total) => {
+          console.log(`📍 ${status} (${current}/${total})`);
+          setDecryptionStatus(`${status} (${current}/${total})`);
+        }
       });
 
-      // Parse decrypted JSON
-      const decryptedString = new TextDecoder().decode(decryptedData);
-      const parsed = JSON.parse(decryptedString);
-      return parsed.content || decryptedString;
-    } catch (error) {
-      console.error('Failed to decrypt content:', error);
-      return 'Error decrypting content';
+      // Update memories with decrypted content
+      setMemories(prev =>
+        prev.map(memory => {
+          const result = results.find(r => r.blobId === memory.blobId);
+          if (result) {
+            return {
+              ...memory,
+              content: result.content || result.error || 'Decryption failed'
+            };
+          }
+          return memory;
+        })
+      );
+
+      setDecryptionStatus('All memories decrypted!');
+      setTimeout(() => setDecryptionStatus(''), 2000);
+    } catch (error: any) {
+      console.error('Batch decryption failed:', error);
+      setDecryptionStatus(`Error: ${error.message}`);
+      // Mark all as failed
+      setMemories(prev =>
+        prev.map(m => ({
+          ...m,
+          content: 'Batch decryption failed'
+        }))
+      );
     }
   };
 
@@ -135,10 +114,6 @@ export function MemoryList() {
     setError('');
 
     try {
-      // Query owned objects of type Memory
-      // StructType filters REQUIRE the full package ID with 0x prefix
-      const packageId = process.env.NEXT_PUBLIC_PACKAGE_ID || '';
-
       console.log('📦 Package ID:', packageId);
 
       if (!packageId) {
@@ -179,10 +154,6 @@ export function MemoryList() {
             metadata: fields.metadata,
           });
 
-          // Log metadata structure to debug field access
-          console.log('🔍 Metadata structure:', JSON.stringify(fields.metadata, null, 2));
-
-          // Access nested metadata fields correctly
           const metadataFields = fields.metadata?.fields || fields.metadata;
 
           const memory: Memory = {
@@ -213,22 +184,10 @@ export function MemoryList() {
       // Set memories first (without content)
       setMemories(loadedMemories);
 
-      // Initialize session ONCE (user signs once)
+      // Batch decrypt all memories with SINGLE signature
       if (loadedMemories.length > 0) {
-        console.log('🔓 Initializing decryption session (signing once)...');
-        await initializeSession();
-
-        // Decrypt all memories using the same session (NO MORE SIGNING!)
-        console.log('🔓 Decrypting', loadedMemories.length, 'memories without additional signatures...');
-        for (const memory of loadedMemories) {
-          fetchAndDecryptContent(memory.blobId).then((content) => {
-            setMemories((prev) =>
-              prev.map((m) =>
-                m.id === memory.id ? { ...m, content } : m
-              )
-            );
-          });
-        }
+        console.log('🔓 Will decrypt', loadedMemories.length, 'memories with 1 signature...');
+        await batchDecryptMemories(loadedMemories);
       }
 
       console.log('🎉 ========== Loading Complete ==========\n');
@@ -264,6 +223,12 @@ export function MemoryList() {
         </div>
       )}
 
+      {decryptionStatus && (
+        <div className="mb-4 p-3 bg-blue-500/20 border border-blue-500/50 rounded-lg">
+          <p className="text-sm text-blue-300">{decryptionStatus}</p>
+        </div>
+      )}
+
       <div className="space-y-4">
         {isLoading ? (
           <div className="text-center py-8">
@@ -293,18 +258,19 @@ export function MemoryList() {
                       {new Date(memory.metadata.createdTimestamp).toLocaleDateString()}
                     </span>
                     <span>
-                      {memory.metadata.embeddingDimension} dimensions
-                    </span>
-                    <span>
                       Importance: {memory.metadata.importance}/10
                     </span>
                   </div>
                 </div>
               </div>
               <div className="mt-3 space-y-2">
-                {memory.content && (
+                {memory.content ? (
                   <div className="text-sm text-slate-200 bg-white/5 rounded p-3 border border-white/10">
                     {memory.content}
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-500 italic">
+                    Decrypting...
                   </div>
                 )}
                 <div className="text-xs text-slate-500 font-mono break-all">

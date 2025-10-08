@@ -30,7 +30,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.VERSION = exports.AggregationService = exports.InMemoryConsentRepository = exports.FileSystemConsentRepository = exports.PermissionService = exports.ContextWalletService = exports.MainWalletService = exports.SDK = exports.QuickStartConfigs = exports.SDK_NAME = exports.SDK_VERSION = exports.Config = exports.ConfigurationHelper = exports.MemoryDecryptionPipeline = exports.MemoryRetrievalService = exports.KnowledgeGraphManager = exports.GraphService = exports.MemoryProcessingCache = exports.BatchingService = exports.BatchManager = exports.HnswIndexService = exports.VectorManager = exports.EncryptionService = exports.SealService = exports.BlockchainManager = exports.SuiService = exports.StorageManager = exports.WalrusStorageService = exports.VectorService = exports.MemoryService = exports.CrossContextPermissionService = exports.ChatService = exports.BatchService = exports.TransactionService = exports.ViewService = exports.MemoryIndexService = exports.ClassifierService = exports.QueryService = exports.GeminiAIService = exports.EmbeddingService = exports.StorageService = exports.PipelineManager = exports.MemoryPipeline = void 0;
+exports.VERSION = exports.AggregationService = exports.InMemoryConsentRepository = exports.FileSystemConsentRepository = exports.PermissionService = exports.ContextWalletService = exports.MainWalletService = exports.ClientMemoryManager = exports.SDK = exports.QuickStartConfigs = exports.SDK_NAME = exports.SDK_VERSION = exports.Config = exports.ConfigurationHelper = exports.MemoryDecryptionPipeline = exports.MemoryRetrievalService = exports.KnowledgeGraphManager = exports.GraphService = exports.MemoryProcessingCache = exports.BatchingService = exports.BatchManager = exports.HnswIndexService = exports.VectorManager = exports.EncryptionService = exports.SealService = exports.BlockchainManager = exports.SuiService = exports.StorageManager = exports.WalrusStorageService = exports.VectorService = exports.MemoryService = exports.CrossContextPermissionService = exports.ChatService = exports.BatchService = exports.TransactionService = exports.ViewService = exports.MemoryIndexService = exports.ClassifierService = exports.QueryService = exports.GeminiAIService = exports.EmbeddingService = exports.StorageService = exports.PipelineManager = exports.MemoryPipeline = void 0;
 exports.createQuickStartPipeline = createQuickStartPipeline;
 exports.createPipelineManager = createPipelineManager;
 // Core pipeline - the main entry point
@@ -315,6 +315,9 @@ exports.default = {
     QuickStartConfigs: exports.QuickStartConfigs,
     SDK: exports.SDK
 };
+// Client-side memory management for React dApps
+var ClientMemoryManager_1 = require("./client/ClientMemoryManager");
+Object.defineProperty(exports, "ClientMemoryManager", { enumerable: true, get: function () { return ClientMemoryManager_1.ClientMemoryManager; } });
 // Wallet architecture components
 var MainWalletService_1 = require("./wallet/MainWalletService");
 Object.defineProperty(exports, "MainWalletService", { enumerable: true, get: function () { return MainWalletService_1.MainWalletService; } });
