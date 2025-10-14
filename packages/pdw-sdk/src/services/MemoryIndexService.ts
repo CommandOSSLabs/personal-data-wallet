@@ -12,7 +12,7 @@
  * matching backend's performance while maintaining browser compatibility.
  */
 
-import { HnswIndexService } from '../vector/HnswIndexService';
+import { HnswWasmService } from '../vector/HnswWasmService';
 import { EmbeddingService } from './EmbeddingService';
 import { StorageService, type MemoryMetadata } from './StorageService';
 import type { HNSWSearchOptions } from '../embedding/types';
@@ -83,12 +83,12 @@ export interface MemorySearchResult {
  * Uses native HNSW implementation via HnswIndexService for optimal performance
  */
 export class MemoryIndexService {
-  private hnswService: HnswIndexService;
+  private hnswService: HnswWasmService;
   private embeddingService?: EmbeddingService;
   private storageService?: StorageService;
   private memoryIndex = new Map<string, Map<string, MemoryIndexEntry>>(); // userAddress -> memoryId -> entry
   private nextMemoryId = 1;
-  
+
   // Performance tracking
   private indexStats = new Map<string, {
     totalVectors: number;
@@ -96,15 +96,15 @@ export class MemoryIndexService {
     searchLatency: number[];
     lastOptimized: Date;
   }>();
-  
+
   constructor(
     storageService?: StorageService,
     options: MemoryIndexOptions = {}
   ) {
     this.storageService = storageService;
-    
-    // Initialize legacy HNSW service for backward compatibility
-    this.hnswService = new HnswIndexService(
+
+    // Initialize browser-compatible HNSW service using WebAssembly
+    this.hnswService = new HnswWasmService(
       storageService || undefined as any,
       {
         maxElements: options.maxElements || 10000,
@@ -117,12 +117,12 @@ export class MemoryIndexService {
         batchDelayMs: options.autoFlushInterval || 5000
       }
     );
-    
-    console.log('✅ MemoryIndexService initialized with native HNSW (hnswlib-node)');
+
+    console.log('✅ MemoryIndexService initialized with browser-compatible HNSW (hnswlib-wasm)');
     console.log(`   Max elements: ${options.maxElements || 10000}`);
     console.log(`   Embedding dimension: ${options.dimension || 1536}`);
     console.log(`   HNSW parameters: M=${options.m || 16}, efConstruction=${options.efConstruction || 200}`);
-    console.log(`   Features: batching, caching, Walrus persistence, metadata filtering`);
+    console.log(`   Features: WebAssembly, IndexedDB persistence, batching, Walrus storage`);
   }
 
   /**

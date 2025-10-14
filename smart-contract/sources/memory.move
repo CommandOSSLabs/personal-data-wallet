@@ -29,7 +29,7 @@ module pdw::memory {
         // Content identification
         content_type: String,
         content_size: u64,
-        content_hash: String,
+        content_hash: String, // Should be set to Walrus blob_id (already content-addressed via blake2b256)
         
         // Memory classification
         category: String,
@@ -265,7 +265,74 @@ module pdw::memory {
         memory.metadata.updated_timestamp = tx_context::epoch_timestamp_ms(ctx);
     }
 
-    /// Delete a memory record 
+    /// Create a lightweight memory record (for use with Walrus metadata)
+    ///
+    /// This function creates a minimal on-chain Memory struct with only essential
+    /// queryable fields. Rich metadata should be stored as Walrus blob metadata.
+    ///
+    /// Use this when:
+    /// - Gas costs are a concern
+    /// - Rich metadata is stored on Walrus blob
+    /// - Only need basic filtering (category, vector_id)
+    public entry fun create_memory_record_lightweight(
+        category: vector<u8>,
+        vector_id: u64,
+        blob_id: vector<u8>,
+        blob_object_id: vector<u8>, // Optional: Walrus blob object ID for metadata queries
+        importance: u8,
+        ctx: &mut tx_context::TxContext
+    ) {
+        let owner = tx_context::sender(ctx);
+        let id = object::new(ctx);
+        let object_id = object::uid_to_inner(&id);
+        let timestamp = tx_context::epoch_timestamp_ms(ctx);
+
+        // Validate importance
+        assert!(importance >= 1 && importance <= 10, EInvalidImportance);
+
+        // Create minimal metadata (detailed metadata on Walrus)
+        let metadata = MemoryMetadata {
+            content_type: string::utf8(b"application/octet-stream"),
+            content_size: 0, // Size tracked on Walrus
+            content_hash: string::utf8(b""), // blob_id serves as content hash
+            category: string::utf8(category),
+            topic: string::utf8(b""), // Topic on Walrus metadata
+            importance,
+            embedding_blob_id: string::utf8(b""), // Embedding blob ID on Walrus
+            embedding_dimension: 768,
+            created_timestamp: timestamp,
+            updated_timestamp: timestamp,
+            custom_metadata: vec_map::empty()
+        };
+
+        // Store Walrus blob object ID in custom metadata if provided
+        if (blob_object_id != b"") {
+            vec_map::insert(&mut metadata.custom_metadata,
+                          string::utf8(b"walrus_blob_object_id"),
+                          string::utf8(blob_object_id));
+        };
+
+        let memory = Memory {
+            id,
+            owner,
+            category: string::utf8(category),
+            vector_id,
+            blob_id: string::utf8(blob_id),
+            metadata
+        };
+
+        // Emit event
+        sui::event::emit(MemoryCreated {
+            id: object_id,
+            owner,
+            category: string::utf8(category),
+            vector_id
+        });
+
+        transfer::transfer(memory, owner);
+    }
+
+    /// Delete a memory record
     public entry fun delete_memory_record(
         memory: Memory,
         ctx: &tx_context::TxContext

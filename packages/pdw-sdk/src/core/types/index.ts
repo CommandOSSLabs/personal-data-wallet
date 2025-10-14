@@ -782,6 +782,14 @@ export interface CreateMemoryRecordTxOptions extends TransactionOptions {
   embeddingBlobId: string;
 }
 
+export interface CreateMemoryRecordLightweightTxOptions extends TransactionOptions {
+  category: string;
+  vectorId: number | bigint;
+  blobId: string;
+  blobObjectId?: string; // Optional Walrus blob object ID for metadata queries
+  importance: number;
+}
+
 export interface UpdateMemoryMetadataTxOptions extends TransactionOptions {
   memoryId: string;
   metadataBlobId: string;
