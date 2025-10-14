@@ -12,8 +12,8 @@ import { VectorManager } from '../vector/VectorManager';
 import { StorageService } from '../services/StorageService';
 import { BatchManager } from '../batch/BatchManager';
 import { KnowledgeGraphManager } from '../graph/KnowledgeGraphManager';
-import { StorageManager } from '../storage/StorageManager';
-import { BlockchainManager } from '../blockchain/BlockchainManager';
+import { StorageManager } from '../infrastructure/walrus/StorageManager';
+import { BlockchainManager } from '../infrastructure/sui/BlockchainManager';
 import { Memory, ProcessedMemory, MemoryPipelineConfig, MemoryPipelineResult } from '../embedding/types';
 
 export interface PipelineConfig {

@@ -4,11 +4,12 @@
  *
  * Provides a unified interface for vector operations combining
  * embedding generation and HNSW indexing with smart caching.
+ * Uses hnswlib-wasm for full browser compatibility.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.VectorManager = void 0;
 const EmbeddingService_1 = require("../services/EmbeddingService");
-const HnswIndexService_1 = require("./HnswIndexService");
+const HnswWasmService_1 = require("./HnswWasmService");
 /**
  * Unified vector operations manager
  */
@@ -19,8 +20,8 @@ class VectorManager {
         this.config = config;
         // Initialize embedding service
         this.embeddingService = new EmbeddingService_1.EmbeddingService(config.embedding);
-        // Initialize HNSW index service
-        this.indexService = new HnswIndexService_1.HnswIndexService(storageService, config.index, config.batch);
+        // Initialize HNSW index service (using WASM for browser compatibility)
+        this.indexService = new HnswWasmService_1.HnswWasmService(storageService, config.index, config.batch);
     }
     /**
      * Add text content to vector index (embed + index)

@@ -57,23 +57,6 @@ const client_1 = require("@mysten/sui/client");
 const walrus_1 = require("@mysten/walrus");
 const MemoryIndexService_1 = require("./MemoryIndexService");
 const GraphService_1 = require("../graph/GraphService");
-// Use Web Crypto API for both browser and Node.js environments
-const crypto = (() => {
-    if (typeof window !== 'undefined' && window.crypto) {
-        return window.crypto;
-    }
-    else if (typeof global !== 'undefined' && global.crypto) {
-        return global.crypto;
-    }
-    else {
-        try {
-            return require('crypto').webcrypto || require('crypto');
-        }
-        catch (e) {
-            throw new Error('No crypto implementation available');
-        }
-    }
-})();
 /**
  * StorageService - Unified Walrus Storage Implementation with HNSW Search
  */
@@ -249,11 +232,8 @@ class StorageService {
             // Get blob info
             const blob = await flow.getBlob();
             const uploadTimeMs = performance.now() - startTime;
-            // Generate content hash
-            const hashBuffer = await crypto.subtle.digest('SHA-256', processedData);
-            const contentHash = Array.from(new Uint8Array(hashBuffer))
-                .map(b => b.toString(16).padStart(2, '0'))
-                .join('');
+            // Use Walrus blob_id as content hash (already content-addressed via blake2b256)
+            const contentHash = blob.blobId;
             // Create metadata with proper content type detection
             const contentType = isSealEncrypted
                 ? 'application/octet-stream' // Binary SEAL encrypted data
@@ -261,7 +241,7 @@ class StorageService {
             const metadata = {
                 contentType,
                 contentSize: processedData.length,
-                contentHash,
+                contentHash, // Walrus blob_id serves as content hash
                 category: options.metadata?.category || 'default',
                 topic: options.metadata?.topic || '',
                 importance: parseInt(options.metadata?.importance || '5'),
@@ -271,6 +251,30 @@ class StorageService {
                 isEncrypted,
                 encryptionType: isEncrypted ? (options.metadata?.['encryption-type'] || 'seal') : undefined,
             };
+            // Build Walrus-compatible metadata if requested
+            let walrusMetadata;
+            if (options.attachMetadata) {
+                const metadataOptions = options;
+                walrusMetadata = this.buildWalrusMetadata(processedData.length, {
+                    category: metadata.category,
+                    topic: metadata.topic,
+                    importance: metadata.importance,
+                    embeddingBlobId: metadataOptions.embeddingBlobId,
+                    graphBlobId: metadataOptions.graphBlobId,
+                    graphEntityIds: metadataOptions.graphEntityIds,
+                    vectorId: metadataOptions.vectorId,
+                    isEncrypted,
+                    encryptionType: metadata.encryptionType,
+                    sealIdentity: options.metadata?.['seal-identity'],
+                    customFields: options.metadata,
+                });
+                // TODO: Attach metadata to Blob object via Move call (Phase 2.4)
+                console.log('📋 Walrus metadata prepared (not yet attached):', {
+                    fields: Object.keys(walrusMetadata).length,
+                    vectorId: walrusMetadata.vector_id,
+                    category: walrusMetadata.category,
+                });
+            }
             // Log successful storage approach
             if (isSealEncrypted) {
                 console.log(`✅ StorageService: SEAL encrypted data stored successfully`);
@@ -1028,6 +1032,192 @@ class StorageService {
             } : null,
             topTags: [] // TODO: Implement tag extraction from index stats
         };
+    }
+    // ==================== WALRUS METADATA-ON-BLOB METHODS ====================
+    /**
+     * Build Walrus metadata structure from memory data
+     *
+     * Converts memory data into the WalrusMemoryMetadata format (all string values)
+     * for attachment to Walrus Blob objects as dynamic fields.
+     *
+     * NOTE: No content hashing needed! Walrus blob_id already serves as content hash.
+     * The blob_id is derived from: blake2b256(bcs(root_hash, encoding_type, size))
+     * where root_hash is the Merkle tree root of the blob content.
+     *
+     * @param contentSize - Size of the content in bytes
+     * @param options - Metadata options including embeddings, graph info, etc.
+     * @returns Formatted WalrusMemoryMetadata ready for attachment
+     */
+    buildWalrusMetadata(contentSize, options) {
+        // Determine content type
+        const contentType = options.isEncrypted
+            ? 'application/octet-stream'
+            : options.customFields?.['content-type'] || 'text/plain';
+        // Build base metadata (all values as strings for VecMap<String, String>)
+        const metadata = {
+            // Content identification
+            content_type: contentType,
+            content_size: contentSize.toString(),
+            // No content_hash field - blob_id serves this purpose!
+            // Memory classification
+            category: options.category || 'general',
+            topic: options.topic || '',
+            importance: (options.importance || 5).toString(),
+            // Vector embedding
+            embedding_dimensions: (options.embedding?.length || 768).toString(),
+            embedding_model: 'text-embedding-004',
+            embedding_blob_id: options.embeddingBlobId || '',
+            // Knowledge graph
+            graph_entity_count: (options.graphEntityCount || 0).toString(),
+            graph_relationship_count: (options.graphRelationshipCount || 0).toString(),
+            graph_blob_id: options.graphBlobId || '',
+            graph_entity_ids: options.graphEntityIds ? JSON.stringify(options.graphEntityIds) : '',
+            // Vector index
+            vector_id: options.vectorId?.toString() || '',
+            vector_status: options.vectorId ? '1' : '2', // 1=active if indexed, 2=pending otherwise
+            // Lifecycle
+            created_at: Date.now().toString(),
+            updated_at: Date.now().toString(),
+            // Encryption
+            encrypted: (options.isEncrypted || false).toString(),
+            encryption_type: options.isEncrypted ? (options.encryptionType || 'seal') : undefined,
+            seal_identity: options.sealIdentity || undefined,
+        };
+        // Add custom fields
+        if (options.customFields) {
+            Object.entries(options.customFields).forEach(([key, value]) => {
+                if (value !== undefined && !metadata[key]) {
+                    metadata[key] = value;
+                }
+            });
+        }
+        return metadata;
+    }
+    /**
+     * Attach metadata to a Walrus Blob object via Move call
+     *
+     * This method creates a transaction that calls the Walrus blob::add_metadata()
+     * or blob::add_or_replace_metadata() function to attach metadata as a dynamic field.
+     *
+     * NOTE: Based on research, Walrus metadata is stored as dynamic fields and requires
+     * separate queries to retrieve. This makes it less efficient than on-chain Memory structs
+     * for filtering and querying, but can be useful for storing additional blob-level metadata.
+     *
+     * @param blobId - The Walrus blob object ID (NOT the blob_id hash!)
+     * @param metadata - The metadata to attach (WalrusMemoryMetadata format)
+     * @param signer - The transaction signer (must be blob owner)
+     * @returns Transaction block for metadata attachment
+     */
+    async attachMetadataToBlob(blobId, metadata, signer) {
+        try {
+            const { Transaction } = await Promise.resolve().then(() => __importStar(require('@mysten/sui/transactions')));
+            const tx = new Transaction();
+            // Convert WalrusMemoryMetadata to VecMap<String, String> format
+            const metadataEntries = [];
+            Object.entries(metadata).forEach(([key, value]) => {
+                if (value !== undefined && value !== '') {
+                    metadataEntries.push([key, value]);
+                }
+            });
+            console.log(`📋 Attaching ${metadataEntries.length} metadata fields to blob ${blobId}`);
+            // Call Walrus blob::add_or_replace_metadata()
+            // Note: This requires the Walrus package ID for the system module
+            const walrusPackageId = this.config.network === 'mainnet'
+                ? '0x<mainnet-walrus-package-id>' // TODO: Add actual mainnet package ID
+                : '0x<testnet-walrus-package-id>'; // TODO: Add actual testnet package ID
+            // Build metadata VecMap on-chain
+            // Note: This is a simplified version - actual implementation depends on
+            // how VecMap is constructed in the Walrus Move contracts
+            tx.moveCall({
+                target: `${walrusPackageId}::blob::add_or_replace_metadata`,
+                arguments: [
+                    tx.object(blobId),
+                    // Metadata construction would go here
+                    // This requires understanding the exact Move function signature
+                ],
+            });
+            tx.setSender(signer.toSuiAddress());
+            const result = await signer.signAndExecuteTransaction({
+                transaction: tx,
+                client: this.suiClient,
+            });
+            console.log(`✅ Metadata attached successfully. Digest: ${result.digest}`);
+            return {
+                digest: result.digest,
+                effects: result.effects,
+            };
+        }
+        catch (error) {
+            console.error(`❌ Failed to attach metadata to blob ${blobId}:`, error);
+            throw new Error(`Metadata attachment failed: ${error}`);
+        }
+    }
+    /**
+     * Retrieve metadata from a Walrus Blob object
+     *
+     * Queries the dynamic field attached to a Blob object to retrieve its metadata.
+     *
+     * NOTE: This requires querying Sui dynamic fields, which is slower than querying
+     * on-chain Memory structs. For efficient memory organization and retrieval,
+     * the current on-chain Memory approach is recommended.
+     *
+     * @param blobObjectId - The Blob object ID (NOT the blob_id hash!)
+     * @returns WalrusMemoryMetadata if found, null otherwise
+     */
+    async retrieveBlobMetadata(blobObjectId) {
+        try {
+            // Query dynamic fields on the Blob object
+            const dynamicFields = await this.suiClient.jsonRpc.getDynamicFields({
+                parentId: blobObjectId,
+            });
+            // Look for the metadata dynamic field (name is 'metadata' according to Walrus contracts)
+            const metadataField = dynamicFields.data.find((field) => field.name.value === 'metadata');
+            if (!metadataField) {
+                console.log(`No metadata found for blob object ${blobObjectId}`);
+                return null;
+            }
+            // Retrieve the metadata object
+            const metadataObject = await this.suiClient.jsonRpc.getObject({
+                id: metadataField.objectId,
+                options: { showContent: true },
+            });
+            if (!metadataObject.data?.content || !('fields' in metadataObject.data.content)) {
+                return null;
+            }
+            const fields = metadataObject.data.content.fields;
+            // Parse VecMap<String, String> into WalrusMemoryMetadata
+            // The VecMap structure from Sui has 'contents' field with key-value pairs
+            const metadata = {
+                content_type: '',
+                content_size: '',
+                category: '',
+                topic: '',
+                importance: '',
+                embedding_dimensions: '',
+                embedding_model: '',
+                graph_entity_count: '',
+                graph_relationship_count: '',
+                vector_id: '',
+                vector_status: '',
+                created_at: '',
+                updated_at: '',
+                encrypted: '',
+            };
+            // Parse the VecMap contents
+            if (fields.contents && Array.isArray(fields.contents)) {
+                fields.contents.forEach((entry) => {
+                    if (entry.key && entry.value) {
+                        metadata[entry.key] = entry.value;
+                    }
+                });
+            }
+            console.log(`✅ Retrieved metadata for blob object ${blobObjectId}`);
+            return metadata;
+        }
+        catch (error) {
+            console.error(`❌ Failed to retrieve metadata for blob ${blobObjectId}:`, error);
+            return null;
+        }
     }
     // ==================== PRIVATE HELPER METHODS ====================
     createMetadataFilter(filters) {

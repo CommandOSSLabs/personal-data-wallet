@@ -17,8 +17,8 @@
 import { EmbeddingService } from '../services/EmbeddingService';
 import { VectorManager } from '../vector/VectorManager';
 import { KnowledgeGraphManager } from '../graph/KnowledgeGraphManager';
-import { StorageManager } from '../storage/StorageManager';
-import { BlockchainManager } from '../blockchain/BlockchainManager';
+import { StorageManager } from '../infrastructure/walrus/StorageManager';
+import { BlockchainManager } from '../infrastructure/sui/BlockchainManager';
 import { EncryptionService } from '../services/EncryptionService';
 import { BatchManager } from '../batch/BatchManager';
 import { DecryptionConfig } from './MemoryDecryptionPipeline';

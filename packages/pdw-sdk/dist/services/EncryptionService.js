@@ -10,7 +10,7 @@ exports.EncryptionService = void 0;
 const seal_1 = require("@mysten/seal");
 const transactions_1 = require("@mysten/sui/transactions");
 const utils_1 = require("@mysten/sui/utils");
-const SealService_1 = require("../security/SealService");
+const SealService_1 = require("../infrastructure/seal/SealService");
 const CrossContextPermissionService_1 = require("./CrossContextPermissionService");
 class EncryptionService {
     constructor(client, config) {

@@ -9,13 +9,13 @@ import { EventEmitter } from 'events';
 import { BatchingService, BatchProcessor, BatchItem } from './BatchingService';
 import { MemoryProcessingCache } from './MemoryProcessingCache';
 import { EmbeddingService } from '../services/EmbeddingService';
-import { HnswIndexService } from '../vector/HnswIndexService';
-import { 
-  Memory, 
-  ProcessedMemory, 
+import { HnswWasmService } from '../vector/HnswWasmService';
+import {
+  Memory,
+  ProcessedMemory,
   BatchConfig,
   BatchStats,
-  MemoryBatchResult 
+  MemoryBatchResult
 } from '../embedding/types';
 
 export interface BatchManagerConfig {
@@ -74,7 +74,7 @@ export class BatchManager extends EventEmitter {
   private cache!: MemoryProcessingCache;
 
   private embeddingService?: EmbeddingService;
-  private indexService?: HnswIndexService;
+  private indexService?: HnswWasmService;
   
   private readonly config: Required<BatchManagerConfig>;
   private jobStatuses = new Map<string, BatchJobStatus>();
@@ -121,7 +121,7 @@ export class BatchManager extends EventEmitter {
    */
   initialize(services: {
     embeddingService?: EmbeddingService;
-    indexService?: HnswIndexService;
+    indexService?: HnswWasmService;
   }): void {
     this.embeddingService = services.embeddingService;
     this.indexService = services.indexService;
@@ -491,7 +491,7 @@ export class BatchManager extends EventEmitter {
 
   private async processIndexingBatch(processedMemories: ProcessedMemory[]): Promise<void> {
     if (!this.indexService) {
-      console.warn('HnswIndexService not initialized');
+      console.warn('HnswWasmService not initialized');
       return;
     }
 

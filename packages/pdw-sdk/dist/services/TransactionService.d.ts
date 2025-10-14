@@ -1,6 +1,6 @@
 import { Transaction } from '@mysten/sui/transactions';
 import { SuiClient } from '@mysten/sui/client';
-import { PDWConfig, TransactionOptions, TransactionResult, CreateMemoryRecordTxOptions, UpdateMemoryMetadataTxOptions, DeleteMemoryRecordTxOptions, CreateMemoryIndexTxOptions, UpdateMemoryIndexTxOptions, GrantAccessTxOptions, RevokeAccessTxOptions, RegisterContentTxOptions } from '../types';
+import { PDWConfig, TransactionOptions, TransactionResult, CreateMemoryRecordTxOptions, CreateMemoryRecordLightweightTxOptions, UpdateMemoryMetadataTxOptions, DeleteMemoryRecordTxOptions, CreateMemoryIndexTxOptions, UpdateMemoryIndexTxOptions, GrantAccessTxOptions, RevokeAccessTxOptions, RegisterContentTxOptions } from '../types';
 /**
  * TransactionService provides high-level transaction building and execution
  * for Personal Data Wallet Move contracts with proper error handling and gas management.
@@ -13,6 +13,21 @@ export declare class TransactionService {
      * Build transaction to create a new memory record
      */
     buildCreateMemoryRecord(options: CreateMemoryRecordTxOptions): Transaction;
+    /**
+     * Build transaction to create a lightweight memory record
+     *
+     * This creates a minimal on-chain Memory struct with only essential queryable fields.
+     * Rich metadata should be stored as Walrus blob metadata for gas efficiency.
+     *
+     * Use this when:
+     * - Gas costs are a concern (saves ~50% gas vs full metadata)
+     * - Rich metadata is stored on Walrus blob
+     * - Only need basic filtering (category, vector_id, importance)
+     *
+     * @param options - Lightweight memory creation options
+     * @returns Transaction to create lightweight memory record
+     */
+    buildCreateMemoryRecordLightweight(options: CreateMemoryRecordLightweightTxOptions): Transaction;
     /**
      * Build transaction to update memory metadata
      */

@@ -6,7 +6,7 @@
  */
 import { EventEmitter } from 'events';
 import { EmbeddingService } from '../services/EmbeddingService';
-import { HnswIndexService } from '../vector/HnswIndexService';
+import { HnswWasmService } from '../vector/HnswWasmService';
 import { Memory, BatchStats } from '../embedding/types';
 export interface BatchManagerConfig {
     embedding?: {
@@ -70,7 +70,7 @@ export declare class BatchManager extends EventEmitter {
      */
     initialize(services: {
         embeddingService?: EmbeddingService;
-        indexService?: HnswIndexService;
+        indexService?: HnswWasmService;
     }): void;
     /**
      * Add memory to complete processing pipeline

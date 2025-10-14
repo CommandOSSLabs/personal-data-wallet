@@ -1,12 +1,13 @@
 /**
  * VectorManager - High-level Vector Operations Orchestrator
- * 
+ *
  * Provides a unified interface for vector operations combining
  * embedding generation and HNSW indexing with smart caching.
+ * Uses hnswlib-wasm for full browser compatibility.
  */
 
 import { EmbeddingService, EmbeddingOptions, EmbeddingResult, BatchEmbeddingResult } from '../services/EmbeddingService';
-import { HnswIndexService } from './HnswIndexService';
+import { HnswWasmService } from './HnswWasmService';
 import { StorageService } from '../services/StorageService';
 import {
   VectorEmbedding,
@@ -50,7 +51,7 @@ export interface VectorSearchStats {
  */
 export class VectorManager {
   private embeddingService: EmbeddingService;
-  private indexService: HnswIndexService;
+  private indexService: HnswWasmService;
   private vectorIdCounter = new Map<string, number>(); // userAddress -> nextVectorId
   private memoryCache = new Map<string, VectorEmbedding>(); // text hash -> embedding
   private config: VectorManagerConfig;
@@ -64,8 +65,8 @@ export class VectorManager {
     // Initialize embedding service
     this.embeddingService = new EmbeddingService(config.embedding);
 
-    // Initialize HNSW index service
-    this.indexService = new HnswIndexService(
+    // Initialize HNSW index service (using WASM for browser compatibility)
+    this.indexService = new HnswWasmService(
       storageService,
       config.index,
       config.batch

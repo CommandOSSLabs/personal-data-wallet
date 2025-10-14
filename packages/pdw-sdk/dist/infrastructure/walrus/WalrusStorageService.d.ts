@@ -162,7 +162,6 @@ export declare class WalrusStorageService {
         isEncrypted: boolean;
     }>;
     private createMetadataWithEmbedding;
-    private generateContentHash;
     private uploadToWalrus;
     private retrieveFromWalrus;
     private createWalrusTags;

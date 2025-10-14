@@ -13,8 +13,8 @@ const EmbeddingService_1 = require("../services/EmbeddingService");
 const VectorManager_1 = require("../vector/VectorManager");
 const BatchManager_1 = require("../batch/BatchManager");
 const KnowledgeGraphManager_1 = require("../graph/KnowledgeGraphManager");
-const StorageManager_1 = require("../storage/StorageManager");
-const BlockchainManager_1 = require("../blockchain/BlockchainManager");
+const StorageManager_1 = require("../infrastructure/walrus/StorageManager");
+const BlockchainManager_1 = require("../infrastructure/sui/BlockchainManager");
 /**
  * Complete memory processing pipeline with orchestrated services
  */

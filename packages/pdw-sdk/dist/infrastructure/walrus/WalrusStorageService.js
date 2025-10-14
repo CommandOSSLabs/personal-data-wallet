@@ -78,7 +78,7 @@ class WalrusStorageService {
                 backupKey = 'session-key-reference'; // Store session reference
                 isEncrypted = true;
             }
-            const metadata = await this.createMetadataWithEmbedding(processedContent, category, topic, importance, {
+            const metadata = this.createMetadataWithEmbedding(processedContent, category, topic, importance, {
                 ...customMetadata,
                 ...(contextId && { 'context-id': contextId }),
                 ...(appId && { 'app-id': appId }),
@@ -88,6 +88,8 @@ class WalrusStorageService {
             });
             // Upload to Walrus with official client
             const blobId = await this.uploadToWalrus(processedContent, metadata);
+            // Use Walrus blob_id as content hash (already content-addressed via blake2b256)
+            metadata.contentHash = blobId;
             const uploadTimeMs = Date.now() - startTime;
             this.stats.successfulUploads++;
             this.updateAverageUploadTime(uploadTimeMs);
@@ -236,11 +238,11 @@ class WalrusStorageService {
     async uploadContentWithMetadata(content, userId, options) {
         const startTime = Date.now();
         try {
-            // Convert options to MemoryMetadata format
-            const memoryMetadata = {
+            // Upload to Walrus first to get blob_id (which serves as content hash)
+            const tempMetadata = {
                 contentType: 'application/json',
                 contentSize: content.length,
-                contentHash: await this.generateContentHash(content),
+                contentHash: '', // Will be set to blobId below
                 category: options.category || 'general',
                 topic: options.topic || 'misc',
                 importance: options.importance || 5,
@@ -251,7 +253,12 @@ class WalrusStorageService {
                 isEncrypted: options.enableEncryption || false,
                 encryptionType: options.enableEncryption ? 'seal' : undefined
             };
-            const blobId = await this.uploadToWalrus(content, memoryMetadata);
+            const blobId = await this.uploadToWalrus(content, tempMetadata);
+            // Use Walrus blob_id as content hash (already content-addressed via blake2b256)
+            const memoryMetadata = {
+                ...tempMetadata,
+                contentHash: blobId, // Walrus blob_id serves as content hash
+            };
             return {
                 blobId,
                 metadata: memoryMetadata,
@@ -264,14 +271,13 @@ class WalrusStorageService {
         }
     }
     // ==================== PRIVATE METHODS ====================
-    async createMetadataWithEmbedding(content, category, topic, importance, customMetadata) {
+    createMetadataWithEmbedding(content, category, topic, importance, customMetadata) {
         const contentBuffer = Buffer.from(content, 'utf-8');
-        const contentHash = await this.generateContentHash(content);
         const timestamp = Date.now();
         return {
             contentType: 'text/plain',
             contentSize: contentBuffer.length,
-            contentHash,
+            contentHash: '', // Will be set to blobId after upload
             category,
             topic: topic || `Memory about ${category}`,
             importance: Math.max(1, Math.min(10, importance)),
@@ -279,13 +285,6 @@ class WalrusStorageService {
             createdTimestamp: timestamp,
             customMetadata
         };
-    }
-    async generateContentHash(content) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(content);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     }
     async uploadToWalrus(content, metadata) {
         // TODO: Replace with official @mysten/walrus client
@@ -326,7 +325,7 @@ class WalrusStorageService {
             const metadata = {
                 contentType: 'text/plain',
                 contentSize: content.length,
-                contentHash: await this.generateContentHash(content),
+                contentHash: blobId, // Use Walrus blob_id as content hash
                 category: 'unknown',
                 topic: 'Retrieved memory',
                 importance: 5,

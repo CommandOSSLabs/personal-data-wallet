@@ -470,13 +470,21 @@ The SDK has been refactored to run fully in browser environments:
 
 ### Vector Indexing Implementation
 
+**WASM-Only Approach**: The SDK uses exclusively `hnswlib-wasm` for vector indexing:
+
 **HnswWasmService** (`src/vector/HnswWasmService.ts`):
-- Replaces `HnswIndexService` with identical API
-- Uses WebAssembly for near-native HNSW performance
+- **Primary and only** vector indexing implementation
+- Uses WebAssembly for near-native HNSW performance (~10-50ms query latency)
 - Stores indices in IndexedDB via Emscripten FS
 - Syncs with Walrus for distributed backup
+- Drop-in replacement for the previous Node.js-only `HnswIndexService`
 
-**Key Differences from Node Version**:
+**Backward Compatibility**:
+- Export alias: `export { HnswWasmService as HnswIndexService }`
+- All existing code using `HnswIndexService` automatically uses WASM version
+- No changes needed in dependent services (VectorManager, BatchManager, etc.)
+
+**Implementation Details**:
 ```typescript
 // Initialization (async for WASM loading)
 const lib = await loadHnswlib();

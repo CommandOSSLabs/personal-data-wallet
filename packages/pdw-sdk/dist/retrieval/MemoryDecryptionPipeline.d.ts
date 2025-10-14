@@ -15,7 +15,7 @@
  */
 import { SessionKey } from '@mysten/seal';
 import { EncryptionService } from '../services/EncryptionService';
-import { StorageManager } from '../storage/StorageManager';
+import { StorageManager } from '../infrastructure/walrus/StorageManager';
 import { UnifiedMemoryResult } from '../retrieval/MemoryRetrievalService';
 export interface KeyServerConfig {
     name: string;

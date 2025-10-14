@@ -674,6 +674,13 @@ export interface CreateMemoryRecordTxOptions extends TransactionOptions {
     importance: number;
     embeddingBlobId: string;
 }
+export interface CreateMemoryRecordLightweightTxOptions extends TransactionOptions {
+    category: string;
+    vectorId: number | bigint;
+    blobId: string;
+    blobObjectId?: string;
+    importance: number;
+}
 export interface UpdateMemoryMetadataTxOptions extends TransactionOptions {
     memoryId: string;
     metadataBlobId: string;

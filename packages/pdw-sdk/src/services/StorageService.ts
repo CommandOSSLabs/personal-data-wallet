@@ -23,7 +23,7 @@ import { WalrusClient, WalrusFile } from '@mysten/walrus';
 import type { WriteFilesFlow, WriteBlobFlow } from '@mysten/walrus';
 import type { Signer } from '@mysten/sui/cryptography';
 import type { ClientWithExtensions } from '@mysten/sui/experimental';
-import type { SealService } from '../security/SealService';
+import type { SealService } from '../infrastructure/seal/SealService';
 import type { BatchService } from './BatchService';
 import { PDWConfig } from '../core';
 import { MemoryIndexService } from './MemoryIndexService';

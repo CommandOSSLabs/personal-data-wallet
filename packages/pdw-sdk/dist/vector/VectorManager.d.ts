@@ -3,6 +3,7 @@
  *
  * Provides a unified interface for vector operations combining
  * embedding generation and HNSW indexing with smart caching.
+ * Uses hnswlib-wasm for full browser compatibility.
  */
 import { StorageService } from '../services/StorageService';
 import { VectorEmbedding, EmbeddingConfig, HNSWIndexConfig, BatchConfig, VectorSearchMatch } from '../embedding/types';

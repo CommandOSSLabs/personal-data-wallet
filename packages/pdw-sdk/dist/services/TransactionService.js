@@ -80,6 +80,46 @@ class TransactionService {
         return tx;
     }
     /**
+     * Build transaction to create a lightweight memory record
+     *
+     * This creates a minimal on-chain Memory struct with only essential queryable fields.
+     * Rich metadata should be stored as Walrus blob metadata for gas efficiency.
+     *
+     * Use this when:
+     * - Gas costs are a concern (saves ~50% gas vs full metadata)
+     * - Rich metadata is stored on Walrus blob
+     * - Only need basic filtering (category, vector_id, importance)
+     *
+     * @param options - Lightweight memory creation options
+     * @returns Transaction to create lightweight memory record
+     */
+    buildCreateMemoryRecordLightweight(options) {
+        const tx = new transactions_1.Transaction();
+        // Set gas budget if provided
+        if (options.gasBudget) {
+            tx.setGasBudget(options.gasBudget);
+        }
+        // Set gas price if provided
+        if (options.gasPrice) {
+            tx.setGasPrice(options.gasPrice);
+        }
+        // Call the lightweight memory creation function
+        // Note: Walrus blob_id is a base64 string (URL-safe, no padding)
+        // Example: "E7_nNXvFU_3qZVu3OH1yycRG7LZlyn1-UxEDCDDqGGU"
+        // We encode the string to vector<u8> for the Move function parameter
+        tx.moveCall({
+            target: `${this.config.packageId}::memory::create_memory_record_lightweight`,
+            arguments: [
+                tx.pure.vector('u8', Array.from(new TextEncoder().encode(options.category))),
+                tx.pure.u64(options.vectorId),
+                tx.pure.vector('u8', Array.from(new TextEncoder().encode(options.blobId))),
+                tx.pure.vector('u8', Array.from(new TextEncoder().encode(options.blobObjectId || ''))),
+                tx.pure.u8(options.importance),
+            ],
+        });
+        return tx;
+    }
+    /**
      * Build transaction to update memory metadata
      */
     buildUpdateMemoryMetadata(options) {

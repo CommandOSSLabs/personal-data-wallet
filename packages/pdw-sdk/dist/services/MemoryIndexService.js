@@ -14,7 +14,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MemoryIndexService = void 0;
-const HnswIndexService_1 = require("../vector/HnswIndexService");
+const HnswWasmService_1 = require("../vector/HnswWasmService");
 /**
  * Memory-focused indexing service providing high-level memory operations
  * Uses native HNSW implementation via HnswIndexService for optimal performance
@@ -26,8 +26,8 @@ class MemoryIndexService {
         // Performance tracking
         this.indexStats = new Map();
         this.storageService = storageService;
-        // Initialize legacy HNSW service for backward compatibility
-        this.hnswService = new HnswIndexService_1.HnswIndexService(storageService || undefined, {
+        // Initialize browser-compatible HNSW service using WebAssembly
+        this.hnswService = new HnswWasmService_1.HnswWasmService(storageService || undefined, {
             maxElements: options.maxElements || 10000,
             dimension: options.dimension || 1536, // Default for text-embedding-004
             efConstruction: options.efConstruction || 200,
@@ -36,11 +36,11 @@ class MemoryIndexService {
             maxBatchSize: options.batchSize || 100,
             batchDelayMs: options.autoFlushInterval || 5000
         });
-        console.log('✅ MemoryIndexService initialized with native HNSW (hnswlib-node)');
+        console.log('✅ MemoryIndexService initialized with browser-compatible HNSW (hnswlib-wasm)');
         console.log(`   Max elements: ${options.maxElements || 10000}`);
         console.log(`   Embedding dimension: ${options.dimension || 1536}`);
         console.log(`   HNSW parameters: M=${options.m || 16}, efConstruction=${options.efConstruction || 200}`);
-        console.log(`   Features: batching, caching, Walrus persistence, metadata filtering`);
+        console.log(`   Features: WebAssembly, IndexedDB persistence, batching, Walrus storage`);
     }
     /**
      * Initialize with embedding service

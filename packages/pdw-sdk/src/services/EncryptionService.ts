@@ -8,7 +8,7 @@
 import { SessionKey } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import { fromHex, toHex } from '@mysten/sui/utils';
-import { SealService } from '../security/SealService';
+import { SealService } from '../infrastructure/seal/SealService';
 import { CrossContextPermissionService } from './CrossContextPermissionService';
 import type {
   ClientWithCoreApi,

@@ -18,7 +18,7 @@ import { SealClient, SessionKey } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import { fromHex, toHex } from '@mysten/sui/utils';
 import { EncryptionService } from '../services/EncryptionService';
-import { StorageManager } from '../storage/StorageManager';
+import { StorageManager } from '../infrastructure/walrus/StorageManager';
 import { UnifiedMemoryResult } from '../retrieval/MemoryRetrievalService';
 
 // Key server configurations from SEAL documentation

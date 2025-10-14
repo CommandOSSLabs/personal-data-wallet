@@ -344,7 +344,7 @@ class BatchManager extends events_1.EventEmitter {
     }
     async processIndexingBatch(processedMemories) {
         if (!this.indexService) {
-            console.warn('HnswIndexService not initialized');
+            console.warn('HnswWasmService not initialized');
             return;
         }
         console.log(`Processing indexing batch of ${processedMemories.length} memories`);
