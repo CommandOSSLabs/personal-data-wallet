@@ -59,30 +59,25 @@ export function useMemoryServices(userAddress, config = {}) {
         config.batchSize,
         config.batchDelayMs
     ]);
-    // Get or create services (singleton per user)
-    const services = useMemo(() => {
-        if (!userAddress)
-            return null;
-        // Return existing services if available
-        if (servicesStore.has(userAddress)) {
-            const existing = servicesStore.get(userAddress);
-            existing.refCount++;
-            return existing;
-        }
-        return null;
-    }, [userAddress]);
     // Initialize services on mount
     useEffect(() => {
         if (!userAddress) {
             setIsReady(false);
             return;
         }
+        // Increment ref count on mount
+        if (servicesStore.has(userAddress)) {
+            const existing = servicesStore.get(userAddress);
+            existing.refCount++;
+            setIsReady(true);
+            console.log(`✅ Using existing services for ${userAddress} (refCount: ${existing.refCount})`);
+        }
         let mounted = true;
         const initializeServices = async () => {
             try {
                 setIsLoading(true);
                 setError(null);
-                // Check if services already exist
+                // Check if services already exist (already checked above, but keeping for clarity)
                 if (servicesStore.has(userAddress)) {
                     setIsReady(true);
                     setIsLoading(false);
@@ -158,8 +153,20 @@ export function useMemoryServices(userAddress, config = {}) {
             }
         };
     }, [userAddress, memoizedConfig]);
-    // Return current services
-    if (!userAddress || !services) {
+    // Return current services (get from store directly)
+    if (!userAddress) {
+        return {
+            embeddingService: null,
+            hnswService: null,
+            graphManager: null,
+            isReady: false,
+            isLoading,
+            error
+        };
+    }
+    // Get services from store
+    const services = servicesStore.get(userAddress);
+    if (!services || !isReady) {
         return {
             embeddingService: null,
             hnswService: null,

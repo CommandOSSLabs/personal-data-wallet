@@ -1,258 +1,317 @@
-# Personal Data Wallet Demo
+# Personal Data Wallet - Example App
 
-A comprehensive demo application showcasing the complete Personal Data Wallet (PDW) SDK workflow, including memory creation, AI embeddings, SEAL encryption, Walrus storage, and decryption.
+A Next.js demo application showcasing the Personal Data Wallet SDK for decentralized memory management with AI embeddings, SEAL encryption, and Walrus storage.
 
 ## Features
 
-This demo application demonstrates:
-
-- 🔐 **Wallet-Based Access Control** - Hierarchical wallet system for secure data access
-- 🧠 **AI Embeddings** - Generate embeddings using Google Gemini API
-- 🔒 **SEAL Encryption** - Mysten Labs' encryption for blockchain data
-- 💾 **Walrus Storage** - Decentralized storage for encrypted data
-- 📝 **Memory Management** - Create, list, and retrieve encrypted memories
-- 🔓 **Decryption Flow** - Complete retrieve and decrypt workflow
-
-## Architecture
-
-```
-┌─────────────────┐
-│   Next.js App   │
-└────────┬────────┘
-         │
-         ├─── Create Memory Flow
-         │    1. User enters content
-         │    2. Generate AI embeddings (Gemini)
-         │    3. Encrypt with SEAL
-         │    4. Upload to Walrus
-         │    5. Register on Sui blockchain
-         │
-         ├─── List Memories Flow
-         │    1. Query owned Memory objects
-         │    2. Display with metadata
-         │
-         └─── Retrieve & Decrypt Flow
-              1. Fetch from Walrus by blob ID
-              2. Decrypt with SEAL
-              3. Display original content
-```
+- 🧠 **Create Memories** - Store data with AI-powered categorization
+- 🔍 **Vector Search** - Find memories using semantic search
+- 💬 **Memory Chat (RAG)** - AI assistant with context from your memories
+- 🕸️ **Knowledge Graph** - Visualize relationships between memories
+- 🔐 **Access Control** - Grant and revoke memory access
+- 📁 **Context Wallets** - Organize memories into contexts
 
 ## Prerequisites
 
-- **Node.js** v20 or higher
-- **npm** or **pnpm**
-- **Sui Wallet** (Chrome extension)
-- **Google Gemini API Key** (for embeddings)
-- **Sui Testnet Tokens** (get from [faucet](https://discord.gg/sui))
+- **Node.js** 18.x or higher
+- **npm** 8.x or higher
+- **Sui Wallet** (browser extension for testnet)
+  - [Sui Wallet Chrome Extension](https://chrome.google.com/webstore/detail/sui-wallet)
+- **Gemini API Key** from [Google AI Studio](https://aistudio.google.com/app/apikey)
 
-## Setup Instructions
+## Installation
 
-### 1. Install Dependencies
+### 1. Clone and Navigate
+
+```bash
+cd packages/pdw-sdk/example
+```
+
+### 2. Install Dependencies
 
 ```bash
 npm install
 ```
 
-### 2. Configure Environment
+This will install all required dependencies including the local SDK from `file:../`.
 
-Create a `.env.local` file:
+### 3. Environment Setup
+
+Create a `.env.local` file in the example directory:
 
 ```bash
 cp .env.example .env.local
 ```
 
-Edit `.env.local` with your configuration:
+Edit `.env.local` and add your configuration:
 
-```bash
-# Sui Network
-NEXT_PUBLIC_SUI_NETWORK=testnet
+```env
+# Sui Blockchain Configuration
+NEXT_PUBLIC_PACKAGE_ID=0x067706fc08339b715dab0383bd853b04d06ef6dff3a642c5e7056222da038bde
+NEXT_PUBLIC_ACCESS_REGISTRY_ID=0x1d0a1936e170e54ff12ef30a042b390a8ef6dae0febcdd62c970a87eebed8659
 
-# Smart Contract IDs (already configured for testnet)
-NEXT_PUBLIC_PACKAGE_ID=0x8973c38babdf022a4f6a57d3718737600400d84cd3a0d19de45425de61abd2a1
-NEXT_PUBLIC_ACCESS_REGISTRY_ID=0x4674f831228c357f658adbbfc3f49926252aa11f0fa498abd87b975edf1eba1c
-NEXT_PUBLIC_WALLET_REGISTRY_ID=0x476eaf8676d8dc7dac54cfa9f23694d4fe55205d510341c9f983de008f5a36f2
-
-# Google Gemini API Key (REQUIRED)
-NEXT_PUBLIC_GEMINI_API_KEY=your_api_key_here
-
-# Walrus Configuration (already configured for testnet)
-NEXT_PUBLIC_WALRUS_PUBLISHER=https://publisher.walrus-testnet.walrus.space
+# Walrus Storage Configuration
 NEXT_PUBLIC_WALRUS_AGGREGATOR=https://aggregator.walrus-testnet.walrus.space
+
+# AI Configuration (Required)
+NEXT_PUBLIC_GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-### 3. Get Google Gemini API Key
+#### Getting Your Gemini API Key
 
-1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. Create a new API key
-3. Copy and paste it into your `.env.local` file
+1. Visit [Google AI Studio](https://aistudio.google.com/app/apikey)
+2. Sign in with your Google account
+3. Click **"Get API Key"** or **"Create API Key"**
+4. Copy the key and paste it into `.env.local`
 
-### 4. Run the Application
+> ⚠️ **Important:** The app will not work without a valid Gemini API key. This is required for AI-powered features like memory categorization and embeddings.
+
+## Running the App
+
+### Development Mode
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+The app will start on [http://localhost:3000](http://localhost:3000) (or 3001 if 3000 is in use).
 
-## Usage Guide
+### Production Build
 
-### Connect Wallet
+```bash
+npm run build
+npm run start
+```
 
-1. Click "Connect Wallet" button
-2. Select your Sui wallet (e.g., Sui Wallet)
-3. Approve the connection
+## Using the App
 
-### Create a Memory
+### 1. Connect Your Wallet
 
-1. Enter your memory content in the text area
-2. Click "Create Memory"
-3. The app will:
-   - Generate AI embeddings for semantic search
-   - Encrypt the data using SEAL
-   - Upload encrypted data to Walrus
-   - Register the memory on Sui blockchain
+1. Open the app in your browser
+2. Click **"Connect Wallet"** in the top-right
+3. Select your Sui wallet and approve the connection
+4. Make sure you're on **Sui Testnet**
+
+### 2. Get Testnet SUI Tokens
+
+You need testnet SUI tokens to pay for transactions:
+
+```bash
+# Request testnet tokens
+curl --location --request POST 'https://faucet.testnet.sui.io/gas' \
+  --header 'Content-Type: application/json' \
+  --data-raw '{
+    "FixedAmountRequest": {
+      "recipient": "YOUR_WALLET_ADDRESS"
+    }
+  }'
+```
+
+Or use the [Sui Testnet Faucet](https://faucet.sui.io/) web interface.
+
+### 3. Create Your First Memory
+
+1. Navigate to the **"Create"** tab
+2. Enter some text (e.g., "I love TypeScript and building decentralized apps")
+3. Click **"Create Memory"**
 4. Approve the transaction in your wallet
-5. Wait for confirmation (usually 2-5 seconds)
+5. Wait for the memory to be processed (~5-10 seconds)
 
-### View Your Memories
+### 4. Search Your Memories
 
-- Your memories appear automatically in the right panel
-- Click "Refresh" to reload the list
-- Each memory shows:
-  - Title (first 100 characters)
-  - Content preview
-  - Creation timestamp
-  - Embedding dimensions
-  - Object ID
+1. Navigate to the **"Vector Search"** tab
+2. Enter a search query (e.g., "programming languages")
+3. Adjust similarity threshold and result count as needed
+4. View semantically similar memories
 
-### Retrieve & Decrypt
+### 5. Chat with Your Memories
 
-1. Get the Walrus blob ID from the create memory status
-2. Paste it into the "Retrieve & Decrypt Memory" section
-3. Click "Retrieve & Decrypt"
-4. The app will:
-   - Fetch encrypted data from Walrus
-   - Decrypt using SEAL
-   - Display the original content
+1. Navigate to the **"AI Chat"** tab
+2. Ask questions about your memories
+3. The AI will retrieve relevant context and respond
+4. Save important messages as new memories
 
-## Code Structure
+## Architecture
 
 ```
-src/
-├── app/
-│   ├── layout.tsx          # Root layout with providers
-│   ├── page.tsx            # Main page component
-│   ├── providers.tsx       # Sui wallet and query providers
-│   └── globals.css         # Global styles
-│
-└── components/
-    ├── CreateMemory.tsx    # Memory creation with encryption
-    ├── MemoryList.tsx      # List of on-chain memories
-    └── RetrieveMemory.tsx  # Decryption and retrieval
+example/
+├── src/
+│   ├── app/
+│   │   ├── api/              # API routes for AI operations
+│   │   │   ├── analyze/      # Content analysis endpoint
+│   │   │   ├── categorize/   # Category detection endpoint
+│   │   │   └── embed/        # Embedding generation endpoint
+│   │   ├── layout.tsx        # Root layout with providers
+│   │   ├── page.tsx          # Main page with tabs
+│   │   └── providers.tsx     # React Query + Sui providers
+│   ├── components/           # React components
+│   │   ├── CreateMemory.tsx  # Memory creation (uses SDK hooks)
+│   │   ├── SearchMemory.tsx  # Vector search
+│   │   ├── MemoryChat.tsx    # RAG chat interface
+│   │   ├── KnowledgeGraph.tsx# Graph visualization
+│   │   └── ...               # Other components
+│   └── styles/
+├── public/
+├── .env.local               # Your environment variables (not committed)
+├── .env.example             # Example environment file
+├── next.config.js           # Next.js configuration
+├── package.json             # Dependencies
+└── README.md                # This file
 ```
 
-## Key Components
+## Key SDK Integration
 
-### CreateMemory Component
+The example app uses the Personal Data Wallet SDK in two ways:
 
-Demonstrates the complete creation flow:
+### 1. React Hooks (Recommended)
 
 ```typescript
-// 1. Generate embedding
-const embedding = await generateEmbedding(content);
+import { useCreateMemory } from 'personal-data-wallet-sdk';
 
-// 2. Encrypt with SEAL
-const encrypted = await encryptWithSEAL(dataBytes);
-
-// 3. Upload to Walrus
-const blobId = await uploadToWalrus(encrypted);
-
-// 4. Register on-chain
-await registerOnChain(blobId, embedding);
-```
-
-### RetrieveMemory Component
-
-Demonstrates the decryption flow:
-
-```typescript
-// 1. Retrieve from Walrus
-const encrypted = await retrieveFromWalrus(blobId);
-
-// 2. Decrypt with SEAL
-const decrypted = await decryptWithSEAL(encrypted);
-
-// 3. Parse and display
-const data = JSON.parse(new TextDecoder().decode(decrypted));
-```
-
-## Smart Contract Interactions
-
-### Register Context Wallet
-
-```typescript
-tx.moveCall({
-  target: `${packageId}::seal_access_control::register_context_wallet`,
-  arguments: [
-    tx.object(accessRegistryId),
-    tx.pure.address(walletAddress),
-    tx.pure.u64(0),
-    tx.pure.string('pdw-demo'),
-    tx.object('0x6'),
-  ],
+const { mutate: createMemory, isPending, progress } = useCreateMemory({
+  config: {
+    packageId: process.env.NEXT_PUBLIC_PACKAGE_ID!,
+    geminiApiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY!,
+  },
+  onSuccess: (result) => console.log('Created:', result.blobId),
 });
+
+// Use it
+createMemory({ content: 'My memory', category: 'general' });
 ```
 
-### Create Memory
+### 2. Direct Manager (Alternative)
 
 ```typescript
-tx.moveCall({
-  target: `${packageId}::memory::create_memory`,
-  arguments: [
-    tx.object(walletRegistryId),
-    tx.pure.string(title),
-    tx.pure.string(content),
-    tx.pure.vector('u8', metadata),
-    tx.pure.vector('f32', embedding),
-    tx.pure.string('pdw-demo'),
-  ],
+import { ClientMemoryManager } from 'personal-data-wallet-sdk';
+
+const manager = new ClientMemoryManager({
+  packageId: process.env.NEXT_PUBLIC_PACKAGE_ID!,
+  geminiApiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY!,
+});
+
+const blobId = await manager.createMemory({
+  content: 'My memory',
+  account,
+  signAndExecute,
+  client,
 });
 ```
 
 ## Troubleshooting
 
+### Build Fails / Module Resolution Errors
+
+If you see errors during build:
+
+```bash
+# Clean everything and reinstall
+rm -rf .next node_modules
+npm install
+npm run dev
+```
+
 ### "Gemini API key not configured"
-- Make sure you've set `NEXT_PUBLIC_GEMINI_API_KEY` in `.env.local`
-- Restart the dev server after adding the key
 
-### "Insufficient gas"
-- Get testnet SUI tokens from [Discord faucet](https://discord.gg/sui)
-- Use the `#devnet-faucet` channel
+Ensure your `.env.local` has the API key:
 
-### "Failed to upload to Walrus"
-- Check your internet connection
-- Walrus testnet might be temporarily down
-- Try again in a few moments
+```env
+NEXT_PUBLIC_GEMINI_API_KEY=AIza...your_key_here
+```
 
-### Wallet connection issues
-- Make sure Sui Wallet extension is installed
-- Switch to Sui Testnet in your wallet
-- Try disconnecting and reconnecting
+Restart the dev server after changing `.env.local`.
 
-## Resources
+### Wallet Not Connecting
 
-- [PDW SDK Documentation](https://www.npmjs.com/package/personal-data-wallet-sdk)
-- [Sui Documentation](https://docs.sui.io/)
-- [Walrus Documentation](https://docs.walrus.site/)
-- [SEAL Documentation](https://github.com/MystenLabs/seal)
-- [Google Gemini API](https://ai.google.dev/)
+1. Install the [Sui Wallet extension](https://chrome.google.com/webstore/detail/sui-wallet)
+2. Switch to **Testnet** in wallet settings
+3. Refresh the page and try again
+
+### Memory Creation Stuck
+
+If memory creation hangs:
+
+1. Check browser console for errors
+2. Verify your wallet has testnet SUI tokens
+3. Check that Gemini API key is valid
+4. Ensure Walrus aggregator is accessible
+
+### Port Already in Use
+
+If port 3000 is in use:
+
+```bash
+# Kill the process using port 3000
+lsof -ti:3000 | xargs kill -9
+
+# Or let Next.js use an alternative port (it will try 3001 automatically)
+npm run dev
+```
+
+### SDK Changes Not Reflecting
+
+When making changes to the SDK:
+
+```bash
+# 1. Build the SDK
+cd packages/pdw-sdk
+npm run build
+
+# 2. Reinstall in example app
+cd example
+rm -rf node_modules/personal-data-wallet-sdk
+npm install
+
+# 3. Restart dev server
+npm run dev
+```
+
+## Environment Variables Reference
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NEXT_PUBLIC_PACKAGE_ID` | Yes | Sui smart contract package ID (testnet) |
+| `NEXT_PUBLIC_ACCESS_REGISTRY_ID` | Yes | Access control registry object ID |
+| `NEXT_PUBLIC_WALRUS_AGGREGATOR` | Yes | Walrus storage aggregator URL |
+| `NEXT_PUBLIC_GEMINI_API_KEY` | Yes | Google Gemini API key for AI features |
+
+## Performance Notes
+
+- **Memory Creation**: ~5-10 seconds (includes AI analysis + encryption + storage)
+- **Vector Search**: ~50-200ms (after index is loaded)
+- **Memory Retrieval**: ~300-500ms (includes decryption)
+
+## SDK Development Workflow
+
+This example app uses the local SDK via `file:../`. When developing:
+
+```bash
+# 1. Make changes in packages/pdw-sdk/src/
+# 2. Build the SDK
+cd packages/pdw-sdk
+npm run build
+
+# 3. The example app automatically uses the latest build
+cd example
+npm run dev
+```
+
+## Learn More
+
+- [Personal Data Wallet SDK Documentation](../README.md)
+- [Next.js Documentation](https://nextjs.org/docs)
+- [Sui Documentation](https://docs.sui.io)
+- [Walrus Documentation](https://docs.walrus.site)
+- [@mysten/dapp-kit](https://sdk.mystenlabs.com/dapp-kit)
+
+## Support
+
+If you encounter issues:
+
+1. Check this README's troubleshooting section
+2. Review the [SDK documentation](../README.md)
+3. Open an issue on [GitHub](https://github.com/CommandOSSLabs/personal-data-wallet/issues)
 
 ## License
 
 MIT
-
-## Support
-
-For issues and questions:
-- GitHub Issues: [CommandOSS/personal_data_wallet](https://github.com/CommandOSS/personal_data_wallet/issues)
-- SDK Package: [personal-data-wallet-sdk](https://www.npmjs.com/package/personal-data-wallet-sdk)

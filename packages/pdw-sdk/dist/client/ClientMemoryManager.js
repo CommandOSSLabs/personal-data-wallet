@@ -37,6 +37,8 @@ import { SealClient, SessionKey } from '@mysten/seal';
 import { WalrusClient } from '@mysten/walrus';
 import { Transaction } from '@mysten/sui/transactions';
 import { fromHex } from '@mysten/sui/utils';
+import { BrowserHnswIndexService } from '../vector/BrowserHnswIndexService';
+import { EmbeddingService } from '../services/EmbeddingService';
 /**
  * Client-side memory manager for React dApps
  */
@@ -53,8 +55,27 @@ export class ClientMemoryManager {
                 '0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8'
             ],
             walrusNetwork: config.walrusNetwork || 'testnet',
-            categories: config.categories || this.defaultCategories
+            categories: config.categories || this.defaultCategories,
+            enableLocalIndexing: config.enableLocalIndexing !== false // Default: true
         };
+        // Initialize local indexing services if enabled
+        if (this.config.enableLocalIndexing && this.config.geminiApiKey) {
+            this.embeddingService = new EmbeddingService({
+                apiKey: this.config.geminiApiKey,
+                model: 'text-embedding-004',
+                dimensions: 768
+            });
+            this.hnswService = new BrowserHnswIndexService({
+                dimension: 768,
+                maxElements: 10000,
+                m: 16,
+                efConstruction: 200
+            }, {
+                maxBatchSize: 50,
+                batchDelayMs: 5000
+            });
+            console.log('✅ Local indexing enabled for ClientMemoryManager');
+        }
     }
     /**
      * Create a new memory (3 signatures: Walrus register, certify, on-chain)
@@ -107,6 +128,33 @@ export class ClientMemoryManager {
             });
             console.log('✅ Memory created successfully!');
             onProgress?.('Memory created successfully!');
+            // Step 7: Index locally for search (if enabled)
+            if (this.config.enableLocalIndexing && this.hnswService && account.address) {
+                try {
+                    console.log('🔍 Step 7: Indexing locally for search...');
+                    onProgress?.('Indexing for local search...');
+                    const vectorId = Date.now(); // Same as used in registerOnChain
+                    // Prepare metadata
+                    const metadata = {
+                        blobId,
+                        category: analysis.category,
+                        importance: analysis.importance,
+                        createdTimestamp: Date.now(),
+                        contentType: 'text/plain',
+                        contentSize: content.length,
+                        source: 'client_memory_manager'
+                    };
+                    // Add to local index (batched, will flush in ~5 seconds)
+                    this.hnswService.addVectorToIndexBatched(account.address, vectorId, embedding, // Reuse embedding from step 2!
+                    metadata);
+                    console.log('✅ Memory indexed locally! Vector ID:', vectorId);
+                    onProgress?.('Memory indexed! (will persist in ~5 seconds)');
+                }
+                catch (indexError) {
+                    // Non-fatal: memory is still created on-chain
+                    console.warn('⚠️ Local indexing failed:', indexError);
+                }
+            }
             console.log('🎉 Memory creation complete!');
             return blobId;
         }

@@ -30,6 +30,20 @@ export function KnowledgeGraph() {
     setRelatedEntities(related || []);
   };
 
+  // Show connection prompt if wallet not connected
+  if (!account?.address) {
+    return (
+      <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6 shadow-xl">
+        <h2 className="text-2xl font-bold text-white mb-2">Knowledge Graph</h2>
+        <div className="text-center py-12">
+          <p className="text-slate-300 mb-4">
+            Please connect your wallet to view Knowledge Graph
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6 shadow-xl">
       <h2 className="text-2xl font-bold text-white mb-2">Knowledge Graph</h2>

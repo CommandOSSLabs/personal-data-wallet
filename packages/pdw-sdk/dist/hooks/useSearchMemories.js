@@ -63,7 +63,7 @@ export function useSearchMemories(userAddress, query, options = {}) {
         userAddress: userAddress ? `${userAddress.substring(0, 10)}...` : 'UNDEFINED'
     });
     // Use the browser-compatible memory search hook with API key config
-    const { search, results, isSearching, error: searchError } = useMemorySearch(userAddress, geminiApiKey ? { geminiApiKey } : undefined);
+    const { search, results, isSearching, error: searchError, isReady } = useMemorySearch(userAddress, geminiApiKey ? { geminiApiKey } : undefined);
     // React Query for caching and state management
     const queryResult = useQuery({
         queryKey: cacheKeys.searchMemories(userAddress, debouncedQuery),
@@ -89,7 +89,7 @@ export function useSearchMemories(userAddress, query, options = {}) {
                 embedding: result.embedding,
             }));
         },
-        enabled: enabled && !!userAddress && debouncedQuery.trim().length > 0,
+        enabled: enabled && !!userAddress && debouncedQuery.trim().length > 0 && isReady,
         staleTime,
         retry: 1,
     });

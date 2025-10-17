@@ -9,6 +9,9 @@
 # Next.js
 /.next/
 /out/
+.turbo/
+.cache/
+.parcel-cache/
 
 # Production
 /build
@@ -25,6 +28,8 @@ yarn-error.log*
 # IDE
 .vscode/
 .idea/
+.serena/
+.claude/
 
 # OS
 .DS_Store

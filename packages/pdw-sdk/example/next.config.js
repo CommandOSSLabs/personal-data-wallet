@@ -18,6 +18,12 @@ const nextConfig = {
   webpack: (config, { isServer }) => {
     config.externals.push('pino-pretty', 'encoding');
 
+    // Ensure @tanstack/react-query resolves to the app's node_modules
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@tanstack/react-query': require.resolve('@tanstack/react-query'),
+    };
+
     // Exclude Node.js native modules from client bundle
     if (!isServer) {
       config.resolve.fallback = {

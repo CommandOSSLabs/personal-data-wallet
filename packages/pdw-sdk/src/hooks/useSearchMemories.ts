@@ -149,7 +149,7 @@ export function useSearchMemories(
   });
 
   // Use the browser-compatible memory search hook with API key config
-  const { search, results, isSearching, error: searchError } = useMemorySearch(
+  const { search, results, isSearching, error: searchError, isReady } = useMemorySearch(
     userAddress,
     geminiApiKey ? { geminiApiKey } : undefined
   );
@@ -183,7 +183,7 @@ export function useSearchMemories(
         embedding: result.embedding,
       }));
     },
-    enabled: enabled && !!userAddress && debouncedQuery.trim().length > 0,
+    enabled: enabled && !!userAddress && debouncedQuery.trim().length > 0 && isReady,
     staleTime,
     retry: 1,
   });

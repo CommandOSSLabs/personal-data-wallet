@@ -26,6 +26,20 @@ export function SearchMemory() {
     }
   );
 
+  // Show connection prompt if wallet not connected
+  if (!account?.address) {
+    return (
+      <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6 shadow-xl">
+        <h2 className="text-2xl font-bold text-white mb-4">Vector Search</h2>
+        <div className="text-center py-8">
+          <p className="text-slate-300 mb-4">
+            Please connect your wallet to search memories
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6 shadow-xl">
       <h2 className="text-2xl font-bold text-white mb-4">Vector Search</h2>
@@ -114,6 +128,9 @@ export function SearchMemory() {
             </p>
             <p className="text-slate-400 text-sm mt-2">
               Try lowering the similarity threshold or using different keywords.
+            </p>
+            <p className="text-slate-400 text-sm mt-3">
+              💡 Tip: Make sure you've added some memories first using the "Add Memory" section above.
             </p>
           </div>
         )}

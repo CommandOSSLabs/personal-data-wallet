@@ -71,11 +71,36 @@ export function useMemorySearch(userAddress, config) {
             // 3. Create metadata filter
             const filter = createMetadataFilter(options);
             // 4. Search HNSW index
-            const vectorResults = await hnswService.searchVectors(userAddress, embeddingResult.vector, {
-                k: Math.min(k * 2, 100), // Get more candidates for filtering
-                efSearch,
-                filter
-            });
+            let vectorResults;
+            try {
+                vectorResults = await hnswService.searchVectors(userAddress, embeddingResult.vector, {
+                    k: Math.min(k * 2, 100), // Get more candidates for filtering
+                    efSearch,
+                    filter
+                });
+            }
+            catch (searchError) {
+                // Handle "No index found" gracefully - return empty results
+                if (searchError.message?.includes('No index found')) {
+                    console.info(`No memories indexed yet for user ${userAddress}`);
+                    const searchResult = {
+                        vectorResults: {
+                            ids: [],
+                            distances: [],
+                            similarities: []
+                        },
+                        metadata: {
+                            queryTime: performance.now() - startTime,
+                            totalResults: 0,
+                            mode: options.mode || 'semantic'
+                        }
+                    };
+                    setResults(searchResult);
+                    return searchResult;
+                }
+                // Re-throw other errors
+                throw searchError;
+            }
             // 5. Apply threshold filtering
             let filteredIds = vectorResults.ids;
             let filteredDistances = vectorResults.distances;

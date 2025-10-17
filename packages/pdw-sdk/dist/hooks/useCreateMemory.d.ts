@@ -105,7 +105,6 @@ export interface UseCreateMemoryReturn {
 }
 /**
  * Hook for creating memories with automatic state management
- * No React Query dependency - uses plain React state
  */
 export declare function useCreateMemory(options?: UseCreateMemoryOptions): UseCreateMemoryReturn;
 export default useCreateMemory;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { EmbeddingService } from 'personal-data-wallet-sdk/services';
+import { GoogleGenAI } from '@google/genai';
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,23 +20,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Use SDK's EmbeddingService (same as test)
-    const embeddingService = new EmbeddingService({
-      apiKey: apiKey,
-      model: 'text-embedding-004'
+    // Use GoogleGenAI directly (bypasses SDK import issues)
+    const genAI = new GoogleGenAI({ apiKey });
+    const startTime = Date.now();
+
+    // Generate embedding using Gemini API
+    const result = await genAI.models.embedContent({
+      model: 'text-embedding-004',
+      contents: text
     });
 
-    // Generate embedding
-    const result = await embeddingService.embedText({
-      text,
-      type: 'content'
-    });
+    const embedding = result.embeddings?.[0]?.values || [];
+    const processingTime = Date.now() - startTime;
 
     return NextResponse.json({
-      embedding: result.vector,
-      dimensions: result.dimension,
-      model: result.model,
-      processingTime: result.processingTime,
+      embedding,
+      dimensions: embedding.length,
+      model: 'text-embedding-004',
+      processingTime,
     });
   } catch (error: any) {
     console.error('Embedding error:', error);

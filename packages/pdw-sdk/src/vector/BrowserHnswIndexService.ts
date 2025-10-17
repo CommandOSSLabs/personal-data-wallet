@@ -250,7 +250,13 @@ export class BrowserHnswIndexService {
         // Try to load from IndexedDB
         const loaded = await this.loadIndexFromDB(userAddress);
         if (!loaded) {
-          throw new Error(`No index found for user ${userAddress}`);
+          // No index exists yet - this is normal for new users or users with no memories
+          console.info(`No index found for user ${userAddress} - returning empty results`);
+          return {
+            ids: [],
+            distances: [],
+            similarities: []
+          };
         }
       }
 

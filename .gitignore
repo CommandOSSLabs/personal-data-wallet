@@ -8,6 +8,9 @@ __pycache__/
 .next/
 out/
 build/
+.turbo/
+.cache/
+.parcel-cache/
 
 # Environment variables
 .env
@@ -19,6 +22,8 @@ build/
 # IDE
 .vscode/
 .idea/
+.serena/
+.claude/
 *.swp
 *.swo
 

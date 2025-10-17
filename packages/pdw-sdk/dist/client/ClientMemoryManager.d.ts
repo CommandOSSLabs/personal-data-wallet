@@ -43,6 +43,8 @@ export interface ClientMemoryManagerConfig {
     sealServerObjectIds?: string[];
     walrusNetwork?: 'testnet' | 'mainnet';
     categories?: string[];
+    /** Enable local browser indexing for vector search (default: true) */
+    enableLocalIndexing?: boolean;
 }
 export interface CreateMemoryOptions {
     content: string;
@@ -101,6 +103,8 @@ export interface ClientMemoryMetadata {
 export declare class ClientMemoryManager {
     private readonly config;
     private readonly defaultCategories;
+    private embeddingService?;
+    private hnswService?;
     constructor(config: ClientMemoryManagerConfig);
     /**
      * Create a new memory (3 signatures: Walrus register, certify, on-chain)

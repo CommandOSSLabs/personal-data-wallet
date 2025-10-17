@@ -36,6 +36,22 @@ export function MemoryChat() {
     }
   };
 
+  // Show connection prompt if wallet not connected
+  if (!account?.address) {
+    return (
+      <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6 shadow-xl h-[700px] flex flex-col">
+        <h2 className="text-2xl font-bold text-white mb-2">Memory Chat (RAG)</h2>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-slate-300 mb-4">
+              Please connect your wallet to use Memory Chat
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6 shadow-xl h-[700px] flex flex-col">
       <div className="mb-4">
