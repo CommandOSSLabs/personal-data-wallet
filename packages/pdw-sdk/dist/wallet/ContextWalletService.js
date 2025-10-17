@@ -1,4 +1,3 @@
-"use strict";
 /**
  * ContextWalletService - App-scoped data container management
  *
@@ -8,14 +7,12 @@
  * - CRUD operations within contexts
  * - Integration with MainWalletService for identity
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ContextWalletService = void 0;
-const transactions_1 = require("@mysten/sui/transactions");
-const utils_1 = require("@mysten/sui/utils");
+import { Transaction } from '@mysten/sui/transactions';
+import { normalizeSuiAddress } from '@mysten/sui/utils';
 /**
  * ContextWalletService handles app-scoped data containers
  */
-class ContextWalletService {
+export class ContextWalletService {
     constructor(config) {
         this.suiClient = config.suiClient;
         this.packageId = config.packageId;
@@ -42,7 +39,7 @@ class ContextWalletService {
             appId: options.appId
         });
         // Build transaction to create context wallet as dynamic field
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         tx.moveCall({
             target: `${this.packageId}::wallet::create_context_wallet`,
             arguments: [
@@ -157,9 +154,9 @@ class ContextWalletService {
             const derivedContextId = `0x${contextIdBytes
                 .map((byte) => Number(byte).toString(16).padStart(2, '0'))
                 .join('')}`;
-            const ownerAddress = fields.owner ? (0, utils_1.normalizeSuiAddress)(String(fields.owner)) : undefined;
+            const ownerAddress = fields.owner ? normalizeSuiAddress(String(fields.owner)) : undefined;
             const mainWalletId = fields.main_wallet_id
-                ? (0, utils_1.normalizeSuiAddress)(String(fields.main_wallet_id))
+                ? normalizeSuiAddress(String(fields.main_wallet_id))
                 : undefined;
             return {
                 id: objectData.objectId,
@@ -416,11 +413,11 @@ class ContextWalletService {
      * @returns True if user has access
      */
     async validateAccess(contextId, userAddress) {
-        const normalizedUser = (0, utils_1.normalizeSuiAddress)(userAddress);
+        const normalizedUser = normalizeSuiAddress(userAddress);
         const targetId = contextId.toLowerCase();
         // First, try direct lookup by object ID
         const context = await this.getContext(contextId);
-        if (context && (0, utils_1.normalizeSuiAddress)(context.owner) === normalizedUser) {
+        if (context && normalizeSuiAddress(context.owner) === normalizedUser) {
             return true;
         }
         // Fallback: iterate through user contexts and match by id or derived context id
@@ -429,7 +426,7 @@ class ContextWalletService {
         if (!match) {
             return false;
         }
-        return (0, utils_1.normalizeSuiAddress)(match.owner) === normalizedUser;
+        return normalizeSuiAddress(match.owner) === normalizedUser;
     }
     /**
      * Get statistics for a context wallet
@@ -481,5 +478,4 @@ class ContextWalletService {
             context.contextId.toLowerCase() === normalizedIdentifier);
     }
 }
-exports.ContextWalletService = ContextWalletService;
 //# sourceMappingURL=ContextWalletService.js.map

@@ -1,21 +1,15 @@
-"use strict";
 /**
  * Configuration Validation
  *
  * Validates PDW configuration and provides helpful error messages
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ConfigurationError = void 0;
-exports.validateConfig = validateConfig;
-exports.mergeConfigs = mergeConfigs;
-class ConfigurationError extends Error {
+export class ConfigurationError extends Error {
     constructor(message) {
         super(`PDW Configuration Error: ${message}`);
         this.name = 'ConfigurationError';
     }
 }
-exports.ConfigurationError = ConfigurationError;
-function validateConfig(config) {
+export function validateConfig(config) {
     const errors = [];
     // Validate required fields
     if (!config.apiUrl) {
@@ -58,7 +52,7 @@ function isValidUrl(string) {
         return false;
     }
 }
-function mergeConfigs(base, overrides) {
+export function mergeConfigs(base, overrides) {
     return {
         ...base,
         ...overrides,

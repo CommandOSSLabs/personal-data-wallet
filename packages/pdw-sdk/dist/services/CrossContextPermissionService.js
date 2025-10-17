@@ -1,18 +1,15 @@
-"use strict";
 /**
  * Cross-Context Permission Service
  *
  * Manages cross-context access permissions for the Personal Data Wallet.
  * Enables apps to request and manage access to data from other app contexts.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.CrossContextPermissionService = void 0;
-const transactions_1 = require("@mysten/sui/transactions");
-const utils_1 = require("@mysten/sui/utils");
+import { Transaction } from '@mysten/sui/transactions';
+import { normalizeSuiAddress } from '@mysten/sui/utils';
 /**
  * Service for managing cross-context permissions
  */
-class CrossContextPermissionService {
+export class CrossContextPermissionService {
     constructor(config, client) {
         this.packageId = config.packageId;
         this.accessRegistryId = config.accessRegistryId;
@@ -47,12 +44,12 @@ class CrossContextPermissionService {
      * @returns Transaction object
      */
     buildRegisterContextWalletTransaction(options) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         tx.moveCall({
             target: `${this.packageId}::seal_access_control::register_context_wallet`,
             arguments: [
                 tx.object(this.accessRegistryId),
-                tx.pure.address((0, utils_1.normalizeSuiAddress)(options.contextWallet)),
+                tx.pure.address(normalizeSuiAddress(options.contextWallet)),
                 tx.pure.u64(options.derivationIndex),
                 tx.pure.string(options.appHint ?? ''),
                 tx.object('0x6'), // Clock object
@@ -89,13 +86,13 @@ class CrossContextPermissionService {
      * @returns Transaction object
      */
     buildGrantWalletAllowlistTransaction(options) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         tx.moveCall({
             target: `${this.packageId}::seal_access_control::grant_wallet_allowlist_access`,
             arguments: [
                 tx.object(this.accessRegistryId),
-                tx.pure.address((0, utils_1.normalizeSuiAddress)(options.requestingWallet)),
-                tx.pure.address((0, utils_1.normalizeSuiAddress)(options.targetWallet)),
+                tx.pure.address(normalizeSuiAddress(options.requestingWallet)),
+                tx.pure.address(normalizeSuiAddress(options.targetWallet)),
                 tx.pure.string(options.scope ?? 'read'),
                 tx.pure.string(options.accessLevel),
                 tx.pure.u64(options.expiresAt),
@@ -133,13 +130,13 @@ class CrossContextPermissionService {
      * @returns Transaction object
      */
     buildRevokeWalletAllowlistTransaction(options) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         tx.moveCall({
             target: `${this.packageId}::seal_access_control::revoke_wallet_allowlist_access`,
             arguments: [
                 tx.object(this.accessRegistryId),
-                tx.pure.address((0, utils_1.normalizeSuiAddress)(options.requestingWallet)),
-                tx.pure.address((0, utils_1.normalizeSuiAddress)(options.targetWallet)),
+                tx.pure.address(normalizeSuiAddress(options.requestingWallet)),
+                tx.pure.address(normalizeSuiAddress(options.targetWallet)),
                 tx.pure.string(options.scope ?? 'read'),
             ],
         });
@@ -153,12 +150,12 @@ class CrossContextPermissionService {
      * @returns Transaction object
      */
     buildSealApproveTransaction(contentId, requestingWallet) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         tx.moveCall({
             target: `${this.packageId}::seal_access_control::seal_approve`,
             arguments: [
                 tx.pure.vector('u8', Array.from(contentId)),
-                tx.pure.address((0, utils_1.normalizeSuiAddress)(requestingWallet)),
+                tx.pure.address(normalizeSuiAddress(requestingWallet)),
                 tx.object(this.accessRegistryId),
                 tx.object('0x6'), // Clock object
             ],
@@ -171,8 +168,8 @@ class CrossContextPermissionService {
     async queryWalletPermissions(options) {
         const events = await this.fetchWalletAllowlistEvents();
         const state = this.reduceWalletAllowlistEvents(events);
-        const normalizedRequester = options.requestingWallet ? (0, utils_1.normalizeSuiAddress)(options.requestingWallet) : undefined;
-        const normalizedTarget = options.targetWallet ? (0, utils_1.normalizeSuiAddress)(options.targetWallet) : undefined;
+        const normalizedRequester = options.requestingWallet ? normalizeSuiAddress(options.requestingWallet) : undefined;
+        const normalizedTarget = options.targetWallet ? normalizeSuiAddress(options.targetWallet) : undefined;
         const scopeFilter = options.scope ?? undefined;
         return Array.from(state.values())
             .filter((permission) => {
@@ -218,10 +215,10 @@ class CrossContextPermissionService {
     async getWalletAllowlistHistory(filter) {
         const events = await this.fetchWalletAllowlistEvents();
         const normalizedRequester = filter?.requestingWallet
-            ? (0, utils_1.normalizeSuiAddress)(filter.requestingWallet)
+            ? normalizeSuiAddress(filter.requestingWallet)
             : undefined;
         const normalizedTarget = filter?.targetWallet
-            ? (0, utils_1.normalizeSuiAddress)(filter.targetWallet)
+            ? normalizeSuiAddress(filter.targetWallet)
             : undefined;
         return events
             .filter((event) => {
@@ -259,13 +256,13 @@ class CrossContextPermissionService {
             if (!parsed) {
                 continue;
             }
-            const requestingWallet = (0, utils_1.normalizeSuiAddress)(String(parsed.requester_wallet));
-            const targetWallet = (0, utils_1.normalizeSuiAddress)(String(parsed.target_wallet));
+            const requestingWallet = normalizeSuiAddress(String(parsed.requester_wallet));
+            const targetWallet = normalizeSuiAddress(String(parsed.target_wallet));
             const scope = String(parsed.scope ?? 'read');
             const accessLevel = String(parsed.access_level ?? 'read');
             const granted = Boolean(parsed.granted);
             const expiresAt = Number(parsed.expires_at ?? 0);
-            const grantedBy = (0, utils_1.normalizeSuiAddress)(String(parsed.granted_by ?? requestingWallet));
+            const grantedBy = normalizeSuiAddress(String(parsed.granted_by ?? requestingWallet));
             const grantedAt = Number(event.timestampMs ?? Date.now());
             const key = `${requestingWallet}-${targetWallet}-${scope}`;
             events.push({
@@ -304,5 +301,4 @@ class CrossContextPermissionService {
         return state;
     }
 }
-exports.CrossContextPermissionService = CrossContextPermissionService;
 //# sourceMappingURL=CrossContextPermissionService.js.map

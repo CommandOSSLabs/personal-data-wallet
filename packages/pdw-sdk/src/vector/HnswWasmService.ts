@@ -131,9 +131,9 @@ export class HnswWasmService {
       console.log(`🔨 Creating new HNSW index for user ${userAddress}`);
       console.log(`   Dimensions: ${config.dimension}, M: ${config.m}, efConstruction: ${config.efConstruction}`);
 
-      // Create a new index using WASM
-      const index = this.hnswlib!.HierarchicalNSW(config.spaceType, config.maxElements);
-      index.initIndex(config.dimension, config.m, config.efConstruction, config.randomSeed);
+      // Create a new index using WASM (constructor takes: spaceName, numDimensions, autoSaveFilename)
+      const index = new this.hnswlib!.HierarchicalNSW(config.spaceType, config.dimension, '');
+      index.initIndex(config.maxElements, config.m, config.efConstruction, config.randomSeed);
 
       // Create cache entry
       this.indexCache.set(userAddress, {
@@ -150,11 +150,11 @@ export class HnswWasmService {
       const indexName = `index_${userAddress}_${Date.now()}`;
       await index.writeIndex(indexName);
 
-      // Sync to IndexedDB
-      await this.hnswlib!.EmscriptenFileSystemManager.syncFS(false);
+      // Sync to IndexedDB (persist the index) - syncFS requires a callback
+      await this.hnswlib!.EmscriptenFileSystemManager.syncFS(false, () => {});
 
-      // Read serialized data (simplified - in real implementation would read from Emscripten FS)
-      const serialized = new Uint8Array(0); // Placeholder
+      // Read serialized data from filesystem for returning
+      const serialized = new Uint8Array(0); // Placeholder - actual data is in IndexedDB
 
       console.log(`✅ Index created successfully for ${userAddress}`);
 
@@ -243,7 +243,7 @@ export class HnswWasmService {
       const { k = 10, efSearch = 50, filter } = options;
 
       // Set search parameters
-      cacheEntry.index.setEf(efSearch);
+      cacheEntry.index.setEfSearch(efSearch);
 
       let searchIndex = cacheEntry.index;
 
@@ -258,10 +258,15 @@ export class HnswWasmService {
         }
       }
 
-      // Perform search with optional filter
-      const result = filter
-        ? searchIndex.searchKnn(queryVector, k, filter)
-        : searchIndex.searchKnn(queryVector, k);
+      // Perform search (convert to Float32Array if needed)
+      const queryFloat32 = queryVector instanceof Float32Array
+        ? queryVector
+        : new Float32Array(queryVector);
+      const result = searchIndex.searchKnn(
+        queryFloat32,
+        k,
+        filter && typeof filter === 'function' ? (filter as (label: number) => boolean) : undefined
+      );
 
       // Apply metadata filter if provided (additional filtering)
       let filteredIds = result.neighbors;
@@ -310,14 +315,14 @@ export class HnswWasmService {
 
       // Save to Emscripten virtual filesystem
       const indexName = `index_${userAddress}_${Date.now()}`;
-      this.hnswlib!.EmscriptenFileSystemManager.writeFile(indexName, indexBuffer);
+      (this.hnswlib!.EmscriptenFileSystemManager as any).writeFile(indexName, indexBuffer);
 
-      // Sync from IndexedDB
-      await this.hnswlib!.EmscriptenFileSystemManager.syncFS(true);
+      // Sync from IndexedDB (load the data into memory)
+      await this.hnswlib!.EmscriptenFileSystemManager.syncFS(true, () => {});
 
-      // Load index
-      const index = this.hnswlib!.HierarchicalNSW(this.indexConfig.spaceType, this.indexConfig.maxElements);
-      await index.readIndex(indexName, false);
+      // Create and load index (constructor: spaceName, numDimensions, autoSaveFilename)
+      const index = new this.hnswlib!.HierarchicalNSW(this.indexConfig.spaceType, this.indexConfig.dimension, '');
+      await index.readIndex(indexName, this.indexConfig.maxElements);
 
       // Cache the loaded index
       this.indexCache.set(userAddress, {
@@ -447,8 +452,8 @@ export class HnswWasmService {
   private async createCacheEntry(dimensions: number): Promise<IndexCacheEntry> {
     await this.ensureInitialized();
 
-    const index = this.hnswlib!.HierarchicalNSW(this.indexConfig.spaceType, this.indexConfig.maxElements);
-    index.initIndex(dimensions, this.indexConfig.m, this.indexConfig.efConstruction);
+    const index = new this.hnswlib!.HierarchicalNSW(this.indexConfig.spaceType, dimensions, '');
+    index.initIndex(this.indexConfig.maxElements, this.indexConfig.m, this.indexConfig.efConstruction, this.indexConfig.randomSeed);
 
     return {
       index,
@@ -538,7 +543,11 @@ export class HnswWasmService {
 
       // Add all pending vectors to the index in batch
       if (vectors.length > 0) {
-        cacheEntry.index.addItems(vectors, labels);
+        // Convert to Float32Array[] as required by hnswlib-wasm
+        const float32Vectors = vectors.map(v =>
+          v instanceof Float32Array ? v : new Float32Array(v)
+        );
+        cacheEntry.index.addItems(float32Vectors, true);
       }
 
       // Save to Walrus
@@ -569,10 +578,10 @@ export class HnswWasmService {
       await index.writeIndex(indexName);
 
       // Sync to IndexedDB
-      await this.hnswlib!.EmscriptenFileSystemManager.syncFS(false);
+      await this.hnswlib!.EmscriptenFileSystemManager.syncFS(false, () => {});
 
       // Read serialized data from filesystem
-      const serialized = this.hnswlib!.EmscriptenFileSystemManager.readFile(indexName);
+      const serialized = (this.hnswlib!.EmscriptenFileSystemManager as any).readFile(indexName) as Uint8Array;
 
       // Upload to Walrus via StorageService
       const metadata: MemoryMetadata = {

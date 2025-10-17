@@ -1,4 +1,3 @@
-"use strict";
 /**
  * ClientMemoryManager - Client-side Memory Operations for React dApps
  *
@@ -34,16 +33,14 @@
  * });
  * ```
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ClientMemoryManager = void 0;
-const seal_1 = require("@mysten/seal");
-const walrus_1 = require("@mysten/walrus");
-const transactions_1 = require("@mysten/sui/transactions");
-const utils_1 = require("@mysten/sui/utils");
+import { SealClient, SessionKey } from '@mysten/seal';
+import { WalrusClient } from '@mysten/walrus';
+import { Transaction } from '@mysten/sui/transactions';
+import { fromHex } from '@mysten/sui/utils';
 /**
  * Client-side memory manager for React dApps
  */
-class ClientMemoryManager {
+export class ClientMemoryManager {
     constructor(config) {
         this.defaultCategories = [
             'personal', 'work', 'education', 'health', 'finance',
@@ -260,7 +257,7 @@ class ClientMemoryManager {
         return data.embedding;
     }
     async encryptWithSEAL(data, ownerAddress, client) {
-        const sealClient = new seal_1.SealClient({
+        const sealClient = new SealClient({
             suiClient: client,
             serverConfigs: this.config.sealServerObjectIds.map((id) => ({
                 objectId: id,
@@ -277,7 +274,7 @@ class ClientMemoryManager {
         return encryptedBytes;
     }
     async uploadToWalrus(data, account, signAndExecute, client) {
-        const extendedClient = client.$extend(walrus_1.WalrusClient.experimental_asClientExtension({
+        const extendedClient = client.$extend(WalrusClient.experimental_asClientExtension({
             network: this.config.walrusNetwork,
             uploadRelay: {
                 host: `https://upload-relay.${this.config.walrusNetwork}.walrus.space`,
@@ -321,7 +318,7 @@ class ClientMemoryManager {
     }
     async registerOnChain(params) {
         const { blobId, category, importance, contentLength, account, signAndExecute, client } = params;
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         const packageId = this.config.packageId.replace(/^0x/, '');
         const vectorId = Date.now();
         const topic = 'memory';
@@ -369,7 +366,7 @@ class ClientMemoryManager {
         const { account, signPersonalMessage, client } = params;
         console.log('🔑 Creating decryption session...');
         // Create SEAL client (reusable)
-        const sealClient = new seal_1.SealClient({
+        const sealClient = new SealClient({
             suiClient: client,
             serverConfigs: this.config.sealServerObjectIds.map((id) => ({
                 objectId: id,
@@ -378,7 +375,7 @@ class ClientMemoryManager {
             verifyKeyServers: false,
         });
         // Create session key (reusable)
-        const sessionKey = await seal_1.SessionKey.create({
+        const sessionKey = await SessionKey.create({
             address: account.address,
             packageId: this.config.packageId,
             ttlMin: 10,
@@ -390,11 +387,11 @@ class ClientMemoryManager {
         await sessionKey.setPersonalMessageSignature(signatureResult.signature);
         console.log('✅ Personal message signed');
         // Build seal_approve transaction ONCE
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         const addressHex = account.address.startsWith('0x')
             ? account.address.slice(2)
             : account.address;
-        const idBytes = (0, utils_1.fromHex)(addressHex);
+        const idBytes = fromHex(addressHex);
         tx.moveCall({
             target: `${this.config.packageId}::seal_access_control::seal_approve`,
             arguments: [
@@ -415,7 +412,7 @@ class ClientMemoryManager {
     async decryptWithSEAL(params) {
         const { encryptedData, account, signPersonalMessage, client } = params;
         // Create SEAL client
-        const sealClient = new seal_1.SealClient({
+        const sealClient = new SealClient({
             suiClient: client,
             serverConfigs: this.config.sealServerObjectIds.map((id) => ({
                 objectId: id,
@@ -424,7 +421,7 @@ class ClientMemoryManager {
             verifyKeyServers: false,
         });
         // Create session key
-        const sessionKey = await seal_1.SessionKey.create({
+        const sessionKey = await SessionKey.create({
             address: account.address,
             packageId: this.config.packageId,
             ttlMin: 10,
@@ -435,11 +432,11 @@ class ClientMemoryManager {
         const signatureResult = await signPersonalMessage({ message: personalMessage });
         await sessionKey.setPersonalMessageSignature(signatureResult.signature);
         // Build seal_approve transaction
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         const addressHex = account.address.startsWith('0x')
             ? account.address.slice(2)
             : account.address;
-        const idBytes = (0, utils_1.fromHex)(addressHex);
+        const idBytes = fromHex(addressHex);
         tx.moveCall({
             target: `${this.config.packageId}::seal_access_control::seal_approve`,
             arguments: [
@@ -459,6 +456,5 @@ class ClientMemoryManager {
         return decryptedData;
     }
 }
-exports.ClientMemoryManager = ClientMemoryManager;
-exports.default = ClientMemoryManager;
+export default ClientMemoryManager;
 //# sourceMappingURL=ClientMemoryManager.js.map

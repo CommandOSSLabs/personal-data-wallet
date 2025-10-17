@@ -1,17 +1,14 @@
-"use strict";
 /**
  * KnowledgeGraphManager - Integration layer for memory-graph processing
  *
  * Orchestrates knowledge graph updates as memories are processed,
  * provides intelligent graph queries, and manages graph persistence.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.KnowledgeGraphManager = void 0;
-const GraphService_1 = require("./GraphService");
+import { GraphService } from './GraphService';
 /**
  * High-level knowledge graph manager integrating with memory processing
  */
-class KnowledgeGraphManager {
+export class KnowledgeGraphManager {
     constructor(graphService) {
         this.memoryMappings = new Map(); // userId -> mappings
         this.graphCache = new Map();
@@ -23,7 +20,7 @@ class KnowledgeGraphManager {
             totalEntitiesCreated: 0,
             totalRelationshipsCreated: 0
         };
-        this.graphService = graphService || new GraphService_1.GraphService();
+        this.graphService = graphService || new GraphService();
     }
     // ==================== MEMORY INTEGRATION ====================
     /**
@@ -494,6 +491,5 @@ class KnowledgeGraphManager {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 }
-exports.KnowledgeGraphManager = KnowledgeGraphManager;
-exports.default = KnowledgeGraphManager;
+export default KnowledgeGraphManager;
 //# sourceMappingURL=KnowledgeGraphManager.js.map

@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useCurrentAccount, useSuiClient, useSignPersonalMessage } from '@mysten/dapp-kit';
-import { ClientMemoryManager } from 'personal-data-wallet-sdk/dist/client/ClientMemoryManager';
+import { ClientMemoryManager } from 'personal-data-wallet-sdk';
 
 export function RetrieveMemory() {
   const account = useCurrentAccount();

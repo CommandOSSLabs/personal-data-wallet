@@ -4,79 +4,79 @@
 import { MoveStruct, type RawTransactionArgument } from '../utils/index.js';
 import { type Transaction } from '@mysten/sui/transactions';
 export declare const RegistryCreated: MoveStruct<{
-    registry_id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    creator: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    registry_id: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    creator: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
 }, "@local-pkg/pdw::seal_access_control::RegistryCreated">;
 export declare const ContentRegistered: MoveStruct<{
-    content_id: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    context_wallet: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    owner: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    timestamp: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
+    content_id: import("@mysten/bcs").BcsType<string, string, "string">;
+    context_wallet: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    owner: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    timestamp: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
 }, "@local-pkg/pdw::seal_access_control::ContentRegistered">;
 export declare const ContextWalletRegistered: MoveStruct<{
-    main_wallet: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    context_wallet: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    derivation_index: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-    scope_hint: import("@mysten/sui/bcs").BcsType<string | null, string | null | undefined, "Option<string>">;
-    timestamp: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
+    main_wallet: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    context_wallet: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    derivation_index: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+    scope_hint: import("@mysten/bcs").BcsType<string | null, string | null | undefined, "Option<string>">;
+    timestamp: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
 }, "@local-pkg/pdw::seal_access_control::ContextWalletRegistered">;
 export declare const WalletAllowlistChanged: MoveStruct<{
-    requester_wallet: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    target_wallet: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    scope: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    access_level: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    granted: import("@mysten/sui/bcs").BcsType<boolean, boolean, "bool">;
-    expires_at: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-    granted_by: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    requester_wallet: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    target_wallet: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    scope: import("@mysten/bcs").BcsType<string, string, "string">;
+    access_level: import("@mysten/bcs").BcsType<string, string, "string">;
+    granted: import("@mysten/bcs").BcsType<boolean, boolean, "bool">;
+    expires_at: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+    granted_by: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
 }, "@local-pkg/pdw::seal_access_control::WalletAllowlistChanged">;
 export declare const AccessRegistry: MoveStruct<{
     id: MoveStruct<{
-        id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+        id: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
     }, "0x2::object::UID">;
     /** Maps context wallet address -> metadata */
     context_wallets: MoveStruct<{
         id: MoveStruct<{
-            id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+            id: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
         }, "0x2::object::UID">;
-        size: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
+        size: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
     }, "0x2::table::Table">;
     /** Maps content_id -> context wallet address (wallet-based contexts) */
     content_contexts: MoveStruct<{
         id: MoveStruct<{
-            id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+            id: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
         }, "0x2::object::UID">;
-        size: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
+        size: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
     }, "0x2::table::Table">;
     /** Maps (requester_wallet, target_wallet, scope) -> WalletAllowlistEntry */
     wallet_allowlist: MoveStruct<{
         id: MoveStruct<{
-            id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+            id: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
         }, "0x2::object::UID">;
-        size: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
+        size: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
     }, "0x2::table::Table">;
 }, "@local-pkg/pdw::seal_access_control::AccessRegistry">;
 export declare const ContextWalletInfo: MoveStruct<{
-    main_wallet: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    derivation_index: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-    registered_at: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-    app_hint: import("@mysten/sui/bcs").BcsType<string | null, string | null | undefined, "Option<string>">;
+    main_wallet: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    derivation_index: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+    registered_at: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+    app_hint: import("@mysten/bcs").BcsType<string | null, string | null | undefined, "Option<string>">;
 }, "@local-pkg/pdw::seal_access_control::ContextWalletInfo">;
 export declare const WalletAllowlistEntry: MoveStruct<{
-    scope: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    access_level: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    granted_at: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-    expires_at: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-    granted_by: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    scope: import("@mysten/bcs").BcsType<string, string, "string">;
+    access_level: import("@mysten/bcs").BcsType<string, string, "string">;
+    granted_at: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+    expires_at: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+    granted_by: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
 }, "@local-pkg/pdw::seal_access_control::WalletAllowlistEntry">;
 export declare const AccessLog: MoveStruct<{
     id: MoveStruct<{
-        id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+        id: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
     }, "0x2::object::UID">;
-    content_id: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    requester: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    access_type: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    timestamp: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-    success: import("@mysten/sui/bcs").BcsType<boolean, boolean, "bool">;
+    content_id: import("@mysten/bcs").BcsType<string, string, "string">;
+    requester: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    access_type: import("@mysten/bcs").BcsType<string, string, "string">;
+    timestamp: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+    success: import("@mysten/bcs").BcsType<boolean, boolean, "bool">;
 }, "@local-pkg/pdw::seal_access_control::AccessLog">;
 export interface SealApproveArguments {
     id: RawTransactionArgument<number[]>;

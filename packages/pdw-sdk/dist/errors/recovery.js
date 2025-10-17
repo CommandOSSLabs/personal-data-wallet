@@ -1,26 +1,18 @@
-"use strict";
 /**
  * Retry and Recovery Utilities for Personal Data Wallet SDK
  *
  * Provides automatic retry logic, circuit breaker patterns,
  * and error recovery strategies for resilient operations.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ResilientOperation = exports.CacheRecovery = exports.FallbackRecovery = exports.RateLimiter = exports.CircuitBreaker = exports.CircuitState = exports.DEFAULT_RETRY_CONFIG = void 0;
-exports.withRetry = withRetry;
-exports.makeResilient = makeResilient;
-exports.delay = delay;
-exports.withTimeout = withTimeout;
-exports.batch = batch;
-const index_1 = require("./index");
-exports.DEFAULT_RETRY_CONFIG = {
+import { isPDWError, NetworkError, TimeoutError, ValidationError } from './index';
+export const DEFAULT_RETRY_CONFIG = {
     maxAttempts: 3,
     initialDelay: 1000,
     maxDelay: 10000,
     backoffMultiplier: 2,
     jitter: true,
     shouldRetry: (error) => {
-        if ((0, index_1.isPDWError)(error)) {
+        if (isPDWError(error)) {
             return error.isRetryable();
         }
         // Retry network errors, timeouts, and temporary failures
@@ -37,8 +29,8 @@ exports.DEFAULT_RETRY_CONFIG = {
 /**
  * Execute a function with automatic retry logic
  */
-async function withRetry(operation, config = {}) {
-    const finalConfig = { ...exports.DEFAULT_RETRY_CONFIG, ...config };
+export async function withRetry(operation, config = {}) {
+    const finalConfig = { ...DEFAULT_RETRY_CONFIG, ...config };
     let lastError;
     for (let attempt = 1; attempt <= finalConfig.maxAttempts; attempt++) {
         try {
@@ -66,13 +58,13 @@ async function withRetry(operation, config = {}) {
     }
     throw lastError;
 }
-var CircuitState;
+export var CircuitState;
 (function (CircuitState) {
     CircuitState["CLOSED"] = "CLOSED";
     CircuitState["OPEN"] = "OPEN";
     CircuitState["HALF_OPEN"] = "HALF_OPEN";
-})(CircuitState || (exports.CircuitState = CircuitState = {}));
-class CircuitBreaker {
+})(CircuitState || (CircuitState = {}));
+export class CircuitBreaker {
     constructor(config = {}) {
         this.state = CircuitState.CLOSED;
         this.failureCount = 0;
@@ -95,7 +87,7 @@ class CircuitBreaker {
                 this.totalCalls = 0;
             }
             else {
-                throw new index_1.NetworkError('Circuit breaker is open - service temporarily unavailable', 'CIRCUIT_BREAKER_OPEN');
+                throw new NetworkError('Circuit breaker is open - service temporarily unavailable', 'CIRCUIT_BREAKER_OPEN');
             }
         }
         try {
@@ -153,9 +145,8 @@ class CircuitBreaker {
         };
     }
 }
-exports.CircuitBreaker = CircuitBreaker;
 // ==================== RATE LIMITER ====================
-class RateLimiter {
+export class RateLimiter {
     constructor(capacity, refillRate) {
         this.capacity = capacity;
         this.refillRate = refillRate;
@@ -187,8 +178,7 @@ class RateLimiter {
         return this.tokens;
     }
 }
-exports.RateLimiter = RateLimiter;
-class FallbackRecovery {
+export class FallbackRecovery {
     constructor(fallbackOperation, canRecoverFn = () => true) {
         this.fallbackOperation = fallbackOperation;
         this.canRecoverFn = canRecoverFn;
@@ -200,8 +190,7 @@ class FallbackRecovery {
         return this.fallbackOperation(error);
     }
 }
-exports.FallbackRecovery = FallbackRecovery;
-class CacheRecovery {
+export class CacheRecovery {
     constructor(keyGenerator, ttl = 300000 // 5 minutes
     ) {
         this.keyGenerator = keyGenerator;
@@ -209,7 +198,7 @@ class CacheRecovery {
         this.cache = new Map();
     }
     canRecover(error) {
-        return (0, index_1.isPDWError)(error) &&
+        return isPDWError(error) &&
             (error.code === 'NETWORK_ERROR' ||
                 error.code === 'TIMEOUT_ERROR' ||
                 error.code === 'CONNECTION_ERROR');
@@ -236,10 +225,9 @@ class CacheRecovery {
         return entry.data;
     }
 }
-exports.CacheRecovery = CacheRecovery;
-class ResilientOperation {
+export class ResilientOperation {
     constructor(config = {}) {
-        this.retryConfig = { ...exports.DEFAULT_RETRY_CONFIG, ...config.retry };
+        this.retryConfig = { ...DEFAULT_RETRY_CONFIG, ...config.retry };
         if (config.circuitBreaker) {
             this.circuitBreaker = new CircuitBreaker(config.circuitBreaker);
         }
@@ -277,12 +265,11 @@ class ResilientOperation {
         }
     }
 }
-exports.ResilientOperation = ResilientOperation;
 // ==================== UTILITY FUNCTIONS ====================
 /**
  * Create a resilient version of an async function
  */
-function makeResilient(fn, config = {}) {
+export function makeResilient(fn, config = {}) {
     const resilientOp = new ResilientOperation(config);
     return (...args) => {
         return resilientOp.execute(() => fn(...args));
@@ -291,16 +278,16 @@ function makeResilient(fn, config = {}) {
 /**
  * Delay execution for a specified time
  */
-function delay(ms) {
+export function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 /**
  * Create a timeout wrapper for promises
  */
-function withTimeout(promise, timeoutMs, timeoutMessage = 'Operation timed out') {
+export function withTimeout(promise, timeoutMs, timeoutMessage = 'Operation timed out') {
     const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => {
-            reject(new index_1.TimeoutError('operation', timeoutMs));
+            reject(new TimeoutError('operation', timeoutMs));
         }, timeoutMs);
     });
     return Promise.race([promise, timeoutPromise]);
@@ -308,7 +295,7 @@ function withTimeout(promise, timeoutMs, timeoutMessage = 'Operation timed out')
 /**
  * Batch operations with concurrency control
  */
-async function batch(items, operation, concurrency = 5) {
+export async function batch(items, operation, concurrency = 5) {
     const results = [];
     const errors = [];
     for (let i = 0; i < items.length; i += concurrency) {
@@ -326,7 +313,7 @@ async function batch(items, operation, concurrency = 5) {
         });
     }
     if (errors.length > 0) {
-        throw new index_1.ValidationError(`Batch operation failed for ${errors.length} items`, 'batch', { errors: errors.map(e => ({ index: e.index, message: e.error.message })) });
+        throw new ValidationError(`Batch operation failed for ${errors.length} items`, 'batch', { errors: errors.map(e => ({ index: e.index, message: e.error.message })) });
     }
     return results;
 }

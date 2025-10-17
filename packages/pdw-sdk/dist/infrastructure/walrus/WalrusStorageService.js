@@ -1,4 +1,3 @@
-"use strict";
 /**
  * WalrusStorageService - Production Decentralized Storage
  *
@@ -11,8 +10,6 @@
  * - Node.js fs/path dependencies
  * - Mock availability checks
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.WalrusStorageService = void 0;
 class WalrusError extends Error {
     constructor(message, cause) {
         super(message);
@@ -23,7 +20,7 @@ class WalrusError extends Error {
 /**
  * Production-ready Walrus storage service with official client integration
  */
-class WalrusStorageService {
+export class WalrusStorageService {
     constructor(config = {}) {
         this.cache = new Map();
         this.stats = {
@@ -366,5 +363,4 @@ class WalrusStorageService {
             (this.stats.averageRetrievalTime * (totalRetrievals - 1) + newTime) / totalRetrievals;
     }
 }
-exports.WalrusStorageService = WalrusStorageService;
 //# sourceMappingURL=WalrusStorageService.js.map

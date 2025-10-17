@@ -1,17 +1,14 @@
-"use strict";
 /**
  * MemoryProcessingCache - Specialized caching for memory processing
  *
  * Optimized caching service for memory data with intelligent eviction,
  * embedding similarity, and memory-specific optimization patterns.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MemoryProcessingCache = void 0;
-const BatchingService_1 = require("./BatchingService");
+import { BatchingService } from './BatchingService';
 /**
  * Specialized caching service for memory processing operations
  */
-class MemoryProcessingCache {
+export class MemoryProcessingCache {
     constructor(config = {}) {
         this.memoryCache = new Map();
         this.embeddingCache = new Map();
@@ -36,7 +33,7 @@ class MemoryProcessingCache {
             similarityThreshold: config.similarityThreshold || 0.85,
             enableSimilarityIndex: config.enableSimilarityIndex !== false
         };
-        this.batchingService = new BatchingService_1.BatchingService({
+        this.batchingService = new BatchingService({
             maxBatchSize: 50,
             batchDelayMs: 3000,
             maxCacheSize: this.config.maxSize
@@ -348,6 +345,5 @@ class MemoryProcessingCache {
         return total > 0 ? hits / total : 0;
     }
 }
-exports.MemoryProcessingCache = MemoryProcessingCache;
-exports.default = MemoryProcessingCache;
+export default MemoryProcessingCache;
 //# sourceMappingURL=MemoryProcessingCache.js.map

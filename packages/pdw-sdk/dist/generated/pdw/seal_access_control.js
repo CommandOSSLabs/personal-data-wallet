@@ -1,84 +1,38 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.AccessLog = exports.WalletAllowlistEntry = exports.ContextWalletInfo = exports.AccessRegistry = exports.WalletAllowlistChanged = exports.ContextWalletRegistered = exports.ContentRegistered = exports.RegistryCreated = void 0;
-exports.sealApprove = sealApprove;
-exports.registerContent = registerContent;
-exports.registerContextWallet = registerContextWallet;
-exports.grantWalletAllowlistAccess = grantWalletAllowlistAccess;
-exports.revokeWalletAllowlistAccess = revokeWalletAllowlistAccess;
-exports.getContextWalletInfo = getContextWalletInfo;
-exports.getContentContext = getContentContext;
-exports.checkWalletAllowlist = checkWalletAllowlist;
-exports.logAccess = logAccess;
-exports.cleanupExpiredAllowlist = cleanupExpiredAllowlist;
 /**************************************************************
  * THIS FILE IS GENERATED AND SHOULD NOT BE MANUALLY MODIFIED *
  **************************************************************/
-const index_js_1 = require("../utils/index.js");
-const bcs_1 = require("@mysten/sui/bcs");
-const object = __importStar(require("./deps/sui/object.js"));
-const table = __importStar(require("./deps/sui/table.js"));
+import { MoveStruct, normalizeMoveArguments } from '../utils/index.js';
+import { bcs } from '@mysten/sui/bcs';
+import * as object from './deps/sui/object.js';
+import * as table from './deps/sui/table.js';
 const $moduleName = '@local-pkg/pdw::seal_access_control';
-exports.RegistryCreated = new index_js_1.MoveStruct({ name: `${$moduleName}::RegistryCreated`, fields: {
-        registry_id: bcs_1.bcs.Address,
-        creator: bcs_1.bcs.Address
+export const RegistryCreated = new MoveStruct({ name: `${$moduleName}::RegistryCreated`, fields: {
+        registry_id: bcs.Address,
+        creator: bcs.Address
     } });
-exports.ContentRegistered = new index_js_1.MoveStruct({ name: `${$moduleName}::ContentRegistered`, fields: {
-        content_id: bcs_1.bcs.string(),
-        context_wallet: bcs_1.bcs.Address,
-        owner: bcs_1.bcs.Address,
-        timestamp: bcs_1.bcs.u64()
+export const ContentRegistered = new MoveStruct({ name: `${$moduleName}::ContentRegistered`, fields: {
+        content_id: bcs.string(),
+        context_wallet: bcs.Address,
+        owner: bcs.Address,
+        timestamp: bcs.u64()
     } });
-exports.ContextWalletRegistered = new index_js_1.MoveStruct({ name: `${$moduleName}::ContextWalletRegistered`, fields: {
-        main_wallet: bcs_1.bcs.Address,
-        context_wallet: bcs_1.bcs.Address,
-        derivation_index: bcs_1.bcs.u64(),
-        scope_hint: bcs_1.bcs.option(bcs_1.bcs.string()),
-        timestamp: bcs_1.bcs.u64()
+export const ContextWalletRegistered = new MoveStruct({ name: `${$moduleName}::ContextWalletRegistered`, fields: {
+        main_wallet: bcs.Address,
+        context_wallet: bcs.Address,
+        derivation_index: bcs.u64(),
+        scope_hint: bcs.option(bcs.string()),
+        timestamp: bcs.u64()
     } });
-exports.WalletAllowlistChanged = new index_js_1.MoveStruct({ name: `${$moduleName}::WalletAllowlistChanged`, fields: {
-        requester_wallet: bcs_1.bcs.Address,
-        target_wallet: bcs_1.bcs.Address,
-        scope: bcs_1.bcs.string(),
-        access_level: bcs_1.bcs.string(),
-        granted: bcs_1.bcs.bool(),
-        expires_at: bcs_1.bcs.u64(),
-        granted_by: bcs_1.bcs.Address
+export const WalletAllowlistChanged = new MoveStruct({ name: `${$moduleName}::WalletAllowlistChanged`, fields: {
+        requester_wallet: bcs.Address,
+        target_wallet: bcs.Address,
+        scope: bcs.string(),
+        access_level: bcs.string(),
+        granted: bcs.bool(),
+        expires_at: bcs.u64(),
+        granted_by: bcs.Address
     } });
-exports.AccessRegistry = new index_js_1.MoveStruct({ name: `${$moduleName}::AccessRegistry`, fields: {
+export const AccessRegistry = new MoveStruct({ name: `${$moduleName}::AccessRegistry`, fields: {
         id: object.UID,
         /** Maps context wallet address -> metadata */
         context_wallets: table.Table,
@@ -87,26 +41,26 @@ exports.AccessRegistry = new index_js_1.MoveStruct({ name: `${$moduleName}::Acce
         /** Maps (requester_wallet, target_wallet, scope) -> WalletAllowlistEntry */
         wallet_allowlist: table.Table
     } });
-exports.ContextWalletInfo = new index_js_1.MoveStruct({ name: `${$moduleName}::ContextWalletInfo`, fields: {
-        main_wallet: bcs_1.bcs.Address,
-        derivation_index: bcs_1.bcs.u64(),
-        registered_at: bcs_1.bcs.u64(),
-        app_hint: bcs_1.bcs.option(bcs_1.bcs.string())
+export const ContextWalletInfo = new MoveStruct({ name: `${$moduleName}::ContextWalletInfo`, fields: {
+        main_wallet: bcs.Address,
+        derivation_index: bcs.u64(),
+        registered_at: bcs.u64(),
+        app_hint: bcs.option(bcs.string())
     } });
-exports.WalletAllowlistEntry = new index_js_1.MoveStruct({ name: `${$moduleName}::WalletAllowlistEntry`, fields: {
-        scope: bcs_1.bcs.string(),
-        access_level: bcs_1.bcs.string(),
-        granted_at: bcs_1.bcs.u64(),
-        expires_at: bcs_1.bcs.u64(),
-        granted_by: bcs_1.bcs.Address
+export const WalletAllowlistEntry = new MoveStruct({ name: `${$moduleName}::WalletAllowlistEntry`, fields: {
+        scope: bcs.string(),
+        access_level: bcs.string(),
+        granted_at: bcs.u64(),
+        expires_at: bcs.u64(),
+        granted_by: bcs.Address
     } });
-exports.AccessLog = new index_js_1.MoveStruct({ name: `${$moduleName}::AccessLog`, fields: {
+export const AccessLog = new MoveStruct({ name: `${$moduleName}::AccessLog`, fields: {
         id: object.UID,
-        content_id: bcs_1.bcs.string(),
-        requester: bcs_1.bcs.Address,
-        access_type: bcs_1.bcs.string(),
-        timestamp: bcs_1.bcs.u64(),
-        success: bcs_1.bcs.bool()
+        content_id: bcs.string(),
+        requester: bcs.Address,
+        access_type: bcs.string(),
+        timestamp: bcs.u64(),
+        success: bcs.bool()
     } });
 /**
  * SEAL-compliant access approval function with wallet-based access control Must be
@@ -125,7 +79,7 @@ exports.AccessLog = new index_js_1.MoveStruct({ name: `${$moduleName}::AccessLog
  * requesting access @param registry: Access control registry @param clock: Clock
  * for timestamp validation @param ctx: Transaction context
  */
-function sealApprove(options) {
+export function sealApprove(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         'vector<u8>',
@@ -138,7 +92,7 @@ function sealApprove(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'seal_approve',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /**
@@ -150,7 +104,7 @@ function sealApprove(options) {
  * context_wallet: The context wallet that owns this content @param clock:
  * Reference to the global clock for timestamp @param ctx: Transaction context
  */
-function registerContent(options) {
+export function registerContent(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::seal_access_control::AccessRegistry`,
@@ -163,7 +117,7 @@ function registerContent(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'register_content',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /**
@@ -175,7 +129,7 @@ function registerContent(options) {
  * hint about which app this context belongs to @param clock: Reference to the
  * global clock for timestamp @param ctx: Transaction context
  */
-function registerContextWallet(options) {
+export function registerContextWallet(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::seal_access_control::AccessRegistry`,
@@ -189,7 +143,7 @@ function registerContextWallet(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'register_context_wallet',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /**
@@ -202,7 +156,7 @@ function registerContextWallet(options) {
  * expires_at: Expiration timestamp in milliseconds @param clock: Reference to the
  * global clock @param ctx: Transaction context
  */
-function grantWalletAllowlistAccess(options) {
+export function grantWalletAllowlistAccess(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::seal_access_control::AccessRegistry`,
@@ -218,7 +172,7 @@ function grantWalletAllowlistAccess(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'grant_wallet_allowlist_access',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /**
@@ -229,7 +183,7 @@ function grantWalletAllowlistAccess(options) {
  * whose content access is being revoked @param scope: Access scope being revoked
  * @param ctx: Transaction context
  */
-function revokeWalletAllowlistAccess(options) {
+export function revokeWalletAllowlistAccess(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::seal_access_control::AccessRegistry`,
@@ -242,7 +196,7 @@ function revokeWalletAllowlistAccess(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'revoke_wallet_allowlist_access',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /**
@@ -252,7 +206,7 @@ function revokeWalletAllowlistAccess(options) {
  * context wallet address to check @return (exists, main_wallet, derivation_index,
  * registered_at)
  */
-function getContextWalletInfo(options) {
+export function getContextWalletInfo(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::seal_access_control::AccessRegistry`,
@@ -263,7 +217,7 @@ function getContextWalletInfo(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'get_context_wallet_info',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /**
@@ -272,7 +226,7 @@ function getContextWalletInfo(options) {
  * @param registry: Reference to the AccessRegistry @param content_id: The content
  * identifier @return (exists, context_wallet)
  */
-function getContentContext(options) {
+export function getContentContext(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::seal_access_control::AccessRegistry`,
@@ -283,7 +237,7 @@ function getContentContext(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'get_content_context',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /**
@@ -294,7 +248,7 @@ function getContentContext(options) {
  * scope: Access scope @param clock: Reference to the Clock @return (exists,
  * is_active, access_level, expires_at)
  */
-function checkWalletAllowlist(options) {
+export function checkWalletAllowlist(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::seal_access_control::AccessRegistry`,
@@ -308,7 +262,7 @@ function checkWalletAllowlist(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'check_wallet_allowlist',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /**
@@ -318,7 +272,7 @@ function checkWalletAllowlist(options) {
  * attempted @param success: Whether the access was successful @param clock:
  * Reference to the Clock @param ctx: Transaction context
  */
-function logAccess(options) {
+export function logAccess(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         '0x0000000000000000000000000000000000000000000000000000000000000001::string::String',
@@ -331,7 +285,7 @@ function logAccess(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'log_access',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /**
@@ -343,7 +297,7 @@ function logAccess(options) {
  * address @param scope: Access scope @param clock: Reference to the Clock @param
  * ctx: Transaction context
  */
-function cleanupExpiredAllowlist(options) {
+export function cleanupExpiredAllowlist(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::seal_access_control::AccessRegistry`,
@@ -357,7 +311,7 @@ function cleanupExpiredAllowlist(options) {
         package: packageAddress,
         module: 'seal_access_control',
         function: 'cleanup_expired_allowlist',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 //# sourceMappingURL=seal_access_control.js.map

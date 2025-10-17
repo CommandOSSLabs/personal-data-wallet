@@ -1,12 +1,9 @@
-"use strict";
 /**
  * API Client for Personal Data Wallet Backend
  *
  * Handles HTTP communication with the NestJS backend API
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PDWApiClient = void 0;
-class PDWApiClient {
+export class PDWApiClient {
     get baseURL() { return this.baseUrl; }
     get defaultHeaders() { return this.headers; }
     constructor(apiUrl) {
@@ -136,5 +133,4 @@ class PDWApiClient {
         return new EventSource(`${this.baseUrl}/chat/stream?${params.toString()}`);
     }
 }
-exports.PDWApiClient = PDWApiClient;
 //# sourceMappingURL=client.js.map

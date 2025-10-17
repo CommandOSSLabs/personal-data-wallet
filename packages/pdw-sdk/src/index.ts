@@ -382,6 +382,38 @@ export type {
   ClientMemoryMetadata
 } from './client/ClientMemoryManager';
 
+// React Hooks - High-level hooks for React dApps
+export {
+  useMemoryManager,
+  useCreateMemory,
+  useSearchMemories,
+  useWalletMemories,
+  useMemoryChat
+} from './hooks';
+
+export type {
+  MemoryManagerConfig,
+  UseCreateMemoryOptions,
+  UseCreateMemoryReturn,
+  UseSearchMemoriesOptions,
+  UseSearchMemoriesReturn,
+  UseWalletMemoriesOptions,
+  UseWalletMemoriesReturn,
+  UseMemoryChatOptions,
+  UseMemoryChatReturn,
+  CreateMemoryInput,
+  CreateMemoryProgress,
+  CreateMemoryResult,
+  SearchMemoryOptions,
+  SearchMemoryResult,
+  WalletMemory,
+  SortOption,
+  MemoryFilters,
+  MemoryStats,
+  ChatMessage,
+  MemoryChatConfig
+} from './hooks';
+
 // Wallet architecture components
 export { MainWalletService } from './wallet/MainWalletService';
 export { ContextWalletService } from './wallet/ContextWalletService';

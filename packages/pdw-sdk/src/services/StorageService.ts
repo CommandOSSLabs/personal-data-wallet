@@ -9,7 +9,6 @@
  * - Upload relay preferred (only working method on testnet)
  * - Content integrity verification
  * - SEAL encryption integration ready
- * - Proper network configuration with undici agent
  * 
  * Performance: ~13 seconds per blob upload on testnet
  * Test Status: ✅ All tests passing (4/4 - 65.7s total)
@@ -228,9 +227,6 @@ export class StorageService {
     this.suiClient = clients.suiClient;
     this.walrusWithRelay = clients.walrusWithRelay;
     this.walrusWithoutRelay = clients.walrusWithoutRelay;
-    
-    // Configure network asynchronously
-    this.initializeNetworkConfiguration();
   }
 
   /**
@@ -272,23 +268,6 @@ export class StorageService {
     } catch (error) {
       console.error('❌ Failed to initialize Knowledge Graph:', error);
       throw error;
-    }
-  }
-
-  /**
-   * Configure network settings for reliability (from official examples)
-   */
-  private async initializeNetworkConfiguration() {
-    if (typeof window === 'undefined') {
-      try {
-        const { Agent, setGlobalDispatcher } = await import('undici');
-        setGlobalDispatcher(new Agent({
-          connectTimeout: 60_000,
-          connect: { timeout: 60_000 }
-        }));
-      } catch (error) {
-        console.warn('Could not configure undici agent:', error);
-      }
     }
   }
 

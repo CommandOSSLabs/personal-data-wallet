@@ -1,17 +1,14 @@
-"use strict";
 /**
  * AggregationService - Cross-app data query with permission filtering
  *
  * Enables querying data across multiple app contexts while respecting
  * OAuth-style permissions and access control policies.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.AggregationService = void 0;
-const utils_1 = require("@mysten/sui/utils");
+import { normalizeSuiAddress } from '@mysten/sui/utils';
 /**
  * AggregationService handles cross-app queries with permission filtering
  */
-class AggregationService {
+export class AggregationService {
     constructor(config) {
         this.suiClient = config.suiClient;
         this.packageId = config.packageId;
@@ -36,7 +33,7 @@ class AggregationService {
                 permissionChecks: 0
             }
         };
-        const normalizedRequester = (0, utils_1.normalizeSuiAddress)(options.requestingWallet);
+        const normalizedRequester = normalizeSuiAddress(options.requestingWallet);
         const normalizedTargets = options.targetWallets?.map(id => id.toLowerCase());
         const userContexts = await this.contextWalletService.listUserContexts(options.userAddress);
         const candidateContexts = normalizedTargets?.length
@@ -224,5 +221,4 @@ class AggregationService {
         return limitedResults;
     }
 }
-exports.AggregationService = AggregationService;
 //# sourceMappingURL=AggregationService.js.map

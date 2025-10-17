@@ -1,17 +1,14 @@
-"use strict";
 /**
  * GraphService - Knowledge Graph Extraction and Management
  *
  * Ports sophisticated knowledge graph logic from the backend with AI-powered
  * entity/relationship extraction, graph traversal, and intelligent updates.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.GraphService = void 0;
-const GeminiAIService_1 = require("../services/GeminiAIService");
+import { GeminiAIService } from '../services/GeminiAIService';
 /**
  * Advanced knowledge graph service with AI extraction and intelligent management
  */
-class GraphService {
+export class GraphService {
     constructor(config = {}, embeddingService) {
         this.graphs = new Map(); // User graphs cache
         this.extractionStats = {
@@ -35,7 +32,7 @@ class GraphService {
         // Initialize Gemini AI service if API key is provided and not using mock
         if (this.config.geminiApiKey && !this.config.useMockAI) {
             try {
-                this.geminiAI = new GeminiAIService_1.GeminiAIService({
+                this.geminiAI = new GeminiAIService({
                     apiKey: this.config.geminiApiKey,
                     model: this.config.extractionModel,
                     ...this.config.geminiConfig
@@ -661,6 +658,5 @@ JSON:`;
         return { ...this.extractionStats };
     }
 }
-exports.GraphService = GraphService;
-exports.default = GraphService;
+export default GraphService;
 //# sourceMappingURL=GraphService.js.map

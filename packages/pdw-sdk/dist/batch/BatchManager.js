@@ -1,19 +1,16 @@
-"use strict";
 /**
  * BatchManager - Central orchestrator for all batch processing operations
  *
  * Coordinates embedding generation, vector indexing, knowledge graph updates,
  * and Walrus operations through intelligent batching and caching.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.BatchManager = void 0;
-const events_1 = require("events");
-const BatchingService_1 = require("./BatchingService");
-const MemoryProcessingCache_1 = require("./MemoryProcessingCache");
+import { EventEmitter } from 'events';
+import { BatchingService } from './BatchingService';
+import { MemoryProcessingCache } from './MemoryProcessingCache';
 /**
  * Central batch processing manager with integrated caching and monitoring
  */
-class BatchManager extends events_1.EventEmitter {
+export class BatchManager extends EventEmitter {
     constructor(config = {}) {
         super();
         this.jobStatuses = new Map();
@@ -45,7 +42,7 @@ class BatchManager extends events_1.EventEmitter {
         };
         // Initialize services
         this.initializeBatchingServices();
-        this.cache = new MemoryProcessingCache_1.MemoryProcessingCache(this.config.cache);
+        this.cache = new MemoryProcessingCache(this.config.cache);
     }
     // ==================== SERVICE INITIALIZATION ====================
     /**
@@ -255,17 +252,17 @@ class BatchManager extends events_1.EventEmitter {
     // ==================== PRIVATE METHODS ====================
     initializeBatchingServices() {
         // Initialize embedding batcher
-        this.embeddingBatcher = new BatchingService_1.BatchingService({
+        this.embeddingBatcher = new BatchingService({
             maxBatchSize: this.config.embedding.batchSize,
             batchDelayMs: this.config.embedding.delayMs
         });
         // Initialize indexing batcher
-        this.indexingBatcher = new BatchingService_1.BatchingService({
+        this.indexingBatcher = new BatchingService({
             maxBatchSize: this.config.indexing.batchSize,
             batchDelayMs: this.config.indexing.delayMs
         });
         // Initialize Walrus batcher
-        this.walrusBatcher = new BatchingService_1.BatchingService({
+        this.walrusBatcher = new BatchingService({
             maxBatchSize: this.config.walrus.batchSize,
             batchDelayMs: this.config.walrus.delayMs
         });
@@ -426,6 +423,5 @@ class BatchManager extends events_1.EventEmitter {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 }
-exports.BatchManager = BatchManager;
-exports.default = BatchManager;
+export default BatchManager;
 //# sourceMappingURL=BatchManager.js.map

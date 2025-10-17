@@ -1,16 +1,13 @@
-"use strict";
 /**
  * Configuration Utilities for Personal Data Wallet SDK
  *
  * Provides helpers for managing API keys, environment variables,
  * and configuration validation across the SDK.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Config = exports.ConfigurationHelper = void 0;
 /**
  * Configuration helper with environment variable support
  */
-class ConfigurationHelper {
+export class ConfigurationHelper {
     constructor() {
         // Instance constructor for backwards compatibility
     }
@@ -257,11 +254,10 @@ SEAL_KEY_SERVER_2_OBJECT=0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f
         return privateKey.substring(0, 6) + '*'.repeat(privateKey.length - 12) + privateKey.substring(privateKey.length - 6);
     }
 }
-exports.ConfigurationHelper = ConfigurationHelper;
 /**
  * Quick configuration helpers
  */
-exports.Config = {
+export const Config = {
     /**
      * Create configuration from environment variables
      */
@@ -283,5 +279,5 @@ exports.Config = {
      */
     generateEnvTemplate: () => ConfigurationHelper.generateEnvTemplate()
 };
-exports.default = ConfigurationHelper;
+export default ConfigurationHelper;
 //# sourceMappingURL=ConfigurationHelper.js.map

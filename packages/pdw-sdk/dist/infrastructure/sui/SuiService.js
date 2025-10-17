@@ -1,19 +1,16 @@
-"use strict";
 /**
  * SuiService - Blockchain Integration for Memory Records
  *
  * Comprehensive Sui blockchain integration for memory ownership records,
  * transaction batching, and decentralized metadata management.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.SuiService = void 0;
-const client_1 = require("@mysten/sui/client");
-const transactions_1 = require("@mysten/sui/transactions");
-const ed25519_1 = require("@mysten/sui/keypairs/ed25519");
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+import { Transaction } from '@mysten/sui/transactions';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 /**
  * Sui blockchain service for memory ownership and metadata management
  */
-class SuiService {
+export class SuiService {
     constructor(config = {}) {
         this.batchQueue = [];
         this.pendingTransactions = new Map();
@@ -398,8 +395,8 @@ class SuiService {
     // ==================== PRIVATE METHODS ====================
     initializeSuiClient() {
         try {
-            const networkUrl = this.config.rpcUrl || (0, client_1.getFullnodeUrl)(this.config.network);
-            this.client = new client_1.SuiClient({ url: networkUrl });
+            const networkUrl = this.config.rpcUrl || getFullnodeUrl(this.config.network);
+            this.client = new SuiClient({ url: networkUrl });
             console.log(`Sui client initialized for ${this.config.network} network`);
         }
         catch (error) {
@@ -410,7 +407,7 @@ class SuiService {
     initializeAdminKeypair() {
         if (!this.config.adminPrivateKey) {
             console.warn('No admin private key provided. Creating random keypair for development.');
-            this.adminKeypair = new ed25519_1.Ed25519Keypair();
+            this.adminKeypair = new Ed25519Keypair();
             return;
         }
         try {
@@ -418,7 +415,7 @@ class SuiService {
             let privateKey = this.config.adminPrivateKey.replace(/\s+/g, '');
             if (privateKey.startsWith('suiprivkey1')) {
                 // Sui private key format
-                this.adminKeypair = ed25519_1.Ed25519Keypair.fromSecretKey(privateKey);
+                this.adminKeypair = Ed25519Keypair.fromSecretKey(privateKey);
             }
             else {
                 // Hex format
@@ -429,7 +426,7 @@ class SuiService {
                 if (keyBuffer.length !== 32) {
                     throw new Error(`Invalid key length: ${keyBuffer.length}, expected 32`);
                 }
-                this.adminKeypair = ed25519_1.Ed25519Keypair.fromSecretKey(new Uint8Array(keyBuffer));
+                this.adminKeypair = Ed25519Keypair.fromSecretKey(new Uint8Array(keyBuffer));
             }
             const adminAddress = this.adminKeypair.getPublicKey().toSuiAddress();
             console.log(`Admin keypair initialized with address: ${adminAddress}`);
@@ -437,12 +434,12 @@ class SuiService {
         catch (error) {
             console.error('Failed to initialize admin keypair:', error);
             console.warn('Using random keypair for development');
-            this.adminKeypair = new ed25519_1.Ed25519Keypair();
+            this.adminKeypair = new Ed25519Keypair();
         }
     }
     async executeCreateMemoryRecord(userAddress, category, vectorId, blobId, metadata) {
         try {
-            const tx = new transactions_1.Transaction();
+            const tx = new Transaction();
             // Convert metadata to Move-compatible format
             const metadataFields = this.serializeMetadata(metadata);
             tx.moveCall({
@@ -467,7 +464,7 @@ class SuiService {
     }
     async executeCreateMemoryIndex(userAddress, indexBlobId, graphBlobId) {
         try {
-            const tx = new transactions_1.Transaction();
+            const tx = new Transaction();
             tx.moveCall({
                 target: `${this.config.packageId}::memory::create_memory_index`,
                 arguments: [
@@ -488,7 +485,7 @@ class SuiService {
     }
     async executeUpdateMemoryIndex(indexId, userAddress, expectedVersion, newIndexBlobId, newGraphBlobId) {
         try {
-            const tx = new transactions_1.Transaction();
+            const tx = new Transaction();
             tx.moveCall({
                 target: `${this.config.packageId}::memory::update_memory_index`,
                 arguments: [
@@ -653,6 +650,5 @@ class SuiService {
         return `tx_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
     }
 }
-exports.SuiService = SuiService;
-exports.default = SuiService;
+export default SuiService;
 //# sourceMappingURL=SuiService.js.map

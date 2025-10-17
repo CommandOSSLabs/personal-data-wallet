@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Memory Module - DEPRECATED
  *
@@ -10,9 +9,6 @@
  *
  * This export is maintained for backward compatibility only.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MemoryService = void 0;
 // Re-export from production location
-var MemoryService_1 = require("../services/MemoryService");
-Object.defineProperty(exports, "MemoryService", { enumerable: true, get: function () { return MemoryService_1.MemoryService; } });
+export { MemoryService } from '../services/MemoryService';
 //# sourceMappingURL=index.js.map

@@ -1,4 +1,3 @@
-"use strict";
 /**
  * MemoryIndexService - Enhanced Memory Indexing and Vector Search
  *
@@ -12,14 +11,12 @@
  * Enhanced from basic wrapper to sophisticated vector search engine
  * matching backend's performance while maintaining browser compatibility.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MemoryIndexService = void 0;
-const HnswWasmService_1 = require("../vector/HnswWasmService");
+import { HnswWasmService } from '../vector/HnswWasmService';
 /**
  * Memory-focused indexing service providing high-level memory operations
  * Uses native HNSW implementation via HnswIndexService for optimal performance
  */
-class MemoryIndexService {
+export class MemoryIndexService {
     constructor(storageService, options = {}) {
         this.memoryIndex = new Map(); // userAddress -> memoryId -> entry
         this.nextMemoryId = 1;
@@ -27,9 +24,9 @@ class MemoryIndexService {
         this.indexStats = new Map();
         this.storageService = storageService;
         // Initialize browser-compatible HNSW service using WebAssembly
-        this.hnswService = new HnswWasmService_1.HnswWasmService(storageService || undefined, {
+        this.hnswService = new HnswWasmService(storageService || undefined, {
             maxElements: options.maxElements || 10000,
-            dimension: options.dimension || 1536, // Default for text-embedding-004
+            dimension: options.dimension || 768, // Default for text-embedding-004 (Gemini)
             efConstruction: options.efConstruction || 200,
             m: options.m || 16
         }, {
@@ -38,7 +35,7 @@ class MemoryIndexService {
         });
         console.log('✅ MemoryIndexService initialized with browser-compatible HNSW (hnswlib-wasm)');
         console.log(`   Max elements: ${options.maxElements || 10000}`);
-        console.log(`   Embedding dimension: ${options.dimension || 1536}`);
+        console.log(`   Embedding dimension: ${options.dimension || 768}`);
         console.log(`   HNSW parameters: M=${options.m || 16}, efConstruction=${options.efConstruction || 200}`);
         console.log(`   Features: WebAssembly, IndexedDB persistence, batching, Walrus storage`);
     }
@@ -616,5 +613,4 @@ class MemoryIndexService {
         return 1 - (angle / Math.PI);
     }
 }
-exports.MemoryIndexService = MemoryIndexService;
 //# sourceMappingURL=MemoryIndexService.js.map

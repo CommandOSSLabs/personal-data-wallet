@@ -1,4 +1,3 @@
-"use strict";
 /**
  * MemoryDecryptionPipeline - Seamless SEAL-based Memory Decryption
  *
@@ -14,13 +13,11 @@
  * - 📊 Decryption analytics and monitoring
  * - 🌍 Environment-based configuration
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MemoryDecryptionPipeline = void 0;
-const seal_1 = require("@mysten/seal");
+import { SealClient } from '@mysten/seal';
 /**
  * Memory Decryption Pipeline Service
  */
-class MemoryDecryptionPipeline {
+export class MemoryDecryptionPipeline {
     constructor(encryptionService, storageManager, config) {
         this.sealClient = null;
         // Session key management
@@ -115,7 +112,7 @@ class MemoryDecryptionPipeline {
                     }, ...keyServers];
             }
             // Initialize SEAL client
-            this.sealClient = new seal_1.SealClient({
+            this.sealClient = new SealClient({
                 suiClient: this.encryptionService.suiClient,
                 serverConfigs: keyServers.map(server => ({
                     objectId: server.objectId,
@@ -543,7 +540,6 @@ class MemoryDecryptionPipeline {
         };
     }
 }
-exports.MemoryDecryptionPipeline = MemoryDecryptionPipeline;
 // Official Mysten Labs testnet key servers from documentation
 MemoryDecryptionPipeline.DEFAULT_TESTNET_SERVERS = [
     {

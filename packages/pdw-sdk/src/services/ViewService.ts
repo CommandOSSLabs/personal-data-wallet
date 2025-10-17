@@ -107,7 +107,8 @@ export class ViewService {
       for (const obj of response.data) {
         if (obj.data?.content && 'fields' in obj.data.content) {
           const fields = obj.data.content.fields as any;
-          
+          const metadata = fields.metadata?.fields || fields.metadata || {};
+
           // Filter by category if specified
           if (options?.category && fields.category !== options.category) {
             continue;
@@ -119,14 +120,14 @@ export class ViewService {
             category: fields.category,
             vectorId: parseInt(fields.vector_id),
             blobId: fields.blob_id,
-            contentType: fields.content_type,
-            contentSize: parseInt(fields.content_size),
-            contentHash: fields.content_hash,
-            topic: fields.topic,
-            importance: parseInt(fields.importance),
-            embeddingBlobId: fields.embedding_blob_id,
-            createdAt: parseInt(fields.created_at || '0'),
-            updatedAt: parseInt(fields.updated_at || '0'),
+            contentType: metadata.content_type || '',
+            contentSize: parseInt(metadata.content_size || '0'),
+            contentHash: metadata.content_hash || '',
+            topic: metadata.topic || '',
+            importance: parseInt(metadata.importance || '5'),
+            embeddingBlobId: metadata.embedding_blob_id || '',
+            createdAt: parseInt(metadata.created_timestamp || '0'),
+            updatedAt: parseInt(metadata.updated_timestamp || '0'),
           });
         }
       }

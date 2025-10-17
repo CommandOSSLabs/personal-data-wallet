@@ -4,36 +4,36 @@
 import { MoveStruct, type RawTransactionArgument } from '../utils/index.js';
 import { type Transaction } from '@mysten/sui/transactions';
 export declare const MemoryCreated: MoveStruct<{
-    id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    owner: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    category: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    vector_id: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
+    id: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    owner: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    category: import("@mysten/bcs").BcsType<string, string, "string">;
+    vector_id: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
 }, "@local-pkg/pdw::memory::MemoryCreated">;
 export declare const MemoryIndexUpdated: MoveStruct<{
-    id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    owner: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    version: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-    index_blob_id: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    graph_blob_id: import("@mysten/sui/bcs").BcsType<string, string, "string">;
+    id: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    owner: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    version: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+    index_blob_id: import("@mysten/bcs").BcsType<string, string, "string">;
+    graph_blob_id: import("@mysten/bcs").BcsType<string, string, "string">;
 }, "@local-pkg/pdw::memory::MemoryIndexUpdated">;
 export declare const MemoryMetadataUpdated: MoveStruct<{
-    memory_id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    metadata_blob_id: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    embedding_dimension: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
+    memory_id: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    metadata_blob_id: import("@mysten/bcs").BcsType<string, string, "string">;
+    embedding_dimension: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
 }, "@local-pkg/pdw::memory::MemoryMetadataUpdated">;
 export declare const MemoryMetadata: MoveStruct<{
-    content_type: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    content_size: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-    content_hash: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    category: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    topic: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    importance: import("@mysten/sui/bcs").BcsType<number, number, "u8">;
-    embedding_blob_id: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    embedding_dimension: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-    created_timestamp: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-    updated_timestamp: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
+    content_type: import("@mysten/bcs").BcsType<string, string, "string">;
+    content_size: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+    content_hash: import("@mysten/bcs").BcsType<string, string, "string">;
+    category: import("@mysten/bcs").BcsType<string, string, "string">;
+    topic: import("@mysten/bcs").BcsType<string, string, "string">;
+    importance: import("@mysten/bcs").BcsType<number, number, "u8">;
+    embedding_blob_id: import("@mysten/bcs").BcsType<string, string, "string">;
+    embedding_dimension: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+    created_timestamp: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+    updated_timestamp: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
     custom_metadata: MoveStruct<{
-        contents: import("@mysten/sui/bcs").BcsType<{
+        contents: import("@mysten/bcs").BcsType<{
             key: string;
             value: string;
         }[], Iterable<{
@@ -46,34 +46,34 @@ export declare const MemoryMetadata: MoveStruct<{
 }, "@local-pkg/pdw::memory::MemoryMetadata">;
 export declare const MemoryIndex: MoveStruct<{
     id: MoveStruct<{
-        id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+        id: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
     }, "0x2::object::UID">;
-    owner: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    version: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-    index_blob_id: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    graph_blob_id: import("@mysten/sui/bcs").BcsType<string, string, "string">;
+    owner: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    version: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+    index_blob_id: import("@mysten/bcs").BcsType<string, string, "string">;
+    graph_blob_id: import("@mysten/bcs").BcsType<string, string, "string">;
 }, "@local-pkg/pdw::memory::MemoryIndex">;
 export declare const Memory: MoveStruct<{
     id: MoveStruct<{
-        id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+        id: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
     }, "0x2::object::UID">;
-    owner: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
-    category: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-    vector_id: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-    blob_id: import("@mysten/sui/bcs").BcsType<string, string, "string">;
+    owner: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+    category: import("@mysten/bcs").BcsType<string, string, "string">;
+    vector_id: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+    blob_id: import("@mysten/bcs").BcsType<string, string, "string">;
     metadata: MoveStruct<{
-        content_type: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-        content_size: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-        content_hash: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-        category: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-        topic: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-        importance: import("@mysten/sui/bcs").BcsType<number, number, "u8">;
-        embedding_blob_id: import("@mysten/sui/bcs").BcsType<string, string, "string">;
-        embedding_dimension: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-        created_timestamp: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
-        updated_timestamp: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
+        content_type: import("@mysten/bcs").BcsType<string, string, "string">;
+        content_size: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+        content_hash: import("@mysten/bcs").BcsType<string, string, "string">;
+        category: import("@mysten/bcs").BcsType<string, string, "string">;
+        topic: import("@mysten/bcs").BcsType<string, string, "string">;
+        importance: import("@mysten/bcs").BcsType<number, number, "u8">;
+        embedding_blob_id: import("@mysten/bcs").BcsType<string, string, "string">;
+        embedding_dimension: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+        created_timestamp: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
+        updated_timestamp: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
         custom_metadata: MoveStruct<{
-            contents: import("@mysten/sui/bcs").BcsType<{
+            contents: import("@mysten/bcs").BcsType<{
                 key: string;
                 value: string;
             }[], Iterable<{

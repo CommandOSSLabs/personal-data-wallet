@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Chat Module - DEPRECATED
  *
@@ -10,9 +9,6 @@
  *
  * This export is maintained for backward compatibility only.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ChatService = void 0;
 // Re-export from production location
-var ChatService_1 = require("../services/ChatService");
-Object.defineProperty(exports, "ChatService", { enumerable: true, get: function () { return ChatService_1.ChatService; } });
+export { ChatService } from '../services/ChatService';
 //# sourceMappingURL=index.js.map

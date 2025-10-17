@@ -147,7 +147,7 @@ export declare class MemoryIndexService {
     getServiceStats(): {
         totalUsers: number;
         totalMemories: number;
-        hnswStats: import("../embedding/types").BatchStats;
+        hnswStats: import("../vector").BatchStats;
         hasEmbeddingService: boolean;
         hasStorageService: boolean;
     };

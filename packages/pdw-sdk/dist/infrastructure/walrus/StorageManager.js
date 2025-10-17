@@ -1,17 +1,14 @@
-"use strict";
 /**
  * StorageManager - Unified Storage Operations Manager
  *
  * Orchestrates Walrus storage operations with intelligent batching,
  * encryption management, and seamless integration with memory processing.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.StorageManager = void 0;
-const WalrusStorageService_1 = require("./WalrusStorageService");
+import { WalrusStorageService } from './WalrusStorageService';
 /**
  * Unified storage manager coordinating multiple storage providers
  */
-class StorageManager {
+export class StorageManager {
     constructor(config = {}) {
         this.pendingOperations = new Map();
         this.batchQueue = [];
@@ -43,7 +40,7 @@ class StorageManager {
             retentionPolicyDays: config.retentionPolicyDays || 365
         };
         // Initialize Walrus service
-        this.walrusService = new WalrusStorageService_1.WalrusStorageService({
+        this.walrusService = new WalrusStorageService({
             network: this.config.walrusConfig.network
         });
     }
@@ -412,6 +409,5 @@ class StorageManager {
         }
     }
 }
-exports.StorageManager = StorageManager;
-exports.default = StorageManager;
+export default StorageManager;
 //# sourceMappingURL=StorageManager.js.map

@@ -1,4 +1,3 @@
-"use strict";
 /**
  * VectorService - Unified Vector Operations
  *
@@ -7,44 +6,10 @@
  *
  * Replaces: HnswIndexService + VectorManager
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.VectorService = void 0;
-const hnswlib = __importStar(require("hnswlib-node"));
-const EmbeddingService_1 = require("./EmbeddingService");
-const StorageService_1 = require("./StorageService");
+// Using hnswlib-wasm for browser compatibility
+import { loadHnswlib } from 'hnswlib-wasm';
+import { EmbeddingService } from './EmbeddingService';
+import { StorageService } from './StorageService';
 // Local VectorError class implementation
 class VectorErrorImpl extends Error {
     constructor(message) {
@@ -59,12 +24,21 @@ class VectorErrorImpl extends Error {
  * - Intelligent batching and caching
  * - Persistence via Walrus storage
  */
-class VectorService {
+export class VectorService {
     constructor(config, embeddingService, storageService) {
         this.config = config;
         this.indexCache = new Map();
-        this.embeddingService = embeddingService || new EmbeddingService_1.EmbeddingService(config.embedding);
-        this.storageService = storageService || new StorageService_1.StorageService({ packageId: '' }); // Will be properly configured
+        this.hnswlibModule = null;
+        this.embeddingService = embeddingService || new EmbeddingService(config.embedding);
+        this.storageService = storageService || new StorageService({ packageId: '' }); // Will be properly configured
+    }
+    /**
+     * Initialize the WASM module (must be called before using any index operations)
+     */
+    async initialize() {
+        if (!this.hnswlibModule) {
+            this.hnswlibModule = await loadHnswlib('IDBFS');
+        }
     }
     /**
      * Generate embeddings for text content
@@ -81,9 +55,14 @@ class VectorService {
      * Create or get HNSW index for a specific space
      */
     async createIndex(spaceId, dimension, config) {
+        await this.initialize();
+        if (!this.hnswlibModule) {
+            throw new VectorErrorImpl('WASM module not initialized');
+        }
         const finalConfig = { ...this.config.index, ...config };
-        const index = new hnswlib.HierarchicalNSW('cosine', dimension);
-        index.initIndex(finalConfig?.maxElements || 10000);
+        const index = new this.hnswlibModule.HierarchicalNSW('cosine', dimension, '');
+        index.initIndex(finalConfig?.maxElements || 10000, finalConfig?.m || 16, finalConfig?.efConstruction || 200, 100 // randomSeed
+        );
         this.indexCache.set(spaceId, {
             index,
             lastModified: new Date(),
@@ -101,7 +80,7 @@ class VectorService {
         if (!entry) {
             throw new VectorErrorImpl(`Index ${spaceId} not found`);
         }
-        entry.index.addPoint(vector, vectorId);
+        entry.index.addPoint(vector, vectorId, false);
         if (metadata) {
             entry.metadata.set(vectorId, metadata);
         }
@@ -117,7 +96,7 @@ class VectorService {
             throw new VectorErrorImpl(`Index ${spaceId} not found`);
         }
         const k = options?.k || 10;
-        const result = entry.index.searchKnn(queryVector, k);
+        const result = entry.index.searchKnn(queryVector, k, undefined);
         return {
             results: result.neighbors.map((neighborId, i) => ({
                 memoryId: neighborId.toString(),
@@ -238,5 +217,4 @@ class VectorService {
         this.indexCache.clear();
     }
 }
-exports.VectorService = VectorService;
 //# sourceMappingURL=VectorService.js.map

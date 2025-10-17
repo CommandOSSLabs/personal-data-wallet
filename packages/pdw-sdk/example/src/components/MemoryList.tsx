@@ -1,39 +1,133 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { useCurrentAccount, useSuiClient, useSignPersonalMessage } from '@mysten/dapp-kit';
-import { ClientMemoryManager } from 'personal-data-wallet-sdk/dist/client/ClientMemoryManager';
+import { useCurrentAccount, useSignPersonalMessage, useSuiClient } from '@mysten/dapp-kit';
+import { ClientMemoryManager, ViewService } from 'personal-data-wallet-sdk';
 
-interface Memory {
-  id: string;
-  category: string;
-  vectorId: number;
+interface MemoryWithContent {
   blobId: string;
+  category: string;
+  importance: number;
+  contentLength: number;
+  timestamp: Date;
+  owner: string;
   content?: string;
-  metadata: {
-    contentType: string;
-    contentSize: number;
-    topic: string;
-    importance: number;
-    embeddingBlobId: string;
-    embeddingDimension: number;
-    createdTimestamp: number;
-  };
 }
 
 export function MemoryList() {
   const account = useCurrentAccount();
-  const client = useSuiClient();
   const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
+  const client = useSuiClient();
 
-  const [memories, setMemories] = useState<Memory[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [memoriesWithContent, setMemoriesWithContent] = useState<MemoryWithContent[]>([]);
   const [decryptionStatus, setDecryptionStatus] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [queryLoading, setQueryLoading] = useState(false);
+  const [queryError, setQueryError] = useState<string | null>(null);
 
-  const packageId = process.env.NEXT_PUBLIC_PACKAGE_ID || '';
+  // Initialize ViewService for querying memories
+  const viewService = useMemo(() => {
+    if (!client) return null;
+    return new ViewService(client as any, {
+      packageId: process.env.NEXT_PUBLIC_PACKAGE_ID || '',
+    });
+  }, [client]);
 
-  // Initialize ClientMemoryManager
+  // Query memories using SDK's ViewService
+  useEffect(() => {
+    if (!account?.address || !viewService) {
+      console.log('⏸️ Waiting for wallet connection...');
+      return;
+    }
+
+    const queryMemories = async () => {
+      setQueryLoading(true);
+      setQueryError(null);
+
+      const packageId = process.env.NEXT_PUBLIC_PACKAGE_ID;
+      const structType = `${packageId}::memory::Memory`;
+
+      console.log('🔍 Querying memories using SDK ViewService...');
+      console.log('📍 Wallet:', account.address);
+      console.log('📦 Package ID:', packageId);
+      console.log('🏗️ Struct Type:', structType);
+
+      try {
+        const result = await viewService.getUserMemories(account.address, {
+          limit: 50
+        });
+
+        console.log('✅ ViewService response:', result);
+        console.log('📊 Found', result.data.length, 'memories');
+
+        if (result.data.length === 0) {
+          console.log('ℹ️ No Memory objects found.');
+          console.log('💡 This is a fresh deployment - create your first memory!');
+        }
+
+        // Convert ViewService MemoryRecord to MemoryWithContent
+        const parsedMemories: MemoryWithContent[] = result.data.map(memory => {
+          console.log('📝 Memory:', memory);
+          return {
+            blobId: memory.blobId,
+            category: memory.category,
+            importance: memory.importance,
+            contentLength: memory.contentSize,
+            timestamp: new Date(memory.createdAt),
+            owner: account.address,
+          };
+        });
+
+        console.log('✅ Parsed', parsedMemories.length, 'memories');
+        setMemoriesWithContent(parsedMemories);
+        setQueryLoading(false);
+
+      } catch (err: any) {
+        console.error('❌ Query failed:', err);
+        setQueryError(err.message);
+        setQueryLoading(false);
+      }
+    };
+
+    queryMemories();
+  }, [account?.address, viewService]);
+
+  // Handle refresh button click
+  const handleRefresh = async () => {
+    if (!account?.address || !viewService) return;
+
+    setIsRefreshing(true);
+    setDecryptionStatus('Refreshing memories...');
+    setMemoriesWithContent([]);
+
+    console.log('🔄 Refreshing memories using ViewService...');
+
+    try {
+      const result = await viewService.getUserMemories(account.address, {
+        limit: 50
+      });
+
+      const parsedMemories: MemoryWithContent[] = result.data.map(memory => ({
+        blobId: memory.blobId,
+        category: memory.category,
+        importance: memory.importance,
+        contentLength: memory.contentSize,
+        timestamp: new Date(memory.createdAt),
+        owner: account.address,
+      }));
+
+      console.log('✅ Refreshed:', parsedMemories.length, 'memories');
+      setMemoriesWithContent(parsedMemories);
+      setDecryptionStatus('');
+    } catch (error: any) {
+      console.error('❌ Refresh failed:', error);
+      setQueryError(error.message);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  // Initialize ClientMemoryManager for decryption
   const memoryManager = useMemo(() => {
     return new ClientMemoryManager({
       packageId: process.env.NEXT_PUBLIC_PACKAGE_ID || '',
@@ -43,183 +137,103 @@ export function MemoryList() {
     });
   }, []);
 
-  const batchDecryptMemories = async (memoriesToDecrypt: Memory[]): Promise<void> => {
-    if (!account) {
-      console.error('No account connected');
-      return;
-    }
+  // Batch decrypt memories when they're loaded
+  useEffect(() => {
+    if (memoriesWithContent.length > 0 && account && signPersonalMessage && client && !isRefreshing) {
+      // Check if any memories need decryption
+      const needsDecryption = memoriesWithContent.some(m => !m.content);
 
-    if (memoriesToDecrypt.length === 0) {
-      return;
-    }
-
-    try {
-      const blobIds = memoriesToDecrypt.map(m => m.blobId);
-
-      console.log('🔓 Starting batch decryption with SINGLE signature...');
-      setDecryptionStatus('Initializing decryption (sign once)...');
-
-      // Batch decrypt with SINGLE signature
-      const results = await memoryManager.batchRetrieveMemories({
-        blobIds,
-        account,
-        signPersonalMessage: signPersonalMessage as any,
-        client: client as any,
-        onProgress: (status, current, total) => {
-          console.log(`📍 ${status} (${current}/${total})`);
-          setDecryptionStatus(`${status} (${current}/${total})`);
-        }
-      });
-
-      // Update memories with decrypted content
-      setMemories(prev =>
-        prev.map(memory => {
-          const result = results.find(r => r.blobId === memory.blobId);
-          if (result) {
-            return {
-              ...memory,
-              content: result.content || result.error || 'Decryption failed'
-            };
-          }
-          return memory;
-        })
-      );
-
-      setDecryptionStatus('All memories decrypted!');
-      setTimeout(() => setDecryptionStatus(''), 2000);
-    } catch (error: any) {
-      console.error('Batch decryption failed:', error);
-      setDecryptionStatus(`Error: ${error.message}`);
-      // Mark all as failed
-      setMemories(prev =>
-        prev.map(m => ({
-          ...m,
-          content: 'Batch decryption failed'
-        }))
-      );
-    }
-  };
-
-  const loadMemories = async () => {
-    console.log('\n📚 ========== Loading Memories ==========');
-
-    if (!account?.address) {
-      console.log('⚠️ No account connected');
-      return;
-    }
-
-    console.log('👤 Account:', account.address);
-
-    setIsLoading(true);
-    setError('');
-
-    try {
-      console.log('📦 Package ID:', packageId);
-
-      if (!packageId) {
-        throw new Error('Package ID not configured');
+      if (!needsDecryption) {
+        console.log('✅ All memories already decrypted');
+        return;
       }
 
-      console.log('🔍 Querying objects with StructType:', `${packageId}::memory::Memory`);
+      const decryptMemories = async () => {
+        console.log('📊 Found', memoriesWithContent.length, 'memories on-chain');
+        console.log('🔓 Starting batch decryption with SINGLE signature...');
+        setDecryptionStatus('Initializing decryption (sign once)...');
 
-      const objects = await client.getOwnedObjects({
-        owner: account.address,
-        filter: {
-          StructType: `${packageId}::memory::Memory`,
-        },
-        options: {
-          showContent: true,
-          showType: true,
-        },
-      });
+        try {
+          const blobIds = memoriesWithContent.map(m => m.blobId);
 
-      console.log('📡 Query response:', {
-        total: objects.data.length,
-        hasNextPage: objects.hasNextPage,
-      });
-
-      const loadedMemories: Memory[] = [];
-
-      for (const obj of objects.data) {
-        console.log('🔍 Processing object:', obj.data?.objectId);
-
-        if (obj.data?.content && 'fields' in obj.data.content) {
-          const fields = obj.data.content.fields as any;
-
-          console.log('📝 Memory fields:', {
-            id: obj.data.objectId,
-            category: fields.category,
-            vectorId: fields.vector_id,
-            blobId: fields.blob_id,
-            metadata: fields.metadata,
+          // Batch decrypt with SINGLE signature
+          const results = await memoryManager.batchRetrieveMemories({
+            blobIds,
+            account,
+            signPersonalMessage: signPersonalMessage as any,
+            client: client as any,
+            onProgress: (status, current, total) => {
+              console.log(`📍 ${status} (${current}/${total})`);
+              setDecryptionStatus(`${status} (${current}/${total})`);
+            }
           });
 
-          const metadataFields = fields.metadata?.fields || fields.metadata;
+          console.log('✅ Decryption complete:', results.length, 'results');
 
-          const memory: Memory = {
-            id: obj.data.objectId,
-            category: fields.category || 'general',
-            vectorId: parseInt(fields.vector_id || '0'),
-            blobId: fields.blob_id || '',
-            metadata: {
-              contentType: metadataFields?.content_type || '',
-              contentSize: parseInt(metadataFields?.content_size || '0'),
-              topic: metadataFields?.topic || '',
-              importance: parseInt(metadataFields?.importance || '0'),
-              embeddingBlobId: metadataFields?.embedding_blob_id || '',
-              embeddingDimension: parseInt(metadataFields?.embedding_dimension || '0'),
-              createdTimestamp: parseInt(metadataFields?.created_timestamp || '0'),
-            },
-          };
+          // Update memories with decrypted content
+          setMemoriesWithContent(prev =>
+            prev.map(memory => {
+              const result = results.find(r => r.blobId === memory.blobId);
+              if (result) {
+                return {
+                  ...memory,
+                  content: result.content || result.error || 'Decryption failed'
+                };
+              }
+              return memory;
+            })
+          );
 
-          loadedMemories.push(memory);
+          setDecryptionStatus('All memories decrypted!');
+          setTimeout(() => setDecryptionStatus(''), 2000);
+        } catch (error: any) {
+          console.error('❌ Batch decryption failed:', error);
+          setDecryptionStatus(`Error: ${error.message}`);
         }
-      }
+      };
 
-      // Sort by timestamp (newest first)
-      loadedMemories.sort((a, b) => b.metadata.createdTimestamp - a.metadata.createdTimestamp);
-
-      console.log('✅ Loaded', loadedMemories.length, 'memories');
-
-      // Set memories first (without content)
-      setMemories(loadedMemories);
-
-      // Batch decrypt all memories with SINGLE signature
-      if (loadedMemories.length > 0) {
-        console.log('🔓 Will decrypt', loadedMemories.length, 'memories with 1 signature...');
-        await batchDecryptMemories(loadedMemories);
-      }
-
-      console.log('🎉 ========== Loading Complete ==========\n');
-    } catch (err: any) {
-      console.error('❌ Error loading memories:', err);
-      console.error('Stack:', err.stack);
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
+      decryptMemories();
     }
-  };
-
-  useEffect(() => {
-    loadMemories();
-  }, [account?.address]);
+  }, [memoriesWithContent.length, account, signPersonalMessage, client, memoryManager, isRefreshing]);
 
   return (
     <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6 shadow-xl">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-bold text-white">Your Memories</h2>
         <button
-          onClick={loadMemories}
-          disabled={isLoading}
-          className="bg-primary/20 hover:bg-primary/30 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+          onClick={handleRefresh}
+          disabled={queryLoading || isRefreshing}
+          className="bg-primary/20 hover:bg-primary/30 disabled:bg-slate-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm transition-colors"
         >
-          {isLoading ? 'Loading...' : 'Refresh'}
+          {queryLoading || isRefreshing ? 'Loading...' : 'Refresh'}
         </button>
       </div>
 
-      {error && (
+      {/* Debug Info Panel */}
+      <div className="mb-4 p-4 bg-slate-800/50 border border-slate-600/50 rounded-lg text-xs font-mono">
+        <div className="text-slate-300 mb-2 font-bold">🔍 Debug Information:</div>
+        <div className="space-y-1 text-slate-400">
+          <div>📍 Wallet: {account?.address ? `${account.address.slice(0, 10)}...${account.address.slice(-8)}` : '❌ Not connected'}</div>
+          <div>📦 Package ID: {process.env.NEXT_PUBLIC_PACKAGE_ID?.slice(0, 10)}...{process.env.NEXT_PUBLIC_PACKAGE_ID?.slice(-8)}</div>
+          <div>🏗️ Struct Type: {process.env.NEXT_PUBLIC_PACKAGE_ID}::memory::Memory</div>
+          <div>📊 Memories Found: {memoriesWithContent.length}</div>
+          <div>⏱️ Status: {queryLoading ? '⏳ Loading...' : isRefreshing ? '🔄 Refreshing...' : '✅ Ready'}</div>
+        </div>
+        {!account && (
+          <div className="mt-2 p-2 bg-yellow-500/20 border border-yellow-500/50 rounded text-yellow-300 text-xs">
+            ⚠️ Please connect your wallet to query memories
+          </div>
+        )}
+        {account && memoriesWithContent.length === 0 && !queryLoading && (
+          <div className="mt-2 p-2 bg-blue-500/20 border border-blue-500/50 rounded text-blue-300 text-xs">
+            💡 No memories found. This is a fresh deployment - create your first memory using the "Create Memory" tab!
+          </div>
+        )}
+      </div>
+
+      {queryError && (
         <div className="mb-4 p-4 bg-red-500/20 border border-red-500/50 rounded-lg">
-          <p className="text-sm text-red-300">{error}</p>
+          <p className="text-sm text-red-300">{queryError}</p>
         </div>
       )}
 
@@ -230,35 +244,35 @@ export function MemoryList() {
       )}
 
       <div className="space-y-4">
-        {isLoading ? (
+        {queryLoading ? (
           <div className="text-center py-8">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
             <p className="text-slate-300 mt-2">Loading memories...</p>
           </div>
-        ) : memories.length === 0 ? (
+        ) : memoriesWithContent.length === 0 ? (
           <div className="text-center py-8">
             <p className="text-slate-300">No memories yet. Create your first one!</p>
           </div>
         ) : (
-          memories.map((memory) => (
+          memoriesWithContent.map((memory) => (
             <div
-              key={memory.id}
+              key={memory.blobId}
               className="bg-white/5 border border-white/10 rounded-lg p-4 hover:bg-white/10 transition-colors"
             >
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <h3 className="font-semibold text-white mb-1">
-                    {memory.metadata.topic || memory.category}
+                    {memory.category}
                   </h3>
-                  <p className="text-sm text-slate-300 mb-2">
-                    Category: {memory.category} • Vector ID: {memory.vectorId}
-                  </p>
                   <div className="flex items-center gap-4 text-xs text-slate-400">
                     <span>
-                      {new Date(memory.metadata.createdTimestamp).toLocaleDateString()}
+                      {memory.timestamp.toLocaleDateString()}
                     </span>
                     <span>
-                      Importance: {memory.metadata.importance}/10
+                      Importance: {memory.importance}/10
+                    </span>
+                    <span>
+                      {memory.contentLength} bytes
                     </span>
                   </div>
                 </div>
@@ -282,9 +296,9 @@ export function MemoryList() {
         )}
       </div>
 
-      {memories.length > 0 && (
+      {memoriesWithContent.length > 0 && (
         <div className="mt-4 text-sm text-slate-400 text-center">
-          {memories.length} {memories.length === 1 ? 'memory' : 'memories'} found
+          {memoriesWithContent.length} {memoriesWithContent.length === 1 ? 'memory' : 'memories'} found
         </div>
       )}
     </div>

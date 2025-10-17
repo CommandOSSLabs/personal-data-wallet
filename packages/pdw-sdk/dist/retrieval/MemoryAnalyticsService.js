@@ -1,4 +1,3 @@
-"use strict";
 /**
  * MemoryAnalyticsService - Memory Analytics & Insights
  *
@@ -10,18 +9,16 @@
  * - Content sentiment analysis
  * - Recommendation engines
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MemoryAnalyticsService = void 0;
-const KnowledgeGraphManager_1 = require("../graph/KnowledgeGraphManager");
+import { KnowledgeGraphManager } from '../graph/KnowledgeGraphManager';
 /**
  * Memory Analytics Service
  */
-class MemoryAnalyticsService {
+export class MemoryAnalyticsService {
     constructor(config) {
         // Analytics cache
         this.analyticsCache = new Map();
         this.ANALYTICS_CACHE_TTL = 60 * 60 * 1000; // 1 hour
-        this.graphManager = config?.graphManager ?? new KnowledgeGraphManager_1.KnowledgeGraphManager();
+        this.graphManager = config?.graphManager ?? new KnowledgeGraphManager();
         // Use placeholder vector manager until proper service injection is implemented
         this.vectorManager = config?.vectorManager ?? {};
     }
@@ -417,5 +414,4 @@ class MemoryAnalyticsService {
         };
     }
 }
-exports.MemoryAnalyticsService = MemoryAnalyticsService;
 //# sourceMappingURL=MemoryAnalyticsService.js.map

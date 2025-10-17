@@ -1,4 +1,3 @@
-"use strict";
 /**
  * QueryService - Advanced Memory Query Operations
  *
@@ -9,12 +8,10 @@
  * This service coordinates between MemoryIndexService, GraphService, and other
  * components to provide unified query capabilities.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.QueryService = void 0;
 /**
  * Advanced query service providing unified memory search capabilities
  */
-class QueryService {
+export class QueryService {
     constructor(memoryIndexService, embeddingService, storageService, graphService) {
         this.memoryIndexService = memoryIndexService;
         this.embeddingService = embeddingService;
@@ -631,5 +628,4 @@ class QueryService {
         return recommendations;
     }
 }
-exports.QueryService = QueryService;
 //# sourceMappingURL=QueryService.js.map

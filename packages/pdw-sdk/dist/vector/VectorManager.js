@@ -1,4 +1,3 @@
-"use strict";
 /**
  * VectorManager - High-level Vector Operations Orchestrator
  *
@@ -6,22 +5,20 @@
  * embedding generation and HNSW indexing with smart caching.
  * Uses hnswlib-wasm for full browser compatibility.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.VectorManager = void 0;
-const EmbeddingService_1 = require("../services/EmbeddingService");
-const HnswWasmService_1 = require("./HnswWasmService");
+import { EmbeddingService } from '../services/EmbeddingService';
+import { HnswWasmService } from './HnswWasmService';
 /**
  * Unified vector operations manager
  */
-class VectorManager {
+export class VectorManager {
     constructor(storageService, config) {
         this.vectorIdCounter = new Map(); // userAddress -> nextVectorId
         this.memoryCache = new Map(); // text hash -> embedding
         this.config = config;
         // Initialize embedding service
-        this.embeddingService = new EmbeddingService_1.EmbeddingService(config.embedding);
+        this.embeddingService = new EmbeddingService(config.embedding);
         // Initialize HNSW index service (using WASM for browser compatibility)
-        this.indexService = new HnswWasmService_1.HnswWasmService(storageService, config.index, config.batch);
+        this.indexService = new HnswWasmService(storageService, config.index, config.batch);
     }
     /**
      * Add text content to vector index (embed + index)
@@ -285,6 +282,5 @@ class VectorManager {
         return true;
     }
 }
-exports.VectorManager = VectorManager;
-exports.default = VectorManager;
+export default VectorManager;
 //# sourceMappingURL=VectorManager.js.map

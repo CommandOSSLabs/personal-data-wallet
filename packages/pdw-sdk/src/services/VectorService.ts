@@ -7,7 +7,9 @@
  * Replaces: HnswIndexService + VectorManager
  */
 
-import * as hnswlib from 'hnswlib-node';
+// Using hnswlib-wasm for browser compatibility
+import { loadHnswlib } from 'hnswlib-wasm';
+import type { HnswlibModule, HierarchicalNSW } from 'hnswlib-wasm';
 import { EmbeddingService } from './EmbeddingService';
 import { StorageService } from './StorageService';
 import {
@@ -16,12 +18,8 @@ import {
   HNSWIndexConfig,
   BatchConfig,
   VectorSearchOptions,
-  VectorSearchResult,
-  VectorSearchMatch,
-  HNSWSearchResult,
-  VectorError
+  VectorSearchResult
 } from '../embedding/types';
-import type { StorageResult } from '../core';
 import type { MemoryMetadata } from './StorageService';
 
 // Local VectorError class implementation
@@ -41,7 +39,7 @@ export interface VectorServiceConfig {
 }
 
 interface IndexCacheEntry {
-  index: hnswlib.HierarchicalNSW;
+  index: HierarchicalNSW;
   lastModified: Date;
   pendingVectors: Map<number, number[]>;
   isDirty: boolean;
@@ -60,7 +58,8 @@ export class VectorService {
   private embeddingService: EmbeddingService;
   private storageService: StorageService;
   private indexCache: Map<string, IndexCacheEntry> = new Map();
-  
+  private hnswlibModule: HnswlibModule | null = null;
+
   constructor(
     private config: VectorServiceConfig,
     embeddingService?: EmbeddingService,
@@ -68,6 +67,15 @@ export class VectorService {
   ) {
     this.embeddingService = embeddingService || new EmbeddingService(config.embedding);
     this.storageService = storageService || new StorageService({ packageId: '' }); // Will be properly configured
+  }
+
+  /**
+   * Initialize the WASM module (must be called before using any index operations)
+   */
+  async initialize(): Promise<void> {
+    if (!this.hnswlibModule) {
+      this.hnswlibModule = await loadHnswlib('IDBFS');
+    }
   }
 
   /**
@@ -86,11 +94,21 @@ export class VectorService {
    * Create or get HNSW index for a specific space
    */
   async createIndex(spaceId: string, dimension: number, config?: Partial<HNSWIndexConfig>): Promise<void> {
+    await this.initialize();
+    if (!this.hnswlibModule) {
+      throw new VectorErrorImpl('WASM module not initialized');
+    }
+
     const finalConfig = { ...this.config.index, ...config };
-    
-    const index = new hnswlib.HierarchicalNSW('cosine', dimension);
-    index.initIndex(finalConfig?.maxElements || 10000);
-    
+
+    const index = new this.hnswlibModule.HierarchicalNSW('cosine', dimension, '');
+    index.initIndex(
+      finalConfig?.maxElements || 10000,
+      finalConfig?.m || 16,
+      finalConfig?.efConstruction || 200,
+      100 // randomSeed
+    );
+
     this.indexCache.set(spaceId, {
       index,
       lastModified: new Date(),
@@ -110,7 +128,7 @@ export class VectorService {
       throw new VectorErrorImpl(`Index ${spaceId} not found`);
     }
 
-    entry.index.addPoint(vector, vectorId);
+    entry.index.addPoint(vector, vectorId, false);
     if (metadata) {
       entry.metadata.set(vectorId, metadata);
     }
@@ -122,8 +140,8 @@ export class VectorService {
    * Search vectors in index
    */
   async searchVectors(
-    spaceId: string, 
-    queryVector: number[], 
+    spaceId: string,
+    queryVector: number[],
     options?: Partial<VectorSearchOptions>
   ): Promise<VectorSearchResult> {
     const entry = this.indexCache.get(spaceId);
@@ -132,10 +150,10 @@ export class VectorService {
     }
 
     const k = options?.k || 10;
-    const result = entry.index.searchKnn(queryVector, k);
-    
+    const result = entry.index.searchKnn(queryVector, k, undefined);
+
     return {
-      results: result.neighbors.map((neighborId, i) => ({
+      results: result.neighbors.map((neighborId: number, i: number) => ({
         memoryId: neighborId.toString(),
         vectorId: neighborId,
         similarity: 1 - result.distances[i], // Convert distance to similarity

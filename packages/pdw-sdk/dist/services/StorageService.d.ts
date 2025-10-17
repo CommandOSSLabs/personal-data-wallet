@@ -9,7 +9,6 @@
  * - Upload relay preferred (only working method on testnet)
  * - Content integrity verification
  * - SEAL encryption integration ready
- * - Proper network configuration with undici agent
  *
  * Performance: ~13 seconds per blob upload on testnet
  * Test Status: ✅ All tests passing (4/4 - 65.7s total)
@@ -194,10 +193,6 @@ export declare class StorageService {
      */
     initializeKnowledgeGraph(graphConfig?: any): Promise<GraphService>;
     /**
-     * Configure network settings for reliability (from official examples)
-     */
-    private initializeNetworkConfiguration;
-    /**
      * Create Walrus clients with upload relay support (from benchmark example)
      */
     private createClients;
@@ -309,7 +304,7 @@ export declare class StorageService {
         searchText?: string;
         maxHops?: number;
         limit?: number;
-    }): Promise<import("../graph/GraphService").GraphQueryResult>;
+    }): Promise<import("../graph").GraphQueryResult>;
     /**
      * Get knowledge graph for a user (loads from Walrus if needed)
      */
@@ -340,7 +335,7 @@ export declare class StorageService {
         maxHops?: number;
         relationshipTypes?: string[];
         includeWeights?: boolean;
-    }): Promise<import("../graph/GraphService").GraphQueryResult>;
+    }): Promise<import("../graph").GraphQueryResult>;
     /**
      * Batch extract knowledge graphs from multiple memories
      */

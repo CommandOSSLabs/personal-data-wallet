@@ -1,35 +1,14 @@
-"use strict";
 /**
  * Error Handling System for Personal Data Wallet SDK
  *
  * Provides structured error types, validation, and user-friendly messages
  * for all SDK operations including blockchain, storage, and encryption errors.
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __exportStar = (this && this.__exportStar) || function(m, exports) {
-    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.RETRYABLE_ERROR_CODES = exports.ERROR_MESSAGES = exports.WalletNotConnectedError = exports.InvalidSignatureError = exports.AuthenticationError = exports.RateLimitError = exports.TimeoutError = exports.ConnectionError = exports.NetworkError = exports.SessionKeyError = exports.AccessDeniedError = exports.DecryptionFailedError = exports.EncryptionFailedError = exports.SealInitializationError = exports.EncryptionError = exports.StorageQuotaExceededError = exports.StorageRetrievalError = exports.StorageUploadError = exports.WalrusError = exports.StorageError = exports.ObjectNotFoundError = exports.ContractExecutionError = exports.InsufficientGasError = exports.TransactionError = exports.BlockchainError = exports.MissingParameterError = exports.InvalidParameterError = exports.ConfigurationError = exports.ValidationError = exports.PDWError = void 0;
-exports.isPDWError = isPDWError;
-exports.wrapError = wrapError;
-exports.createBlockchainError = createBlockchainError;
-exports.createNetworkError = createNetworkError;
 // ==================== BASE ERROR CLASSES ====================
 /**
  * Base error class for all Personal Data Wallet SDK errors
  */
-class PDWError extends Error {
+export class PDWError extends Error {
     constructor(message, code, category, severity = 'error', context, originalError) {
         super(message);
         this.name = this.constructor.name;
@@ -68,186 +47,158 @@ class PDWError extends Error {
      * Get user-friendly error message
      */
     getUserMessage() {
-        return exports.ERROR_MESSAGES[this.code] || this.message;
+        return ERROR_MESSAGES[this.code] || this.message;
     }
     /**
      * Check if error is retryable
      */
     isRetryable() {
-        return exports.RETRYABLE_ERROR_CODES.includes(this.code);
+        return RETRYABLE_ERROR_CODES.includes(this.code);
     }
 }
-exports.PDWError = PDWError;
 // ==================== VALIDATION ERRORS ====================
-class ValidationError extends PDWError {
+export class ValidationError extends PDWError {
     constructor(message, field, value, originalError) {
         super(message, 'VALIDATION_ERROR', 'validation', 'error', { field, value }, originalError);
     }
 }
-exports.ValidationError = ValidationError;
-class ConfigurationError extends PDWError {
+export class ConfigurationError extends PDWError {
     constructor(message, configKey, originalError) {
         super(message, 'CONFIGURATION_ERROR', 'configuration', 'error', { configKey }, originalError);
     }
 }
-exports.ConfigurationError = ConfigurationError;
-class InvalidParameterError extends PDWError {
+export class InvalidParameterError extends PDWError {
     constructor(parameter, expected, received) {
         super(`Invalid parameter '${parameter}': expected ${expected}, received ${typeof received}`, 'INVALID_PARAMETER', 'validation', 'error', { field: parameter, value: received });
     }
 }
-exports.InvalidParameterError = InvalidParameterError;
-class MissingParameterError extends PDWError {
+export class MissingParameterError extends PDWError {
     constructor(parameter) {
         super(`Missing required parameter: ${parameter}`, 'MISSING_PARAMETER', 'validation', 'error', { field: parameter });
     }
 }
-exports.MissingParameterError = MissingParameterError;
 // ==================== BLOCKCHAIN ERRORS ====================
-class BlockchainError extends PDWError {
+export class BlockchainError extends PDWError {
     constructor(message, code, context, originalError) {
         super(message, code, 'blockchain', 'error', context, originalError);
     }
 }
-exports.BlockchainError = BlockchainError;
-class TransactionError extends BlockchainError {
+export class TransactionError extends BlockchainError {
     constructor(message, transactionId, originalError) {
         super(message, 'TRANSACTION_ERROR', { transactionId }, originalError);
     }
 }
-exports.TransactionError = TransactionError;
-class InsufficientGasError extends BlockchainError {
+export class InsufficientGasError extends BlockchainError {
     constructor(required, available) {
         super(`Insufficient gas: required ${required}, available ${available}`, 'INSUFFICIENT_GAS', { required, available });
     }
 }
-exports.InsufficientGasError = InsufficientGasError;
-class ContractExecutionError extends BlockchainError {
+export class ContractExecutionError extends BlockchainError {
     constructor(contractFunction, reason, originalError) {
         super(`Contract execution failed: ${contractFunction} - ${reason}`, 'CONTRACT_EXECUTION_ERROR', { contractFunction, reason }, originalError);
     }
 }
-exports.ContractExecutionError = ContractExecutionError;
-class ObjectNotFoundError extends BlockchainError {
+export class ObjectNotFoundError extends BlockchainError {
     constructor(objectId, objectType) {
         super(`Object not found: ${objectId}${objectType ? ` (${objectType})` : ''}`, 'OBJECT_NOT_FOUND', { objectId, objectType });
     }
 }
-exports.ObjectNotFoundError = ObjectNotFoundError;
 // ==================== STORAGE ERRORS ====================
-class StorageError extends PDWError {
+export class StorageError extends PDWError {
     constructor(message, code, context, originalError) {
         super(message, code, 'storage', 'error', context, originalError);
     }
 }
-exports.StorageError = StorageError;
-class WalrusError extends StorageError {
+export class WalrusError extends StorageError {
     constructor(message, blobId, originalError) {
         super(message, 'WALRUS_ERROR', { blobId }, originalError);
     }
 }
-exports.WalrusError = WalrusError;
-class StorageUploadError extends StorageError {
+export class StorageUploadError extends StorageError {
     constructor(reason, fileSize, originalError) {
         super(`Storage upload failed: ${reason}`, 'STORAGE_UPLOAD_ERROR', { fileSize }, originalError);
     }
 }
-exports.StorageUploadError = StorageUploadError;
-class StorageRetrievalError extends StorageError {
+export class StorageRetrievalError extends StorageError {
     constructor(blobId, reason, originalError) {
         super(`Storage retrieval failed for ${blobId}: ${reason}`, 'STORAGE_RETRIEVAL_ERROR', { blobId }, originalError);
     }
 }
-exports.StorageRetrievalError = StorageRetrievalError;
-class StorageQuotaExceededError extends StorageError {
+export class StorageQuotaExceededError extends StorageError {
     constructor(currentUsage, limit) {
         super(`Storage quota exceeded: ${currentUsage}/${limit} bytes`, 'STORAGE_QUOTA_EXCEEDED', { currentUsage, limit });
     }
 }
-exports.StorageQuotaExceededError = StorageQuotaExceededError;
 // ==================== ENCRYPTION ERRORS ====================
-class EncryptionError extends PDWError {
+export class EncryptionError extends PDWError {
     constructor(message, code, context, originalError) {
         super(message, code, 'encryption', 'error', context, originalError);
     }
 }
-exports.EncryptionError = EncryptionError;
-class SealInitializationError extends EncryptionError {
+export class SealInitializationError extends EncryptionError {
     constructor(reason, originalError) {
         super(`SEAL client initialization failed: ${reason}`, 'SEAL_INITIALIZATION_ERROR', { reason }, originalError);
     }
 }
-exports.SealInitializationError = SealInitializationError;
-class EncryptionFailedError extends EncryptionError {
+export class EncryptionFailedError extends EncryptionError {
     constructor(userAddress, reason, originalError) {
         super(`Encryption failed for ${userAddress}: ${reason}`, 'ENCRYPTION_FAILED', { userAddress, reason }, originalError);
     }
 }
-exports.EncryptionFailedError = EncryptionFailedError;
-class DecryptionFailedError extends EncryptionError {
+export class DecryptionFailedError extends EncryptionError {
     constructor(reason, contentId, originalError) {
         super(`Decryption failed: ${reason}`, 'DECRYPTION_FAILED', { contentId, reason }, originalError);
     }
 }
-exports.DecryptionFailedError = DecryptionFailedError;
-class AccessDeniedError extends EncryptionError {
+export class AccessDeniedError extends EncryptionError {
     constructor(userAddress, contentId, reason) {
         super(`Access denied for user ${userAddress} to content ${contentId}${reason ? `: ${reason}` : ''}`, 'ACCESS_DENIED', { userAddress, contentId, reason });
     }
 }
-exports.AccessDeniedError = AccessDeniedError;
-class SessionKeyError extends EncryptionError {
+export class SessionKeyError extends EncryptionError {
     constructor(operation, reason, originalError) {
         super(`Session key ${operation} failed: ${reason}`, 'SESSION_KEY_ERROR', { operation, reason }, originalError);
     }
 }
-exports.SessionKeyError = SessionKeyError;
 // ==================== NETWORK ERRORS ====================
-class NetworkError extends PDWError {
+export class NetworkError extends PDWError {
     constructor(message, code, context, originalError) {
         super(message, code, 'network', 'error', context, originalError);
     }
 }
-exports.NetworkError = NetworkError;
-class ConnectionError extends NetworkError {
+export class ConnectionError extends NetworkError {
     constructor(endpoint, originalError) {
         super(`Failed to connect to ${endpoint}`, 'CONNECTION_ERROR', { endpoint }, originalError);
     }
 }
-exports.ConnectionError = ConnectionError;
-class TimeoutError extends NetworkError {
+export class TimeoutError extends NetworkError {
     constructor(operation, timeoutMs) {
         super(`Operation '${operation}' timed out after ${timeoutMs}ms`, 'TIMEOUT_ERROR', { operation, timeoutMs });
     }
 }
-exports.TimeoutError = TimeoutError;
-class RateLimitError extends NetworkError {
+export class RateLimitError extends NetworkError {
     constructor(service, retryAfter) {
         super(`Rate limit exceeded for ${service}${retryAfter ? `, retry after ${retryAfter}s` : ''}`, 'RATE_LIMIT_ERROR', { service, retryAfter });
     }
 }
-exports.RateLimitError = RateLimitError;
 // ==================== AUTHENTICATION ERRORS ====================
-class AuthenticationError extends PDWError {
+export class AuthenticationError extends PDWError {
     constructor(message, code, context, originalError) {
         super(message, code, 'authentication', 'error', context, originalError);
     }
 }
-exports.AuthenticationError = AuthenticationError;
-class InvalidSignatureError extends AuthenticationError {
+export class InvalidSignatureError extends AuthenticationError {
     constructor(expectedAddress, actualAddress) {
         super(`Invalid signature: expected from ${expectedAddress}${actualAddress ? `, got from ${actualAddress}` : ''}`, 'INVALID_SIGNATURE', { expectedAddress, actualAddress });
     }
 }
-exports.InvalidSignatureError = InvalidSignatureError;
-class WalletNotConnectedError extends AuthenticationError {
+export class WalletNotConnectedError extends AuthenticationError {
     constructor() {
         super('Wallet not connected. Please connect your wallet to continue.', 'WALLET_NOT_CONNECTED');
     }
 }
-exports.WalletNotConnectedError = WalletNotConnectedError;
 // ==================== USER-FRIENDLY ERROR MESSAGES ====================
-exports.ERROR_MESSAGES = {
+export const ERROR_MESSAGES = {
     // Validation
     'VALIDATION_ERROR': 'The provided information is invalid. Please check your input and try again.',
     'CONFIGURATION_ERROR': 'There is an issue with the SDK configuration. Please check your settings.',
@@ -278,7 +229,7 @@ exports.ERROR_MESSAGES = {
     'WALLET_NOT_CONNECTED': 'Please connect your wallet to use this feature.',
 };
 // ==================== RETRYABLE ERROR CODES ====================
-exports.RETRYABLE_ERROR_CODES = [
+export const RETRYABLE_ERROR_CODES = [
     'CONNECTION_ERROR',
     'TIMEOUT_ERROR',
     'WALRUS_ERROR',
@@ -290,13 +241,13 @@ exports.RETRYABLE_ERROR_CODES = [
 /**
  * Check if an error is a PDW SDK error
  */
-function isPDWError(error) {
+export function isPDWError(error) {
     return error instanceof PDWError;
 }
 /**
  * Wrap unknown errors in a PDWError
  */
-function wrapError(error, category = 'unknown', context) {
+export function wrapError(error, category = 'unknown', context) {
     if (isPDWError(error)) {
         return error;
     }
@@ -308,7 +259,7 @@ function wrapError(error, category = 'unknown', context) {
 /**
  * Create error from Sui/blockchain errors
  */
-function createBlockchainError(error, context) {
+export function createBlockchainError(error, context) {
     const message = error?.message || 'Unknown blockchain error';
     // Check for specific Sui error patterns
     if (message.includes('InsufficientGas')) {
@@ -330,7 +281,7 @@ function createBlockchainError(error, context) {
 /**
  * Create error from network/HTTP errors
  */
-function createNetworkError(error, endpoint) {
+export function createNetworkError(error, endpoint) {
     const message = error?.message || 'Network error occurred';
     if (error?.code === 'ECONNREFUSED' || error?.code === 'ENOTFOUND') {
         return new ConnectionError(endpoint || 'unknown endpoint', error);
@@ -344,7 +295,7 @@ function createNetworkError(error, endpoint) {
     return new NetworkError(message, 'NETWORK_ERROR', { endpoint }, error);
 }
 // Re-export validation utilities
-__exportStar(require("./validation"), exports);
+export * from './validation';
 // Re-export recovery utilities
-__exportStar(require("./recovery"), exports);
+export * from './recovery';
 //# sourceMappingURL=index.js.map

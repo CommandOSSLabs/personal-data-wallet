@@ -1,16 +1,13 @@
-"use strict";
 /**
  * ClassifierService - Content Classification and Filtering
  *
  * Determines if content should be saved as memory using pattern matching
  * and AI classification. Provides category classification for content organization.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ClassifierService = void 0;
 /**
  * Content classification service for determining memory worthiness
  */
-class ClassifierService {
+export class ClassifierService {
     constructor(client, config, embeddingService, aiApiKey) {
         this.client = client;
         this.config = config;
@@ -348,5 +345,4 @@ class ClassifierService {
         }
     }
 }
-exports.ClassifierService = ClassifierService;
 //# sourceMappingURL=ClassifierService.js.map

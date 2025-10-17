@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Encryption Module - DEPRECATED
  *
@@ -10,9 +9,6 @@
  *
  * This export is maintained for backward compatibility only.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.EncryptionService = void 0;
 // Re-export from production location
-var EncryptionService_1 = require("../services/EncryptionService");
-Object.defineProperty(exports, "EncryptionService", { enumerable: true, get: function () { return EncryptionService_1.EncryptionService; } });
+export { EncryptionService } from '../services/EncryptionService';
 //# sourceMappingURL=index.js.map

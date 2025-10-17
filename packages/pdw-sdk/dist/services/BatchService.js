@@ -1,4 +1,3 @@
-"use strict";
 /**
  * BatchService - Unified Batch Processing & Caching
  *
@@ -7,9 +6,7 @@
  *
  * Replaces: BatchingService + BatchManager
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.BatchService = void 0;
-const events_1 = require("events");
+import { EventEmitter } from 'events';
 /**
  * BatchService provides unified batch processing including:
  * - Intelligent batching with configurable delays and sizes
@@ -17,7 +14,7 @@ const events_1 = require("events");
  * - Event-driven batch coordination
  * - Performance metrics and monitoring
  */
-class BatchService extends events_1.EventEmitter {
+export class BatchService extends EventEmitter {
     constructor(config = {}) {
         super();
         this.config = config;
@@ -259,5 +256,4 @@ class BatchService extends events_1.EventEmitter {
         }, cleanupInterval);
     }
 }
-exports.BatchService = BatchService;
 //# sourceMappingURL=BatchService.js.map

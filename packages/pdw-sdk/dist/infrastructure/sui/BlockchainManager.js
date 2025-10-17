@@ -1,17 +1,14 @@
-"use strict";
 /**
  * BlockchainManager - Memory Ownership & Metadata Management
  *
  * Orchestrates blockchain operations for memory records, manages ownership,
  * and provides seamless integration with memory processing pipeline.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.BlockchainManager = void 0;
-const SuiService_1 = require("./SuiService");
+import { SuiService } from './SuiService';
 /**
  * Blockchain manager for memory ownership and decentralized metadata
  */
-class BlockchainManager {
+export class BlockchainManager {
     constructor(config = {}) {
         this.ownershipCache = new Map();
         this.indexCache = new Map();
@@ -42,7 +39,7 @@ class BlockchainManager {
             enableCaching: config.enableCaching !== false
         };
         // Initialize Sui service
-        this.suiService = new SuiService_1.SuiService(this.config.suiConfig);
+        this.suiService = new SuiService(this.config.suiConfig);
     }
     // ==================== MEMORY RECORD OPERATIONS ====================
     /**
@@ -420,6 +417,5 @@ class BlockchainManager {
         return Date.now() - timestamp.getTime() < CACHE_TTL_MS;
     }
 }
-exports.BlockchainManager = BlockchainManager;
-exports.default = BlockchainManager;
+export default BlockchainManager;
 //# sourceMappingURL=BlockchainManager.js.map

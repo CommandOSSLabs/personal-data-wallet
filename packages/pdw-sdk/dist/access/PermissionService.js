@@ -1,4 +1,3 @@
-"use strict";
 /**
  * PermissionService - OAuth-style access control management
  *
@@ -8,15 +7,13 @@
  * - On-chain access control integration
  * - Permission auditing and revocation
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PermissionService = void 0;
-const crypto_1 = require("crypto");
-const utils_1 = require("@mysten/sui/utils");
-const CrossContextPermissionService_1 = require("../services/CrossContextPermissionService");
+import { randomUUID } from 'crypto';
+import { normalizeSuiAddress } from '@mysten/sui/utils';
+import { CrossContextPermissionService } from '../services/CrossContextPermissionService';
 /**
  * PermissionService handles OAuth-style access control
  */
-class PermissionService {
+export class PermissionService {
     constructor(config) {
         this.pendingConsents = new Map();
         this.suiClient = config.suiClient;
@@ -29,7 +26,7 @@ class PermissionService {
         }
         this.crossContextPermissions =
             config.crossContextPermissionService ??
-                new CrossContextPermissionService_1.CrossContextPermissionService({
+                new CrossContextPermissionService({
                     packageId: this.packageId,
                     accessRegistryId: config.accessRegistryId,
                 }, this.suiClient);
@@ -40,10 +37,10 @@ class PermissionService {
      * @returns Created consent request
      */
     async requestConsent(options) {
-        const requesterWallet = (0, utils_1.normalizeSuiAddress)(options.requesterWallet);
-        const targetWallet = (0, utils_1.normalizeSuiAddress)(options.targetWallet);
+        const requesterWallet = normalizeSuiAddress(options.requesterWallet);
+        const targetWallet = normalizeSuiAddress(options.targetWallet);
         const now = Date.now();
-        const requestId = (0, crypto_1.randomUUID)();
+        const requestId = randomUUID();
         const consentRequest = {
             requesterWallet,
             targetWallet,
@@ -67,8 +64,8 @@ class PermissionService {
      * @returns Created access grant
      */
     async grantPermissions(userAddress, options) {
-        const requestingWallet = (0, utils_1.normalizeSuiAddress)(options.requestingWallet);
-        const targetWallet = (0, utils_1.normalizeSuiAddress)(options.targetWallet);
+        const requestingWallet = normalizeSuiAddress(options.requestingWallet);
+        const targetWallet = normalizeSuiAddress(options.targetWallet);
         if (this.contextWalletService) {
             const ownsContext = await this.contextWalletService.validateAccess(targetWallet, userAddress);
             if (!ownsContext) {
@@ -123,8 +120,8 @@ class PermissionService {
      * @returns Success status
      */
     async revokePermissions(userAddress, options) {
-        const requestingWallet = (0, utils_1.normalizeSuiAddress)(options.requestingWallet);
-        const targetWallet = (0, utils_1.normalizeSuiAddress)(options.targetWallet);
+        const requestingWallet = normalizeSuiAddress(options.requestingWallet);
+        const targetWallet = normalizeSuiAddress(options.targetWallet);
         if (this.contextWalletService) {
             const ownsContext = await this.contextWalletService.validateAccess(targetWallet, userAddress);
             if (!ownsContext) {
@@ -145,8 +142,8 @@ class PermissionService {
      */
     async hasWalletPermission(requestingWallet, targetWallet, scope) {
         return await this.crossContextPermissions.hasWalletPermission({
-            requestingWallet: (0, utils_1.normalizeSuiAddress)(requestingWallet),
-            targetWallet: (0, utils_1.normalizeSuiAddress)(targetWallet),
+            requestingWallet: normalizeSuiAddress(requestingWallet),
+            targetWallet: normalizeSuiAddress(targetWallet),
             scope,
         });
     }
@@ -163,7 +160,7 @@ class PermissionService {
      * @returns Array of access grants
      */
     async getGrantsByUser(userAddress) {
-        const normalized = (0, utils_1.normalizeSuiAddress)(userAddress);
+        const normalized = normalizeSuiAddress(userAddress);
         const permissions = await this.crossContextPermissions.listGrantsByTarget(normalized);
         return this.convertPermissionsToGrants(permissions);
     }
@@ -173,7 +170,7 @@ class PermissionService {
      * @returns Array of pending consent requests
      */
     async getPendingConsents(userAddress) {
-        const normalized = (0, utils_1.normalizeSuiAddress)(userAddress);
+        const normalized = normalizeSuiAddress(userAddress);
         if (this.consentRepository) {
             return await this.consentRepository.listByTarget(normalized, 'pending');
         }
@@ -225,7 +222,7 @@ class PermissionService {
             });
         }
         else {
-            const inferredRequestId = (0, crypto_1.randomUUID)();
+            const inferredRequestId = randomUUID();
             await this.persistConsentRequest({
                 ...consentRequest,
                 requestId: inferredRequestId,
@@ -242,7 +239,7 @@ class PermissionService {
      * @returns Array of permission events
      */
     async getPermissionAudit(userAddress) {
-        const normalized = (0, utils_1.normalizeSuiAddress)(userAddress);
+        const normalized = normalizeSuiAddress(userAddress);
         const auditEntries = [];
         const consentRecords = this.consentRepository
             ? await this.consentRepository.listByTarget(normalized)
@@ -294,7 +291,7 @@ class PermissionService {
      * Build seal_approve transaction for a requesting wallet
      */
     createApprovalTransaction(contentId, requestingWallet) {
-        return this.crossContextPermissions.buildSealApproveTransaction(contentId, (0, utils_1.normalizeSuiAddress)(requestingWallet));
+        return this.crossContextPermissions.buildSealApproveTransaction(contentId, normalizeSuiAddress(requestingWallet));
     }
     /**
      * Get permission statistics for a user
@@ -400,8 +397,8 @@ class PermissionService {
         this.consentRepository = repository;
     }
     async updateConsentStatus(params) {
-        const normalizedRequester = (0, utils_1.normalizeSuiAddress)(params.requesterWallet);
-        const normalizedTarget = (0, utils_1.normalizeSuiAddress)(params.targetWallet);
+        const normalizedRequester = normalizeSuiAddress(params.requesterWallet);
+        const normalizedTarget = normalizeSuiAddress(params.targetWallet);
         if (this.consentRepository) {
             if (params.requestId) {
                 await this.consentRepository.updateStatus(params.requestId, params.newStatus, params.updatedAt);
@@ -425,5 +422,4 @@ class PermissionService {
         }
     }
 }
-exports.PermissionService = PermissionService;
 //# sourceMappingURL=PermissionService.js.map

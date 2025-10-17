@@ -99,7 +99,7 @@ export declare class VectorManager {
      * Get vector processing statistics
      */
     getStats(): {
-        index: import("../embedding/types").BatchStats;
+        index: import(".").BatchStats;
         embedding: {
             totalRequests: number;
             requestsThisMinute: number;

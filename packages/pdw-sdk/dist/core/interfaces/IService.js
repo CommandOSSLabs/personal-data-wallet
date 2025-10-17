@@ -1,27 +1,24 @@
-"use strict";
 /**
  * Base Service Interface
  *
  * Defines the standard interface that all services in the PDW SDK should implement.
  * Provides consistent lifecycle management, error handling, logging, and metrics.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.BaseService = exports.ConsoleLogger = exports.ServiceState = void 0;
 /**
  * Service lifecycle states
  */
-var ServiceState;
+export var ServiceState;
 (function (ServiceState) {
     ServiceState["UNINITIALIZED"] = "uninitialized";
     ServiceState["INITIALIZING"] = "initializing";
     ServiceState["READY"] = "ready";
     ServiceState["ERROR"] = "error";
     ServiceState["DESTROYED"] = "destroyed";
-})(ServiceState || (exports.ServiceState = ServiceState = {}));
+})(ServiceState || (ServiceState = {}));
 /**
  * Default console logger implementation
  */
-class ConsoleLogger {
+export class ConsoleLogger {
     constructor(serviceName, debugEnabled = false) {
         this.serviceName = serviceName;
         this.debugEnabled = debugEnabled;
@@ -41,11 +38,10 @@ class ConsoleLogger {
         console.error(`[${this.serviceName}] ${message}`, error, context || '');
     }
 }
-exports.ConsoleLogger = ConsoleLogger;
 /**
  * Abstract base service class with common functionality
  */
-class BaseService {
+export class BaseService {
     constructor(config) {
         this.config = config;
         this._state = ServiceState.UNINITIALIZED;
@@ -160,5 +156,4 @@ class BaseService {
         this._metrics.averageDuration = (totalDuration + duration) / this._metrics.operationCount;
     }
 }
-exports.BaseService = BaseService;
 //# sourceMappingURL=IService.js.map

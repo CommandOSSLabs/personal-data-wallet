@@ -1,53 +1,17 @@
-"use strict";
 /**
  * Memory Service
  *
  * Handles all memory-related operations including CRUD, search, context retrieval,
  * HNSW vector search, metadata embeddings, and Walrus Quilts integration.
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MemoryService = void 0;
-const client_1 = require("../api/client");
-const transactions_1 = require("@mysten/sui/transactions");
-const memoryContract = __importStar(require("../generated/pdw/memory"));
-class MemoryService {
+import { PDWApiClient } from '../api/client';
+import { Transaction } from '@mysten/sui/transactions';
+import * as memoryContract from '../generated/pdw/memory';
+export class MemoryService {
     constructor(client, config) {
         this.client = client;
         this.config = config;
-        this.apiClient = new client_1.PDWApiClient(config.apiUrl);
+        this.apiClient = new PDWApiClient(config.apiUrl);
     }
     // ==================== TOP-LEVEL METHODS ====================
     /**
@@ -146,7 +110,7 @@ class MemoryService {
              * Create transaction for memory record on blockchain
              */
             createMemoryRecord: async (options) => {
-                const tx = new transactions_1.Transaction();
+                const tx = new Transaction();
                 // Create the memory record with inline metadata
                 const memoryRecord = memoryContract.createMemoryRecord({
                     package: this.config.packageId,
@@ -169,7 +133,7 @@ class MemoryService {
              * Create transaction to delete memory
              */
             deleteMemory: async (memoryId) => {
-                const tx = new transactions_1.Transaction();
+                const tx = new Transaction();
                 const deleteCall = memoryContract.deleteMemoryRecord({
                     package: this.config.packageId,
                     arguments: {
@@ -183,7 +147,7 @@ class MemoryService {
              * Create transaction to update memory metadata
              */
             updateMemoryMetadata: async (memoryId, metadata) => {
-                const tx = new transactions_1.Transaction();
+                const tx = new Transaction();
                 const updateCall = memoryContract.updateMemoryMetadata({
                     package: this.config.packageId,
                     arguments: {
@@ -199,7 +163,7 @@ class MemoryService {
              * Create memory index transaction
              */
             createMemoryIndex: async (options) => {
-                const tx = new transactions_1.Transaction();
+                const tx = new Transaction();
                 const indexCall = memoryContract.createMemoryIndex({
                     package: this.config.packageId,
                     arguments: {
@@ -214,7 +178,7 @@ class MemoryService {
              * Update memory index transaction
              */
             updateMemoryIndex: async (options) => {
-                const tx = new transactions_1.Transaction();
+                const tx = new Transaction();
                 const updateCall = memoryContract.updateMemoryIndex({
                     package: this.config.packageId,
                     arguments: {
@@ -485,7 +449,7 @@ class MemoryService {
         return {
             embeddings: result.embeddings,
             dimension: result.dimension || 768,
-            model: result.model || 'text-embedding-3-large',
+            model: result.model || 'text-embedding-004',
             processingTime: Date.now() - startTime
         };
     }
@@ -674,5 +638,4 @@ class MemoryService {
         };
     }
 }
-exports.MemoryService = MemoryService;
 //# sourceMappingURL=MemoryService.js.map

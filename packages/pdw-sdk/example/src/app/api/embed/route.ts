@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { EmbeddingService } from 'personal-data-wallet-sdk/dist/services/EmbeddingService';
+import { EmbeddingService } from 'personal-data-wallet-sdk/services';
 
 export async function POST(request: NextRequest) {
   try {

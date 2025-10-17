@@ -1,19 +1,16 @@
-"use strict";
 /**
  * SEAL Service Integration
  *
  * Production-ready SEAL service wrapper with comprehensive error handling,
  * session management, and performance analytics integration.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.SealService = void 0;
-const transactions_1 = require("@mysten/sui/transactions");
-const utils_1 = require("@mysten/sui/utils");
-const seal_1 = require("@mysten/seal");
+import { Transaction } from '@mysten/sui/transactions';
+import { fromHex, toHex, normalizeSuiAddress } from '@mysten/sui/utils';
+import { SealClient, SessionKey, EncryptedObject } from '@mysten/seal';
 /**
  * SEAL Service - Production Implementation
  */
-class SealService {
+export class SealService {
     constructor(config) {
         this.sealClient = null;
         this.sessionKey = null;
@@ -38,7 +35,7 @@ class SealService {
                 serverConfigs,
                 verifyKeyServers: this.config.network === 'mainnet' // Only verify on mainnet
             };
-            this.sealClient = new seal_1.SealClient(sealClientOptions);
+            this.sealClient = new SealClient(sealClientOptions);
             this.completeMetric(metric, true, { serverCount: serverConfigs.length });
             console.log('✅ SEAL client initialized with', serverConfigs.length, 'servers');
         }
@@ -53,7 +50,7 @@ class SealService {
     async createSession(config, signature) {
         const metric = this.startMetric('session_creation');
         try {
-            const sessionKey = await seal_1.SessionKey.create({
+            const sessionKey = await SessionKey.create({
                 address: config.address,
                 packageId: config.packageId,
                 ttlMin: config.ttlMin,
@@ -63,7 +60,7 @@ class SealService {
             // In production, signature would come from wallet
             if (signature) {
                 // Convert Uint8Array to hex string if needed
-                const signatureString = typeof signature === 'string' ? signature : (0, utils_1.toHex)(signature);
+                const signatureString = typeof signature === 'string' ? signature : toHex(signature);
                 await sessionKey.setPersonalMessageSignature(signatureString);
             }
             // Store session for management
@@ -211,16 +208,16 @@ class SealService {
     async createSealApproveTransaction(id, userAddress, requestingWallet, accessRegistry) {
         const metric = this.startMetric('transaction_creation');
         try {
-            const tx = new transactions_1.Transaction();
+            const tx = new Transaction();
             // Use the deployed AccessRegistry ID from environment or parameter
             const registryId = accessRegistry || process.env.ACCESS_REGISTRY_ID || "0xc2b8a9705516370e245f4d7ce58286ccbb56554edf31d1cc5a02155ac24d43c0";
-            const normalizedWallet = (0, utils_1.normalizeSuiAddress)(requestingWallet);
+            const normalizedWallet = normalizeSuiAddress(requestingWallet);
             // Wallet-based seal_approve call
             // entry fun seal_approve(id: vector<u8>, requesting_wallet: address, registry: &AccessRegistry, clock: &Clock, ctx: &TxContext)
             tx.moveCall({
                 target: `${this.config.packageId}::seal_access_control::seal_approve`,
                 arguments: [
-                    tx.pure.vector("u8", (0, utils_1.fromHex)(id)), // Arg 1: Content ID (SEAL key ID)
+                    tx.pure.vector("u8", fromHex(id)), // Arg 1: Content ID (SEAL key ID)
                     tx.pure.address(normalizedWallet), // Arg 2: Requesting wallet address
                     tx.object(registryId), // Arg 3: AccessRegistry reference
                     tx.object('0x6') // Arg 4: Clock object (system clock)
@@ -253,10 +250,10 @@ class SealService {
     buildSealApproveTransaction(contentId, requestingWallet, accessRegistry) {
         const metric = this.startMetric('transaction_creation_wallet');
         try {
-            const tx = new transactions_1.Transaction();
+            const tx = new Transaction();
             // Use the deployed AccessRegistry ID from environment or parameter
             const registryId = accessRegistry || process.env.ACCESS_REGISTRY_ID || "0x8088cc36468b53f210696f1c6b1a4de1b1666dd36a7c36f92c394ff1d342f6dd";
-            const normalizedWallet = (0, utils_1.normalizeSuiAddress)(requestingWallet);
+            const normalizedWallet = normalizeSuiAddress(requestingWallet);
             // Wallet-based seal_approve call
             tx.moveCall({
                 target: `${this.config.packageId}::seal_access_control::seal_approve`,
@@ -287,7 +284,7 @@ class SealService {
     parseEncryptedObject(encryptedBytes) {
         const metric = this.startMetric('object_parsing');
         try {
-            const parsed = seal_1.EncryptedObject.parse(encryptedBytes);
+            const parsed = EncryptedObject.parse(encryptedBytes);
             this.completeMetric(metric, true, {
                 version: parsed.version,
                 packageId: parsed.packageId,
@@ -473,5 +470,4 @@ class SealService {
         }
     }
 }
-exports.SealService = SealService;
 //# sourceMappingURL=SealService.js.map

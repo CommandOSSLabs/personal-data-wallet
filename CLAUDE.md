@@ -586,7 +586,7 @@ Key dependencies:
 - `@mysten/dapp-kit` (v0.19+): React hooks for Sui
 - `@mysten/seal` (v0.6+): SEAL encryption
 - `@mysten/walrus` (v0.7+): Walrus storage
-- `@google/generative-ai` (v0.21+): Gemini AI
+- `@google/genai` (v1.20+): Google Gen AI SDK (unified SDK for Gemini API and Vertex AI)
 - `@tanstack/react-query` (v5.90+): React Query for data fetching
 - `hnswlib-wasm` (v0.8.2): Browser-compatible HNSW vector search (WebAssembly)
 

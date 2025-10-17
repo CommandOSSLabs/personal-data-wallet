@@ -108,7 +108,7 @@ export class MemoryIndexService {
       storageService || undefined as any,
       {
         maxElements: options.maxElements || 10000,
-        dimension: options.dimension || 1536, // Default for text-embedding-004
+        dimension: options.dimension || 768, // Default for text-embedding-004 (Gemini)
         efConstruction: options.efConstruction || 200,
         m: options.m || 16
       },
@@ -120,7 +120,7 @@ export class MemoryIndexService {
 
     console.log('✅ MemoryIndexService initialized with browser-compatible HNSW (hnswlib-wasm)');
     console.log(`   Max elements: ${options.maxElements || 10000}`);
-    console.log(`   Embedding dimension: ${options.dimension || 1536}`);
+    console.log(`   Embedding dimension: ${options.dimension || 768}`);
     console.log(`   HNSW parameters: M=${options.m || 16}, efConstruction=${options.efConstruction || 200}`);
     console.log(`   Features: WebAssembly, IndexedDB persistence, batching, Walrus storage`);
   }

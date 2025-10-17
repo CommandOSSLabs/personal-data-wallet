@@ -1,4 +1,3 @@
-"use strict";
 /**
  * MemoryPipeline - Unified Memory Processing Pipeline
  *
@@ -7,18 +6,16 @@
  *
  * Provides comprehensive error handling, rollback capabilities, and monitoring.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MemoryPipeline = void 0;
-const EmbeddingService_1 = require("../services/EmbeddingService");
-const VectorManager_1 = require("../vector/VectorManager");
-const BatchManager_1 = require("../batch/BatchManager");
-const KnowledgeGraphManager_1 = require("../graph/KnowledgeGraphManager");
-const StorageManager_1 = require("../infrastructure/walrus/StorageManager");
-const BlockchainManager_1 = require("../infrastructure/sui/BlockchainManager");
+import { EmbeddingService } from '../services/EmbeddingService';
+import { VectorManager } from '../vector/VectorManager';
+import { BatchManager } from '../batch/BatchManager';
+import { KnowledgeGraphManager } from '../graph/KnowledgeGraphManager';
+import { StorageManager } from '../infrastructure/walrus/StorageManager';
+import { BlockchainManager } from '../infrastructure/sui/BlockchainManager';
 /**
  * Complete memory processing pipeline with orchestrated services
  */
-class MemoryPipeline {
+export class MemoryPipeline {
     constructor(config = {}) {
         this.executions = new Map();
         this.metrics = {
@@ -331,12 +328,12 @@ class MemoryPipeline {
     // ==================== PRIVATE METHODS ====================
     initializeServices() {
         // Initialize all services with configurations
-        this.embeddingService = new EmbeddingService_1.EmbeddingService({
+        this.embeddingService = new EmbeddingService({
             apiKey: this.config.embedding.apiKey,
             model: this.config.embedding.model,
             requestsPerMinute: 60
         });
-        this.vectorManager = new VectorManager_1.VectorManager({}, // TODO: Fix storage service dependency
+        this.vectorManager = new VectorManager({}, // TODO: Fix storage service dependency
         {
             embedding: { apiKey: '' },
             index: {
@@ -345,22 +342,22 @@ class MemoryPipeline {
             },
             batch: { maxBatchSize: 10 }
         });
-        this.batchManager = new BatchManager_1.BatchManager({
+        this.batchManager = new BatchManager({
             embedding: {
                 batchSize: this.config.batch.batchSize,
                 delayMs: this.config.batch.batchDelayMs
             },
             enableMetrics: this.config.enableMonitoring
         });
-        this.graphManager = new KnowledgeGraphManager_1.KnowledgeGraphManager();
-        this.storageManager = new StorageManager_1.StorageManager({
+        this.graphManager = new KnowledgeGraphManager();
+        this.storageManager = new StorageManager({
             walrusConfig: {
                 network: this.config.storage.network,
                 enableEncryption: this.config.storage.enableEncryption,
                 enableBatching: this.config.storage.enableBatching
             }
         });
-        this.blockchainManager = new BlockchainManager_1.BlockchainManager({
+        this.blockchainManager = new BlockchainManager({
             suiConfig: {
                 network: this.config.blockchain.network,
                 packageId: this.config.blockchain.packageId,
@@ -588,6 +585,5 @@ class MemoryPipeline {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 }
-exports.MemoryPipeline = MemoryPipeline;
-exports.default = MemoryPipeline;
+export default MemoryPipeline;
 //# sourceMappingURL=MemoryPipeline.js.map

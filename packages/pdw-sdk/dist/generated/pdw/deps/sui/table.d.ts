@@ -24,9 +24,9 @@ import { MoveStruct } from '../../../utils/index.js';
 export declare const Table: MoveStruct<{
     /** the ID of this table */
     id: MoveStruct<{
-        id: import("@mysten/sui/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
+        id: import("@mysten/bcs").BcsType<string, string | Uint8Array<ArrayBufferLike>, "bytes[32]">;
     }, "0x2::object::UID">;
     /** the number of key-value pairs in the table */
-    size: import("@mysten/sui/bcs").BcsType<string, string | number | bigint, "u64">;
+    size: import("@mysten/bcs").BcsType<string, string | number | bigint, "u64">;
 }, "0x2::table::Table">;
 //# sourceMappingURL=table.d.ts.map

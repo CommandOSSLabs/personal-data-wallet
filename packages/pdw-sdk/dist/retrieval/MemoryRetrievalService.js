@@ -1,4 +1,3 @@
-"use strict";
 /**
  * MemoryRetrievalService - Unified Memory Retrieval & Search
  *
@@ -15,20 +14,18 @@
  * - 🔄 Real-time memory streaming
  * - 📤 Export and backup capabilities
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MemoryRetrievalService = void 0;
-const EmbeddingService_1 = require("../services/EmbeddingService");
-const VectorManager_1 = require("../vector/VectorManager");
-const KnowledgeGraphManager_1 = require("../graph/KnowledgeGraphManager");
-const StorageManager_1 = require("../infrastructure/walrus/StorageManager");
-const BlockchainManager_1 = require("../infrastructure/sui/BlockchainManager");
-const EncryptionService_1 = require("../services/EncryptionService");
-const BatchManager_1 = require("../batch/BatchManager");
-const MemoryDecryptionPipeline_1 = require("./MemoryDecryptionPipeline");
+import { EmbeddingService } from '../services/EmbeddingService';
+import { VectorManager } from '../vector/VectorManager';
+import { KnowledgeGraphManager } from '../graph/KnowledgeGraphManager';
+import { StorageManager } from '../infrastructure/walrus/StorageManager';
+import { BlockchainManager } from '../infrastructure/sui/BlockchainManager';
+import { EncryptionService } from '../services/EncryptionService';
+import { BatchManager } from '../batch/BatchManager';
+import { MemoryDecryptionPipeline } from './MemoryDecryptionPipeline';
 /**
  * Unified Memory Retrieval Service
  */
-class MemoryRetrievalService {
+export class MemoryRetrievalService {
     constructor(config) {
         // Multi-tier caching system
         this.queryCache = new Map();
@@ -39,20 +36,20 @@ class MemoryRetrievalService {
         this.CONTENT_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
         this.ANALYTICS_CACHE_TTL = 60 * 60 * 1000; // 1 hour
         // Initialize services (can be injected or created with default configs)
-        this.embeddingService = config?.embeddingService ?? new EmbeddingService_1.EmbeddingService();
-        this.storageManager = config?.storageManager ?? new StorageManager_1.StorageManager();
-        this.vectorManager = config?.vectorManager ?? new VectorManager_1.VectorManager(this.storageManager, // TODO: Fix type compatibility
+        this.embeddingService = config?.embeddingService ?? new EmbeddingService();
+        this.storageManager = config?.storageManager ?? new StorageManager();
+        this.vectorManager = config?.vectorManager ?? new VectorManager(this.storageManager, // TODO: Fix type compatibility
         {
             embedding: { apiKey: '' },
             index: { dimension: 768 },
             batch: { maxBatchSize: 10 }
         });
-        this.graphManager = config?.graphManager ?? new KnowledgeGraphManager_1.KnowledgeGraphManager();
-        this.blockchainManager = config?.blockchainManager ?? new BlockchainManager_1.BlockchainManager();
-        this.encryptionService = config?.encryptionService ?? new EncryptionService_1.EncryptionService({}, {});
-        this.batchManager = config?.batchManager ?? new BatchManager_1.BatchManager();
+        this.graphManager = config?.graphManager ?? new KnowledgeGraphManager();
+        this.blockchainManager = config?.blockchainManager ?? new BlockchainManager();
+        this.encryptionService = config?.encryptionService ?? new EncryptionService({}, {});
+        this.batchManager = config?.batchManager ?? new BatchManager();
         // Initialize decryption pipeline
-        this.decryptionPipeline = new MemoryDecryptionPipeline_1.MemoryDecryptionPipeline(this.encryptionService, this.storageManager, config?.decryptionConfig);
+        this.decryptionPipeline = new MemoryDecryptionPipeline(this.encryptionService, this.storageManager, config?.decryptionConfig);
     }
     // ==================== UNIFIED SEARCH ====================
     /**
@@ -519,5 +516,4 @@ class MemoryRetrievalService {
         console.log(`Warming up cache for user ${userId}`);
     }
 }
-exports.MemoryRetrievalService = MemoryRetrievalService;
 //# sourceMappingURL=MemoryRetrievalService.js.map

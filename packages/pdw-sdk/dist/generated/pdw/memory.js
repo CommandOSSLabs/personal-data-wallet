@@ -1,117 +1,59 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Memory = exports.MemoryIndex = exports.MemoryMetadata = exports.MemoryMetadataUpdated = exports.MemoryIndexUpdated = exports.MemoryCreated = void 0;
-exports.createMemoryIndex = createMemoryIndex;
-exports.updateMemoryIndex = updateMemoryIndex;
-exports.createMemoryMetadata = createMemoryMetadata;
-exports.createMemoryRecord = createMemoryRecord;
-exports.updateMemoryMetadata = updateMemoryMetadata;
-exports.addCustomMetadata = addCustomMetadata;
-exports.deleteMemoryRecord = deleteMemoryRecord;
-exports.getIndexBlobId = getIndexBlobId;
-exports.getGraphBlobId = getGraphBlobId;
-exports.getVersion = getVersion;
-exports.getMemoryBlobId = getMemoryBlobId;
-exports.getMemoryVectorId = getMemoryVectorId;
-exports.getMemoryCategory = getMemoryCategory;
-exports.getMetadata = getMetadata;
-exports.getEmbeddingBlobId = getEmbeddingBlobId;
-exports.getContentType = getContentType;
-exports.getContentSize = getContentSize;
-exports.getTopic = getTopic;
-exports.getImportance = getImportance;
-exports.getCreatedTimestamp = getCreatedTimestamp;
-exports.getUpdatedTimestamp = getUpdatedTimestamp;
-exports.getCustomMetadata = getCustomMetadata;
 /**************************************************************
  * THIS FILE IS GENERATED AND SHOULD NOT BE MANUALLY MODIFIED *
  **************************************************************/
-const index_js_1 = require("../utils/index.js");
-const bcs_1 = require("@mysten/sui/bcs");
-const vec_map = __importStar(require("./deps/sui/vec_map.js"));
-const object = __importStar(require("./deps/sui/object.js"));
+import { MoveStruct, normalizeMoveArguments } from '../utils/index.js';
+import { bcs } from '@mysten/sui/bcs';
+import * as vec_map from './deps/sui/vec_map.js';
+import * as object from './deps/sui/object.js';
 const $moduleName = '@local-pkg/pdw::memory';
-exports.MemoryCreated = new index_js_1.MoveStruct({ name: `${$moduleName}::MemoryCreated`, fields: {
-        id: bcs_1.bcs.Address,
-        owner: bcs_1.bcs.Address,
-        category: bcs_1.bcs.string(),
-        vector_id: bcs_1.bcs.u64()
+export const MemoryCreated = new MoveStruct({ name: `${$moduleName}::MemoryCreated`, fields: {
+        id: bcs.Address,
+        owner: bcs.Address,
+        category: bcs.string(),
+        vector_id: bcs.u64()
     } });
-exports.MemoryIndexUpdated = new index_js_1.MoveStruct({ name: `${$moduleName}::MemoryIndexUpdated`, fields: {
-        id: bcs_1.bcs.Address,
-        owner: bcs_1.bcs.Address,
-        version: bcs_1.bcs.u64(),
-        index_blob_id: bcs_1.bcs.string(),
-        graph_blob_id: bcs_1.bcs.string()
+export const MemoryIndexUpdated = new MoveStruct({ name: `${$moduleName}::MemoryIndexUpdated`, fields: {
+        id: bcs.Address,
+        owner: bcs.Address,
+        version: bcs.u64(),
+        index_blob_id: bcs.string(),
+        graph_blob_id: bcs.string()
     } });
-exports.MemoryMetadataUpdated = new index_js_1.MoveStruct({ name: `${$moduleName}::MemoryMetadataUpdated`, fields: {
-        memory_id: bcs_1.bcs.Address,
-        metadata_blob_id: bcs_1.bcs.string(),
-        embedding_dimension: bcs_1.bcs.u64()
+export const MemoryMetadataUpdated = new MoveStruct({ name: `${$moduleName}::MemoryMetadataUpdated`, fields: {
+        memory_id: bcs.Address,
+        metadata_blob_id: bcs.string(),
+        embedding_dimension: bcs.u64()
     } });
-exports.MemoryMetadata = new index_js_1.MoveStruct({ name: `${$moduleName}::MemoryMetadata`, fields: {
-        content_type: bcs_1.bcs.string(),
-        content_size: bcs_1.bcs.u64(),
-        content_hash: bcs_1.bcs.string(),
-        category: bcs_1.bcs.string(),
-        topic: bcs_1.bcs.string(),
-        importance: bcs_1.bcs.u8(),
-        embedding_blob_id: bcs_1.bcs.string(),
-        embedding_dimension: bcs_1.bcs.u64(),
-        created_timestamp: bcs_1.bcs.u64(),
-        updated_timestamp: bcs_1.bcs.u64(),
-        custom_metadata: vec_map.VecMap(bcs_1.bcs.string(), bcs_1.bcs.string())
+export const MemoryMetadata = new MoveStruct({ name: `${$moduleName}::MemoryMetadata`, fields: {
+        content_type: bcs.string(),
+        content_size: bcs.u64(),
+        content_hash: bcs.string(),
+        category: bcs.string(),
+        topic: bcs.string(),
+        importance: bcs.u8(),
+        embedding_blob_id: bcs.string(),
+        embedding_dimension: bcs.u64(),
+        created_timestamp: bcs.u64(),
+        updated_timestamp: bcs.u64(),
+        custom_metadata: vec_map.VecMap(bcs.string(), bcs.string())
     } });
-exports.MemoryIndex = new index_js_1.MoveStruct({ name: `${$moduleName}::MemoryIndex`, fields: {
+export const MemoryIndex = new MoveStruct({ name: `${$moduleName}::MemoryIndex`, fields: {
         id: object.UID,
-        owner: bcs_1.bcs.Address,
-        version: bcs_1.bcs.u64(),
-        index_blob_id: bcs_1.bcs.string(),
-        graph_blob_id: bcs_1.bcs.string()
+        owner: bcs.Address,
+        version: bcs.u64(),
+        index_blob_id: bcs.string(),
+        graph_blob_id: bcs.string()
     } });
-exports.Memory = new index_js_1.MoveStruct({ name: `${$moduleName}::Memory`, fields: {
+export const Memory = new MoveStruct({ name: `${$moduleName}::Memory`, fields: {
         id: object.UID,
-        owner: bcs_1.bcs.Address,
-        category: bcs_1.bcs.string(),
-        vector_id: bcs_1.bcs.u64(),
-        blob_id: bcs_1.bcs.string(),
-        metadata: exports.MemoryMetadata
+        owner: bcs.Address,
+        category: bcs.string(),
+        vector_id: bcs.u64(),
+        blob_id: bcs.string(),
+        metadata: MemoryMetadata
     } });
 /** Create a new memory index for a user */
-function createMemoryIndex(options) {
+export function createMemoryIndex(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         'vector<u8>',
@@ -122,11 +64,11 @@ function createMemoryIndex(options) {
         package: packageAddress,
         module: 'memory',
         function: 'create_memory_index',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Update an existing memory index with new blob IDs */
-function updateMemoryIndex(options) {
+export function updateMemoryIndex(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::MemoryIndex`,
@@ -139,11 +81,11 @@ function updateMemoryIndex(options) {
         package: packageAddress,
         module: 'memory',
         function: 'update_memory_index',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Create metadata struct with embedding */
-function createMemoryMetadata(options) {
+export function createMemoryMetadata(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         'vector<u8>',
@@ -161,11 +103,11 @@ function createMemoryMetadata(options) {
         package: packageAddress,
         module: 'memory',
         function: 'create_memory_metadata',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Create a new memory record with rich metadata */
-function createMemoryRecord(options) {
+export function createMemoryRecord(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         'vector<u8>',
@@ -183,11 +125,11 @@ function createMemoryRecord(options) {
         package: packageAddress,
         module: 'memory',
         function: 'create_memory_record',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Update metadata for an existing memory */
-function updateMemoryMetadata(options) {
+export function updateMemoryMetadata(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::Memory`,
@@ -199,11 +141,11 @@ function updateMemoryMetadata(options) {
         package: packageAddress,
         module: 'memory',
         function: 'update_memory_metadata',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Add custom metadata field */
-function addCustomMetadata(options) {
+export function addCustomMetadata(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::Memory`,
@@ -215,11 +157,11 @@ function addCustomMetadata(options) {
         package: packageAddress,
         module: 'memory',
         function: 'add_custom_metadata',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 /** Delete a memory record */
-function deleteMemoryRecord(options) {
+export function deleteMemoryRecord(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::Memory`
@@ -229,10 +171,10 @@ function deleteMemoryRecord(options) {
         package: packageAddress,
         module: 'memory',
         function: 'delete_memory_record',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getIndexBlobId(options) {
+export function getIndexBlobId(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::MemoryIndex`
@@ -242,10 +184,10 @@ function getIndexBlobId(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_index_blob_id',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getGraphBlobId(options) {
+export function getGraphBlobId(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::MemoryIndex`
@@ -255,10 +197,10 @@ function getGraphBlobId(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_graph_blob_id',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getVersion(options) {
+export function getVersion(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::MemoryIndex`
@@ -268,10 +210,10 @@ function getVersion(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_version',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getMemoryBlobId(options) {
+export function getMemoryBlobId(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::Memory`
@@ -281,10 +223,10 @@ function getMemoryBlobId(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_memory_blob_id',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getMemoryVectorId(options) {
+export function getMemoryVectorId(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::Memory`
@@ -294,10 +236,10 @@ function getMemoryVectorId(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_memory_vector_id',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getMemoryCategory(options) {
+export function getMemoryCategory(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::Memory`
@@ -307,10 +249,10 @@ function getMemoryCategory(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_memory_category',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getMetadata(options) {
+export function getMetadata(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::Memory`
@@ -320,10 +262,10 @@ function getMetadata(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_metadata',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getEmbeddingBlobId(options) {
+export function getEmbeddingBlobId(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::MemoryMetadata`
@@ -333,10 +275,10 @@ function getEmbeddingBlobId(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_embedding_blob_id',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getContentType(options) {
+export function getContentType(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::MemoryMetadata`
@@ -346,10 +288,10 @@ function getContentType(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_content_type',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getContentSize(options) {
+export function getContentSize(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::MemoryMetadata`
@@ -359,10 +301,10 @@ function getContentSize(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_content_size',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getTopic(options) {
+export function getTopic(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::MemoryMetadata`
@@ -372,10 +314,10 @@ function getTopic(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_topic',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getImportance(options) {
+export function getImportance(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::MemoryMetadata`
@@ -385,10 +327,10 @@ function getImportance(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_importance',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getCreatedTimestamp(options) {
+export function getCreatedTimestamp(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::MemoryMetadata`
@@ -398,10 +340,10 @@ function getCreatedTimestamp(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_created_timestamp',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getUpdatedTimestamp(options) {
+export function getUpdatedTimestamp(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::MemoryMetadata`
@@ -411,10 +353,10 @@ function getUpdatedTimestamp(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_updated_timestamp',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-function getCustomMetadata(options) {
+export function getCustomMetadata(options) {
     const packageAddress = options.package ?? '@local-pkg/pdw';
     const argumentsTypes = [
         `${packageAddress}::memory::MemoryMetadata`
@@ -424,7 +366,7 @@ function getCustomMetadata(options) {
         package: packageAddress,
         module: 'memory',
         function: 'get_custom_metadata',
-        arguments: (0, index_js_1.normalizeMoveArguments)(options.arguments, argumentsTypes, parameterNames),
+        arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
 //# sourceMappingURL=memory.js.map

@@ -40,7 +40,7 @@ Respond in this exact JSON format:
       model: 'gemini-2.5-flash',
       contents: prompt
     });
-    const responseText = (result.text || result.toString()).trim();
+    const responseText = (result.text || '').trim();
 
     // Parse JSON response
     let analysis;

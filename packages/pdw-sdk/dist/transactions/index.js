@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Transactions Module - DEPRECATED
  *
@@ -10,9 +9,6 @@
  *
  * This export is maintained for backward compatibility only.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.TransactionService = void 0;
 // Re-export from production location
-var TransactionService_1 = require("../services/TransactionService");
-Object.defineProperty(exports, "TransactionService", { enumerable: true, get: function () { return TransactionService_1.TransactionService; } });
+export { TransactionService } from '../services/TransactionService';
 //# sourceMappingURL=index.js.map

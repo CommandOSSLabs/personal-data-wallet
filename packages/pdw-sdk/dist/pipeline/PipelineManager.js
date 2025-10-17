@@ -1,17 +1,14 @@
-"use strict";
 /**
  * PipelineManager - High-Level Pipeline Orchestration
  *
  * Manages multiple pipeline instances, provides scheduling, monitoring,
  * and administration capabilities for memory processing workflows.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PipelineManager = void 0;
-const MemoryPipeline_1 = require("./MemoryPipeline");
+import { MemoryPipeline } from './MemoryPipeline';
 /**
  * High-level pipeline management and orchestration
  */
-class PipelineManager {
+export class PipelineManager {
     constructor(config = {}) {
         this.pipelines = new Map();
         this.schedules = new Map();
@@ -88,7 +85,7 @@ class PipelineManager {
         const managedPipeline = {
             id: pipelineId,
             name,
-            pipeline: new MemoryPipeline_1.MemoryPipeline(mergedConfig),
+            pipeline: new MemoryPipeline(mergedConfig),
             config: mergedConfig,
             status: options.autoStart !== false ? 'active' : 'paused',
             createdAt: new Date(),
@@ -484,6 +481,5 @@ class PipelineManager {
         return `schedule_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     }
 }
-exports.PipelineManager = PipelineManager;
-exports.default = PipelineManager;
+export default PipelineManager;
 //# sourceMappingURL=PipelineManager.js.map

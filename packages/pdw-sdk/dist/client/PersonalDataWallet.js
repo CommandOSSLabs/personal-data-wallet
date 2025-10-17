@@ -1,4 +1,3 @@
-"use strict";
 /**
  * PersonalDataWallet Client Extension
  *
@@ -17,22 +16,20 @@ var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (
     return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
 };
 var _PersonalDataWallet_client, _PersonalDataWallet_config, _PersonalDataWallet_apiClient, _PersonalDataWallet_transactions, _PersonalDataWallet_view, _PersonalDataWallet_memory, _PersonalDataWallet_chat, _PersonalDataWallet_storage, _PersonalDataWallet_encryption, _PersonalDataWallet_mainWallet, _PersonalDataWallet_contextWallet, _PersonalDataWallet_permission, _PersonalDataWallet_aggregation;
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PersonalDataWallet = void 0;
-const MemoryService_1 = require("../services/MemoryService");
-const ChatService_1 = require("../services/ChatService");
-const StorageService_1 = require("../services/StorageService");
-const EncryptionService_1 = require("../services/EncryptionService");
-const TransactionService_1 = require("../services/TransactionService");
-const ViewService_1 = require("../view/ViewService");
-const MainWalletService_1 = require("../wallet/MainWalletService");
-const ContextWalletService_1 = require("../wallet/ContextWalletService");
-const PermissionService_1 = require("../access/PermissionService");
-const AggregationService_1 = require("../aggregation/AggregationService");
-const client_1 = require("../api/client");
-const defaults_1 = require("../config/defaults");
-const validation_1 = require("../config/validation");
-class PersonalDataWallet {
+import { MemoryService } from '../services/MemoryService';
+import { ChatService } from '../services/ChatService';
+import { StorageService } from '../services/StorageService';
+import { EncryptionService } from '../services/EncryptionService';
+import { TransactionService } from '../services/TransactionService';
+import { ViewService } from '../view/ViewService';
+import { MainWalletService } from '../wallet/MainWalletService';
+import { ContextWalletService } from '../wallet/ContextWalletService';
+import { PermissionService } from '../access/PermissionService';
+import { AggregationService } from '../aggregation/AggregationService';
+import { PDWApiClient } from '../api/client';
+import { createDefaultConfig } from '../config/defaults';
+import { validateConfig } from '../config/validation';
+export class PersonalDataWallet {
     constructor(client, config) {
         _PersonalDataWallet_client.set(this, void 0);
         _PersonalDataWallet_config.set(this, void 0);
@@ -48,35 +45,35 @@ class PersonalDataWallet {
         _PersonalDataWallet_permission.set(this, void 0);
         _PersonalDataWallet_aggregation.set(this, void 0);
         __classPrivateFieldSet(this, _PersonalDataWallet_client, client, "f");
-        __classPrivateFieldSet(this, _PersonalDataWallet_config, (0, validation_1.validateConfig)({ ...(0, defaults_1.createDefaultConfig)(), ...config }), "f");
-        __classPrivateFieldSet(this, _PersonalDataWallet_apiClient, new client_1.PDWApiClient(__classPrivateFieldGet(this, _PersonalDataWallet_config, "f").apiUrl), "f");
+        __classPrivateFieldSet(this, _PersonalDataWallet_config, validateConfig({ ...createDefaultConfig(), ...config }), "f");
+        __classPrivateFieldSet(this, _PersonalDataWallet_apiClient, new PDWApiClient(__classPrivateFieldGet(this, _PersonalDataWallet_config, "f").apiUrl), "f");
         // Initialize services
-        __classPrivateFieldSet(this, _PersonalDataWallet_transactions, new TransactionService_1.TransactionService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
-        __classPrivateFieldSet(this, _PersonalDataWallet_view, new ViewService_1.ViewService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
-        __classPrivateFieldSet(this, _PersonalDataWallet_memory, new MemoryService_1.MemoryService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
-        __classPrivateFieldSet(this, _PersonalDataWallet_chat, new ChatService_1.ChatService(__classPrivateFieldGet(this, _PersonalDataWallet_apiClient, "f")), "f");
-        __classPrivateFieldSet(this, _PersonalDataWallet_storage, new StorageService_1.StorageService(__classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
-        __classPrivateFieldSet(this, _PersonalDataWallet_encryption, new EncryptionService_1.EncryptionService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
+        __classPrivateFieldSet(this, _PersonalDataWallet_transactions, new TransactionService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
+        __classPrivateFieldSet(this, _PersonalDataWallet_view, new ViewService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
+        __classPrivateFieldSet(this, _PersonalDataWallet_memory, new MemoryService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
+        __classPrivateFieldSet(this, _PersonalDataWallet_chat, new ChatService(__classPrivateFieldGet(this, _PersonalDataWallet_apiClient, "f")), "f");
+        __classPrivateFieldSet(this, _PersonalDataWallet_storage, new StorageService(__classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
+        __classPrivateFieldSet(this, _PersonalDataWallet_encryption, new EncryptionService(client, __classPrivateFieldGet(this, _PersonalDataWallet_config, "f")), "f");
         // Initialize wallet architecture services
-        __classPrivateFieldSet(this, _PersonalDataWallet_mainWallet, new MainWalletService_1.MainWalletService({
+        __classPrivateFieldSet(this, _PersonalDataWallet_mainWallet, new MainWalletService({
             suiClient: client.client || client,
             packageId: __classPrivateFieldGet(this, _PersonalDataWallet_config, "f").packageId || ''
         }), "f");
-        __classPrivateFieldSet(this, _PersonalDataWallet_contextWallet, new ContextWalletService_1.ContextWalletService({
+        __classPrivateFieldSet(this, _PersonalDataWallet_contextWallet, new ContextWalletService({
             suiClient: client.client || client,
             packageId: __classPrivateFieldGet(this, _PersonalDataWallet_config, "f").packageId || '',
             mainWalletService: __classPrivateFieldGet(this, _PersonalDataWallet_mainWallet, "f"),
             storageService: __classPrivateFieldGet(this, _PersonalDataWallet_storage, "f"),
             encryptionService: __classPrivateFieldGet(this, _PersonalDataWallet_encryption, "f")
         }), "f");
-        __classPrivateFieldSet(this, _PersonalDataWallet_permission, new PermissionService_1.PermissionService({
+        __classPrivateFieldSet(this, _PersonalDataWallet_permission, new PermissionService({
             suiClient: client.client || client,
             packageId: __classPrivateFieldGet(this, _PersonalDataWallet_config, "f").packageId || '',
             accessRegistryId: __classPrivateFieldGet(this, _PersonalDataWallet_config, "f").accessRegistryId || '',
             apiUrl: __classPrivateFieldGet(this, _PersonalDataWallet_config, "f").apiUrl,
             contextWalletService: __classPrivateFieldGet(this, _PersonalDataWallet_contextWallet, "f")
         }), "f");
-        __classPrivateFieldSet(this, _PersonalDataWallet_aggregation, new AggregationService_1.AggregationService({
+        __classPrivateFieldSet(this, _PersonalDataWallet_aggregation, new AggregationService({
             suiClient: client.client || client,
             packageId: __classPrivateFieldGet(this, _PersonalDataWallet_config, "f").packageId || '',
             permissionService: __classPrivateFieldGet(this, _PersonalDataWallet_permission, "f"),
@@ -223,8 +220,7 @@ class PersonalDataWallet {
         };
     }
 }
-exports.PersonalDataWallet = PersonalDataWallet;
 _PersonalDataWallet_client = new WeakMap(), _PersonalDataWallet_config = new WeakMap(), _PersonalDataWallet_apiClient = new WeakMap(), _PersonalDataWallet_transactions = new WeakMap(), _PersonalDataWallet_view = new WeakMap(), _PersonalDataWallet_memory = new WeakMap(), _PersonalDataWallet_chat = new WeakMap(), _PersonalDataWallet_storage = new WeakMap(), _PersonalDataWallet_encryption = new WeakMap(), _PersonalDataWallet_mainWallet = new WeakMap(), _PersonalDataWallet_contextWallet = new WeakMap(), _PersonalDataWallet_permission = new WeakMap(), _PersonalDataWallet_aggregation = new WeakMap();
 // Export for easier usage
-exports.default = PersonalDataWallet;
+export default PersonalDataWallet;
 //# sourceMappingURL=PersonalDataWallet.js.map

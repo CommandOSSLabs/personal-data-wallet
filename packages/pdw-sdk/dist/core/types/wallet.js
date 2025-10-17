@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Wallet Architecture Types for Personal Data Wallet SDK
  *
@@ -8,12 +7,10 @@
  * - Access control and permissions
  * - Cross-app consent and grants
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PermissionScopes = void 0;
 /**
  * Permission scope constants for OAuth-style access control
  */
-exports.PermissionScopes = {
+export const PermissionScopes = {
     /** Can decrypt and read user's memory data */
     READ_MEMORIES: 'read:memories',
     /** Can create/modify memory entries */

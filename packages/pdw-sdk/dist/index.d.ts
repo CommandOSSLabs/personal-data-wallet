@@ -158,6 +158,8 @@ declare const _default: {
 export default _default;
 export { ClientMemoryManager } from './client/ClientMemoryManager';
 export type { ClientMemoryManagerConfig, CreateMemoryOptions as ClientCreateMemoryOptions, RetrieveMemoryOptions as ClientRetrieveMemoryOptions, BatchRetrieveMemoriesOptions as ClientBatchRetrieveMemoriesOptions, BatchRetrieveResult as ClientBatchRetrieveResult, ClientMemoryMetadata } from './client/ClientMemoryManager';
+export { useMemoryManager, useCreateMemory, useSearchMemories, useWalletMemories, useMemoryChat } from './hooks';
+export type { MemoryManagerConfig, UseCreateMemoryOptions, UseCreateMemoryReturn, UseSearchMemoriesOptions, UseSearchMemoriesReturn, UseWalletMemoriesOptions, UseWalletMemoriesReturn, UseMemoryChatOptions, UseMemoryChatReturn, CreateMemoryInput, CreateMemoryProgress, CreateMemoryResult, SearchMemoryOptions, SearchMemoryResult, WalletMemory, SortOption, MemoryFilters, MemoryStats, ChatMessage, MemoryChatConfig } from './hooks';
 export { MainWalletService } from './wallet/MainWalletService';
 export { ContextWalletService } from './wallet/ContextWalletService';
 export { PermissionService } from './access/PermissionService';

@@ -1,48 +1,12 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.TransactionService = void 0;
-const transactions_1 = require("@mysten/sui/transactions");
+import { Transaction } from '@mysten/sui/transactions';
 // Import generated Move contract functions
-const MemoryModule = __importStar(require("../generated/pdw/memory"));
-const AccessModule = __importStar(require("../generated/pdw/seal_access_control"));
+import * as MemoryModule from '../generated/pdw/memory';
+import * as AccessModule from '../generated/pdw/seal_access_control';
 /**
  * TransactionService provides high-level transaction building and execution
  * for Personal Data Wallet Move contracts with proper error handling and gas management.
  */
-class TransactionService {
+export class TransactionService {
     constructor(client, config) {
         this.client = client;
         this.config = config;
@@ -52,7 +16,7 @@ class TransactionService {
      * Build transaction to create a new memory record
      */
     buildCreateMemoryRecord(options) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         // Set gas budget if provided
         if (options.gasBudget) {
             tx.setGasBudget(options.gasBudget);
@@ -94,7 +58,7 @@ class TransactionService {
      * @returns Transaction to create lightweight memory record
      */
     buildCreateMemoryRecordLightweight(options) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         // Set gas budget if provided
         if (options.gasBudget) {
             tx.setGasBudget(options.gasBudget);
@@ -123,7 +87,7 @@ class TransactionService {
      * Build transaction to update memory metadata
      */
     buildUpdateMemoryMetadata(options) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         if (options.gasBudget) {
             tx.setGasBudget(options.gasBudget);
         }
@@ -145,7 +109,7 @@ class TransactionService {
      * Build transaction to delete a memory record
      */
     buildDeleteMemoryRecord(options) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         if (options.gasBudget) {
             tx.setGasBudget(options.gasBudget);
         }
@@ -163,7 +127,7 @@ class TransactionService {
      * Build transaction to create a memory index
      */
     buildCreateMemoryIndex(options) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         if (options.gasBudget) {
             tx.setGasBudget(options.gasBudget);
         }
@@ -184,7 +148,7 @@ class TransactionService {
      * Build transaction to update a memory index
      */
     buildUpdateMemoryIndex(options) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         if (options.gasBudget) {
             tx.setGasBudget(options.gasBudget);
         }
@@ -207,7 +171,7 @@ class TransactionService {
      * Build transaction to grant access to content
      */
     buildGrantAccess(options) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         if (options.gasBudget) {
             tx.setGasBudget(options.gasBudget);
         }
@@ -230,7 +194,7 @@ class TransactionService {
      * Build transaction to revoke access from content
      */
     buildRevokeAccess(options) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         if (options.gasBudget) {
             tx.setGasBudget(options.gasBudget);
         }
@@ -251,7 +215,7 @@ class TransactionService {
      * Build transaction to register content for access control
      */
     buildRegisterContent(options) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         if (options.gasBudget) {
             tx.setGasBudget(options.gasBudget);
         }
@@ -372,7 +336,7 @@ class TransactionService {
      * Build a batch transaction combining multiple operations
      */
     buildBatchTransaction(operations) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         for (const operation of operations) {
             switch (operation.type) {
                 case 'createMemory':
@@ -450,5 +414,4 @@ class TransactionService {
         return baseGas + (operationCount * perOperationGas);
     }
 }
-exports.TransactionService = TransactionService;
 //# sourceMappingURL=TransactionService.js.map

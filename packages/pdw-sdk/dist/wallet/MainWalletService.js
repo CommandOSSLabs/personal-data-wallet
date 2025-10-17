@@ -1,4 +1,3 @@
-"use strict";
 /**
  * MainWalletService - Core wallet identity and key management
  *
@@ -8,14 +7,12 @@
  * - SEAL key rotation and session management
  * - On-chain wallet registry integration
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MainWalletService = void 0;
-const sha3_1 = require("@noble/hashes/sha3");
-const crypto_1 = require("crypto");
+import { sha3_256 } from '@noble/hashes/sha3';
+import { randomBytes } from 'crypto';
 /**
  * MainWalletService handles core wallet identity management
  */
-class MainWalletService {
+export class MainWalletService {
     constructor(config) {
         this.suiClient = config.suiClient;
         this.packageId = config.packageId;
@@ -99,7 +96,7 @@ class MainWalletService {
         // Derive context ID: sha3_256(userAddress | appId | salt)
         const input = `${options.userAddress}|${options.appId}|${salt}`;
         const inputBytes = new TextEncoder().encode(input);
-        const hash = (0, sha3_1.sha3_256)(inputBytes);
+        const hash = sha3_256(inputBytes);
         return `0x${Array.from(hash).map(b => b.toString(16).padStart(2, '0')).join('')}`;
     }
     /**
@@ -187,7 +184,7 @@ class MainWalletService {
      * @returns Random salt as hex string
      */
     generateSalt() {
-        const bytes = (0, crypto_1.randomBytes)(32);
+        const bytes = randomBytes(32);
         return bytes.toString('hex');
     }
     /**
@@ -233,5 +230,4 @@ class MainWalletService {
         });
     }
 }
-exports.MainWalletService = MainWalletService;
 //# sourceMappingURL=MainWalletService.js.map

@@ -1,11 +1,8 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ChatService = void 0;
 /**
  * ChatService handles all chat-related operations including session management,
  * message sending, and streaming responses with memory context integration.
  */
-class ChatService {
+export class ChatService {
     constructor(apiClient) {
         this.apiClient = apiClient;
     }
@@ -319,5 +316,4 @@ class ChatService {
         };
     }
 }
-exports.ChatService = ChatService;
 //# sourceMappingURL=ChatService.js.map

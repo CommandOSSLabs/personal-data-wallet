@@ -110,12 +110,12 @@ export declare class PersonalDataWallet {
     retrieveFromStorage: StorageService['retrieve'];
     setConsentRepository(repository?: ConsentRepository): void;
     get tx(): {
-        createMemoryRecord: (options: import("../types").CreateMemoryRecordTxOptions) => import("@mysten/sui/dist/cjs/transactions").Transaction;
-        updateMemoryMetadata: (options: import("../types").UpdateMemoryMetadataTxOptions) => import("@mysten/sui/dist/cjs/transactions").Transaction;
-        deleteMemoryRecord: (options: import("../types").DeleteMemoryRecordTxOptions) => import("@mysten/sui/dist/cjs/transactions").Transaction;
-        grantAccess: (options: import("../types").GrantAccessTxOptions) => import("@mysten/sui/dist/cjs/transactions").Transaction;
-        revokeAccess: (options: import("../types").RevokeAccessTxOptions) => import("@mysten/sui/dist/cjs/transactions").Transaction;
-        registerContent: (options: import("../types").RegisterContentTxOptions) => import("@mysten/sui/dist/cjs/transactions").Transaction;
+        createMemoryRecord: (options: import("../types").CreateMemoryRecordTxOptions) => import("@mysten/sui/transactions").Transaction;
+        updateMemoryMetadata: (options: import("../types").UpdateMemoryMetadataTxOptions) => import("@mysten/sui/transactions").Transaction;
+        deleteMemoryRecord: (options: import("../types").DeleteMemoryRecordTxOptions) => import("@mysten/sui/transactions").Transaction;
+        grantAccess: (options: import("../types").GrantAccessTxOptions) => import("@mysten/sui/transactions").Transaction;
+        revokeAccess: (options: import("../types").RevokeAccessTxOptions) => import("@mysten/sui/transactions").Transaction;
+        registerContent: (options: import("../types").RegisterContentTxOptions) => import("@mysten/sui/transactions").Transaction;
         executeBatch: (operations: Array<{
             type: "createMemory" | "updateMemory" | "deleteMemory" | "grantAccess" | "revokeAccess";
             options: any;
@@ -166,7 +166,7 @@ export declare class PersonalDataWallet {
         };
         listStoredItems: (filter?: any) => Promise<Array<{
             blobId: string;
-            metadata: import("../services/StorageService").MemoryMetadata;
+            metadata: import("../services").MemoryMetadata;
         }>>;
         getAccessPermissions: (userAddress: string, options?: {
             asGrantor?: boolean;
@@ -233,10 +233,10 @@ export declare class PersonalDataWallet {
     get access(): {
         requestConsent: (options: import("..").RequestConsentOptions) => Promise<import("..").ConsentRequestRecord>;
         grantPermissions: (userAddress: string, options: import("..").GrantPermissionsOptions & {
-            signer?: import("@mysten/sui/dist/cjs/cryptography").Signer;
+            signer?: import("@mysten/sui/cryptography").Signer;
         }) => Promise<import("..").AccessGrant>;
         revokePermissions: (userAddress: string, options: import("..").RevokePermissionsOptions & {
-            signer?: import("@mysten/sui/dist/cjs/cryptography").Signer;
+            signer?: import("@mysten/sui/cryptography").Signer;
         }) => Promise<boolean>;
         checkPermission: (appId: string, scope: import("..").PermissionScope, userAddressOrTargetWallet: string) => Promise<boolean>;
         getGrantsByUser: (userAddress: string) => Promise<import("..").AccessGrant[]>;

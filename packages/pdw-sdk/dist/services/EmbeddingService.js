@@ -1,17 +1,14 @@
-"use strict";
 /**
  * EmbeddingService - Local AI Embedding Generation
  *
  * Provides local embedding generation using Google Gemini API,
  * eliminating the need for backend API calls for vector operations.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.EmbeddingService = void 0;
-const generative_ai_1 = require("@google/generative-ai");
+import { GoogleGenAI } from '@google/genai';
 /**
  * Local embedding service using Google Gemini API
  */
-class EmbeddingService {
+export class EmbeddingService {
     constructor(config = {}) {
         this.requestCount = 0;
         this.lastReset = Date.now();
@@ -27,7 +24,7 @@ class EmbeddingService {
                 '3. GOOGLE_AI_API_KEY environment variable\n' +
                 'Get your API key from: https://makersuite.google.com/app/apikey');
         }
-        this.genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
+        this.genAI = new GoogleGenAI({ apiKey });
         this.model = config.model || 'text-embedding-004';
         this.dimensions = config.dimensions || 768;
         this.maxRequestsPerMinute = config.requestsPerMinute || 1500; // Gemini rate limit
@@ -46,12 +43,17 @@ class EmbeddingService {
         }
         await this.checkRateLimit();
         try {
-            const embeddingModel = this.genAI.getGenerativeModel({
-                model: this.model
+            const taskType = this.getTaskType(options.type);
+            const result = await this.genAI.models.embedContent({
+                model: this.model,
+                contents: options.text,
+                config: {
+                    taskType,
+                    outputDimensionality: this.dimensions
+                }
             });
-            const result = await embeddingModel.embedContent(options.text);
             this.requestCount++;
-            const vector = result.embedding.values;
+            const vector = result.embeddings?.[0]?.values;
             if (!vector || vector.length === 0) {
                 throw new Error('Empty embedding vector received from Gemini API');
             }
@@ -236,6 +238,5 @@ class EmbeddingService {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 }
-exports.EmbeddingService = EmbeddingService;
-exports.default = EmbeddingService;
+export default EmbeddingService;
 //# sourceMappingURL=EmbeddingService.js.map

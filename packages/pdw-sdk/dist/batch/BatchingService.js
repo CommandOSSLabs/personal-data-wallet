@@ -1,16 +1,13 @@
-"use strict";
 /**
  * BatchingService - Intelligent Batch Processing & Caching
  *
  * Provides advanced batching capabilities with intelligent scheduling,
  * cache management, and performance optimization for the PDW SDK.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.BatchingService = void 0;
 /**
  * Advanced batching service with intelligent scheduling and caching
  */
-class BatchingService {
+export class BatchingService {
     constructor(batchConfig = {}, cacheConfig = {}) {
         this.batches = new Map();
         this.processors = new Map();
@@ -300,6 +297,5 @@ class BatchingService {
         }
     }
 }
-exports.BatchingService = BatchingService;
-exports.default = BatchingService;
+export default BatchingService;
 //# sourceMappingURL=BatchingService.js.map

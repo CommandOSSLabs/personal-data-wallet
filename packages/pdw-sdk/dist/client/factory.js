@@ -1,19 +1,13 @@
-"use strict";
 /**
  * Personal Data Wallet Client Factory
  *
  * Provides convenience functions for creating PDW-enabled Sui clients
  * following MystenLabs best practices for client extensions.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.createPDWClient = createPDWClient;
-exports.extendWithPDW = extendWithPDW;
-exports.createDevPDWClient = createDevPDWClient;
-exports.createTestnetPDWClient = createTestnetPDWClient;
-const client_1 = require("@mysten/sui/client");
-const defaults_1 = require("../config/defaults");
-const validation_1 = require("../config/validation");
-const PersonalDataWallet_1 = require("./PersonalDataWallet");
+import { SuiClient } from '@mysten/sui/client';
+import { createDefaultConfig, createTestnetConfig } from '../config/defaults';
+import { validateConfig, mergeConfigs } from '../config/validation';
+import { PersonalDataWallet } from './PersonalDataWallet';
 /**
  * Create a new SuiClient extended with Personal Data Wallet functionality
  *
@@ -39,10 +33,10 @@ const PersonalDataWallet_1 = require("./PersonalDataWallet");
  * });
  * ```
  */
-function createPDWClient(suiClientConfig, pdwConfig) {
-    const suiClient = new client_1.SuiClient(suiClientConfig);
-    const fullConfig = (0, validation_1.validateConfig)((0, validation_1.mergeConfigs)((0, defaults_1.createDefaultConfig)(), pdwConfig || {}));
-    return suiClient.$extend(PersonalDataWallet_1.PersonalDataWallet.asClientExtension(pdwConfig));
+export function createPDWClient(suiClientConfig, pdwConfig) {
+    const suiClient = new SuiClient(suiClientConfig);
+    const fullConfig = validateConfig(mergeConfigs(createDefaultConfig(), pdwConfig || {}));
+    return suiClient.$extend(PersonalDataWallet.asClientExtension(pdwConfig));
 }
 /**
  * Extend an existing SuiClient with Personal Data Wallet functionality
@@ -51,8 +45,8 @@ function createPDWClient(suiClientConfig, pdwConfig) {
  * @param pdwConfig - PDW-specific configuration
  * @returns Extended client with PDW capabilities
  */
-function extendWithPDW(client, pdwConfig) {
-    return client.$extend(PersonalDataWallet_1.PersonalDataWallet.asClientExtension(pdwConfig));
+export function extendWithPDW(client, pdwConfig) {
+    return client.$extend(PersonalDataWallet.asClientExtension(pdwConfig));
 }
 /**
  * Create a PDW client with common development settings
@@ -60,7 +54,7 @@ function extendWithPDW(client, pdwConfig) {
  * @param overrides - Any configuration overrides
  * @returns Development-ready PDW client
  */
-function createDevPDWClient(overrides) {
+export function createDevPDWClient(overrides) {
     return createPDWClient({
         url: overrides?.suiUrl || 'https://fullnode.devnet.sui.io',
     }, {
@@ -86,8 +80,8 @@ function createDevPDWClient(overrides) {
  * @param overrides - Any configuration overrides
  * @returns Testnet-ready PDW client
  */
-function createTestnetPDWClient(overrides) {
-    const testnetConfig = (0, defaults_1.createTestnetConfig)(overrides);
+export function createTestnetPDWClient(overrides) {
+    const testnetConfig = createTestnetConfig(overrides);
     return createPDWClient({ url: 'https://fullnode.testnet.sui.io' }, testnetConfig);
 }
 //# sourceMappingURL=factory.js.map

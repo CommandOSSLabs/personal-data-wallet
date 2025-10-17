@@ -28,7 +28,12 @@ export declare class VectorService {
     private embeddingService;
     private storageService;
     private indexCache;
+    private hnswlibModule;
     constructor(config: VectorServiceConfig, embeddingService?: EmbeddingService, storageService?: StorageService);
+    /**
+     * Initialize the WASM module (must be called before using any index operations)
+     */
+    initialize(): Promise<void>;
     /**
      * Generate embeddings for text content
      */

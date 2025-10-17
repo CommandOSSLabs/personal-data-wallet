@@ -1,1 +1,1 @@
-{"version":3,"file":"wallet.js","sourceRoot":"","sources":["../../src/types/wallet.ts"],"names":[],"mappings":";AAAA;;;;;;;;;GASG;;;;;;;;;;;;;;;;AAEH,kEAAkE;AAClE,uDAAqC"}
+{"version":3,"file":"wallet.js","sourceRoot":"","sources":["../../src/types/wallet.ts"],"names":[],"mappings":"AAAA;;;;;;;;;GASG;AAEH,kEAAkE;AAClE,cAAc,sBAAsB,CAAC"}

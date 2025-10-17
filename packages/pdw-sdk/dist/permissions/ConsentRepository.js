@@ -1,20 +1,17 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.InMemoryConsentRepository = exports.FileSystemConsentRepository = void 0;
-const promises_1 = require("fs/promises");
-const path_1 = require("path");
-const utils_1 = require("@mysten/sui/utils");
+import { mkdir, readFile, writeFile } from 'fs/promises';
+import { dirname, resolve } from 'path';
+import { normalizeSuiAddress } from '@mysten/sui/utils';
 function normalizeRecord(record) {
     return {
         ...record,
-        requesterWallet: (0, utils_1.normalizeSuiAddress)(record.requesterWallet),
-        targetWallet: (0, utils_1.normalizeSuiAddress)(record.targetWallet),
+        requesterWallet: normalizeSuiAddress(record.requesterWallet),
+        targetWallet: normalizeSuiAddress(record.targetWallet),
     };
 }
-class FileSystemConsentRepository {
+export class FileSystemConsentRepository {
     constructor(options) {
         this.initialized = false;
-        this.filePath = options?.filePath ?? (0, path_1.resolve)(__dirname, '../../storage/consents/requests.json');
+        this.filePath = options?.filePath ?? resolve(__dirname, '../../storage/consents/requests.json');
     }
     async save(request) {
         const records = await this.readAll();
@@ -47,7 +44,7 @@ class FileSystemConsentRepository {
         return record ? { ...record } : null;
     }
     async listByTarget(targetWallet, status) {
-        const normalizedTarget = (0, utils_1.normalizeSuiAddress)(targetWallet);
+        const normalizedTarget = normalizeSuiAddress(targetWallet);
         const records = await this.readAll();
         return records
             .filter((record) => record.targetWallet === normalizedTarget)
@@ -55,7 +52,7 @@ class FileSystemConsentRepository {
             .map((record) => ({ ...record }));
     }
     async listByRequester(requesterWallet, status) {
-        const normalizedRequester = (0, utils_1.normalizeSuiAddress)(requesterWallet);
+        const normalizedRequester = normalizeSuiAddress(requesterWallet);
         const records = await this.readAll();
         return records
             .filter((record) => record.requesterWallet === normalizedRequester)
@@ -73,7 +70,7 @@ class FileSystemConsentRepository {
     async readAll() {
         await this.ensureInitialized();
         try {
-            const buffer = await (0, promises_1.readFile)(this.filePath);
+            const buffer = await readFile(this.filePath);
             const parsed = JSON.parse(buffer.toString());
             if (!Array.isArray(parsed)) {
                 return [];
@@ -90,19 +87,18 @@ class FileSystemConsentRepository {
     async writeAll(records) {
         await this.ensureInitialized();
         const serialized = JSON.stringify(records, null, 2);
-        await (0, promises_1.writeFile)(this.filePath, serialized, { encoding: 'utf-8' });
+        await writeFile(this.filePath, serialized, { encoding: 'utf-8' });
     }
     async ensureInitialized() {
         if (this.initialized) {
             return;
         }
-        const dir = (0, path_1.dirname)(this.filePath);
-        await (0, promises_1.mkdir)(dir, { recursive: true });
+        const dir = dirname(this.filePath);
+        await mkdir(dir, { recursive: true });
         this.initialized = true;
     }
 }
-exports.FileSystemConsentRepository = FileSystemConsentRepository;
-class InMemoryConsentRepository {
+export class InMemoryConsentRepository {
     constructor() {
         this.store = new Map();
     }
@@ -126,14 +122,14 @@ class InMemoryConsentRepository {
         return record ? { ...record } : null;
     }
     async listByTarget(targetWallet, status) {
-        const normalizedTarget = (0, utils_1.normalizeSuiAddress)(targetWallet);
+        const normalizedTarget = normalizeSuiAddress(targetWallet);
         return Array.from(this.store.values())
             .filter((record) => record.targetWallet === normalizedTarget)
             .filter((record) => (status ? record.status === status : true))
             .map((record) => ({ ...record }));
     }
     async listByRequester(requesterWallet, status) {
-        const normalizedRequester = (0, utils_1.normalizeSuiAddress)(requesterWallet);
+        const normalizedRequester = normalizeSuiAddress(requesterWallet);
         return Array.from(this.store.values())
             .filter((record) => record.requesterWallet === normalizedRequester)
             .filter((record) => (status ? record.status === status : true))
@@ -143,5 +139,4 @@ class InMemoryConsentRepository {
         this.store.delete(requestId);
     }
 }
-exports.InMemoryConsentRepository = InMemoryConsentRepository;
 //# sourceMappingURL=ConsentRepository.js.map

@@ -1,18 +1,15 @@
-"use strict";
 /**
  * EncryptionService - SEAL-based encryption and access control
  *
  * Provides identity-based encryption using Mysten's SEAL SDK with decentralized
  * key management and onchain access control policies.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.EncryptionService = void 0;
-const seal_1 = require("@mysten/seal");
-const transactions_1 = require("@mysten/sui/transactions");
-const utils_1 = require("@mysten/sui/utils");
-const SealService_1 = require("./SealService");
-const CrossContextPermissionService_1 = require("../../services/CrossContextPermissionService");
-class EncryptionService {
+import { SessionKey } from '@mysten/seal';
+import { Transaction } from '@mysten/sui/transactions';
+import { fromHex } from '@mysten/sui/utils';
+import { SealService } from './SealService';
+import { CrossContextPermissionService } from '../../services/CrossContextPermissionService';
+export class EncryptionService {
     constructor(client, config) {
         this.client = client;
         this.config = config;
@@ -21,7 +18,7 @@ class EncryptionService {
         this.packageId = config.packageId || '';
         this.sealService = this.initializeSealService();
         // Initialize permission service for OAuth-style access control
-        this.permissionService = new CrossContextPermissionService_1.CrossContextPermissionService({
+        this.permissionService = new CrossContextPermissionService({
             packageId: this.packageId,
             accessRegistryId: config.accessRegistryId || ''
         }, this.suiClient);
@@ -52,7 +49,7 @@ class EncryptionService {
             retryAttempts: 3,
             timeoutMs: 30000
         };
-        return new SealService_1.SealService(sealConfig);
+        return new SealService(sealConfig);
     }
     /**
      * Build access approval transaction for SEAL key servers (LEGACY)
@@ -74,7 +71,7 @@ class EncryptionService {
      */
     async buildAccessTransactionForWallet(userAddress, requestingWallet, accessType = 'read') {
         // Convert user address to bytes for SEAL identity
-        const identityBytes = (0, utils_1.fromHex)(userAddress.replace('0x', ''));
+        const identityBytes = fromHex(userAddress.replace('0x', ''));
         return this.permissionService.buildSealApproveTransaction(identityBytes, requestingWallet);
     }
     /**
@@ -248,7 +245,7 @@ class EncryptionService {
     async importSessionKey(exportedKey, userAddress) {
         try {
             const keyData = JSON.parse(exportedKey);
-            const sessionKey = seal_1.SessionKey.import(keyData, this.suiClient);
+            const sessionKey = SessionKey.import(keyData, this.suiClient);
             if (userAddress) {
                 this.sessionKeyCache.set(userAddress, sessionKey);
             }
@@ -284,7 +281,7 @@ class EncryptionService {
      */
     async buildGrantAccessTransaction(options) {
         const { ownerAddress, recipientAddress, contentId, accessLevel, expiresIn } = options;
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         const expiresAt = expiresIn ? Date.now() + expiresIn : Date.now() + 86400000; // 24h default
         tx.moveCall({
             target: `${this.packageId}::seal_access_control::grant_access`,
@@ -303,7 +300,7 @@ class EncryptionService {
      */
     async buildRevokeAccessTransaction(options) {
         const { ownerAddress, recipientAddress, contentId } = options;
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         tx.moveCall({
             target: `${this.packageId}::seal_access_control::revoke_access`,
             arguments: [
@@ -318,7 +315,7 @@ class EncryptionService {
      * Build transaction to register content ownership
      */
     async buildRegisterContentTransaction(ownerAddress, contentId, contentHash) {
-        const tx = new transactions_1.Transaction();
+        const tx = new Transaction();
         tx.moveCall({
             target: `${this.packageId}::seal_access_control::register_content`,
             arguments: [
@@ -391,7 +388,7 @@ class EncryptionService {
             if (userAddress === ownerAddress) {
                 return true;
             }
-            const tx = new transactions_1.Transaction();
+            const tx = new Transaction();
             tx.moveCall({
                 target: `${this.packageId}::seal_access_control::check_access`,
                 arguments: [
@@ -466,5 +463,4 @@ class EncryptionService {
         };
     }
 }
-exports.EncryptionService = EncryptionService;
 //# sourceMappingURL=EncryptionService.js.map

@@ -32,7 +32,7 @@ import { PersonalDataWallet } from './PersonalDataWallet';
  * });
  * ```
  */
-export declare function createPDWClient(suiClientConfig: ConstructorParameters<typeof SuiClient>[0], pdwConfig?: Partial<PDWConfig>): import("@mysten/sui/dist/cjs/experimental").ClientWithExtensions<{
+export declare function createPDWClient(suiClientConfig: ConstructorParameters<typeof SuiClient>[0], pdwConfig?: Partial<PDWConfig>): import("@mysten/sui/experimental").ClientWithExtensions<{
     pdw: PersonalDataWallet;
 }, SuiClient>;
 /**
@@ -42,7 +42,7 @@ export declare function createPDWClient(suiClientConfig: ConstructorParameters<t
  * @param pdwConfig - PDW-specific configuration
  * @returns Extended client with PDW capabilities
  */
-export declare function extendWithPDW(client: SuiClient, pdwConfig?: Partial<PDWConfig>): import("@mysten/sui/dist/cjs/experimental").ClientWithExtensions<{
+export declare function extendWithPDW(client: SuiClient, pdwConfig?: Partial<PDWConfig>): import("@mysten/sui/experimental").ClientWithExtensions<{
     pdw: PersonalDataWallet;
 }, SuiClient>;
 /**
@@ -55,7 +55,7 @@ export declare function createDevPDWClient(overrides?: {
     suiUrl?: string;
     apiUrl?: string;
     packageId?: string;
-}): import("@mysten/sui/dist/cjs/experimental").ClientWithExtensions<{
+}): import("@mysten/sui/experimental").ClientWithExtensions<{
     pdw: PersonalDataWallet;
 }, SuiClient>;
 /**
@@ -64,7 +64,7 @@ export declare function createDevPDWClient(overrides?: {
  * @param overrides - Any configuration overrides
  * @returns Testnet-ready PDW client
  */
-export declare function createTestnetPDWClient(overrides?: Partial<PDWConfig>): import("@mysten/sui/dist/cjs/experimental").ClientWithExtensions<{
+export declare function createTestnetPDWClient(overrides?: Partial<PDWConfig>): import("@mysten/sui/experimental").ClientWithExtensions<{
     pdw: PersonalDataWallet;
 }, SuiClient>;
 //# sourceMappingURL=factory.d.ts.map

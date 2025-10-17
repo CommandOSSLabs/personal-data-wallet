@@ -1,13 +1,10 @@
-"use strict";
 /**
  * ViewService - Read-only blockchain query methods
  *
  * Provides methods for querying blockchain state without creating transactions.
  * Follows MystenLabs patterns for view/query operations.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ViewService = void 0;
-class ViewService {
+export class ViewService {
     constructor(client, config) {
         // Extract SuiClient from the core API wrapper
         this.client = client.client || client;
@@ -327,5 +324,4 @@ class ViewService {
         }
     }
 }
-exports.ViewService = ViewService;
 //# sourceMappingURL=ViewService.js.map

@@ -1,16 +1,12 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Entry = Entry;
-exports.VecMap = VecMap;
 /**************************************************************
  * THIS FILE IS GENERATED AND SHOULD NOT BE MANUALLY MODIFIED *
  **************************************************************/
-const bcs_1 = require("@mysten/sui/bcs");
-const index_js_1 = require("../../../utils/index.js");
+import { bcs } from '@mysten/sui/bcs';
+import { MoveStruct } from '../../../utils/index.js';
 const $moduleName = '0x2::vec_map';
 /** An entry in the map */
-function Entry(...typeParameters) {
-    return new index_js_1.MoveStruct({ name: `${$moduleName}::Entry<${typeParameters[0].name}, ${typeParameters[1].name}>`, fields: {
+export function Entry(...typeParameters) {
+    return new MoveStruct({ name: `${$moduleName}::Entry<${typeParameters[0].name}, ${typeParameters[1].name}>`, fields: {
             key: typeParameters[0],
             value: typeParameters[1]
         } });
@@ -24,9 +20,9 @@ function Entry(...typeParameters) {
  * Maps that need sorted iteration rather than insertion order iteration should
  * also be handwritten.
  */
-function VecMap(...typeParameters) {
-    return new index_js_1.MoveStruct({ name: `${$moduleName}::VecMap<${typeParameters[0].name}, ${typeParameters[1].name}>`, fields: {
-            contents: bcs_1.bcs.vector(Entry(typeParameters[0], typeParameters[1]))
+export function VecMap(...typeParameters) {
+    return new MoveStruct({ name: `${$moduleName}::VecMap<${typeParameters[0].name}, ${typeParameters[1].name}>`, fields: {
+            contents: bcs.vector(Entry(typeParameters[0], typeParameters[1]))
         } });
 }
 //# sourceMappingURL=vec_map.js.map

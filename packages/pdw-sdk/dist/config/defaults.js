@@ -1,14 +1,9 @@
-"use strict";
 /**
  * Default PDW Configuration
  *
  * Provides sensible defaults for different environments
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.createDefaultConfig = createDefaultConfig;
-exports.createProductionConfig = createProductionConfig;
-exports.createTestnetConfig = createTestnetConfig;
-function createDefaultConfig() {
+export function createDefaultConfig() {
     return {
         // Updated October 3, 2025 - Dynamic Fields Implementation
         packageId: '0x6dc2fe501926b17f441e46c3ac121ad0924da3aa7c5bc78781ddd7df1080694a',
@@ -32,7 +27,7 @@ function createDefaultConfig() {
         walrusTimeout: 30000, // 30 seconds
     };
 }
-function createProductionConfig(overrides = {}) {
+export function createProductionConfig(overrides = {}) {
     return {
         ...createDefaultConfig(),
         apiUrl: 'https://api.personaldatawallet.com',
@@ -53,7 +48,7 @@ function createProductionConfig(overrides = {}) {
         ...overrides,
     };
 }
-function createTestnetConfig(overrides = {}) {
+export function createTestnetConfig(overrides = {}) {
     return {
         ...createDefaultConfig(),
         apiUrl: 'https://testnet-api.personaldatawallet.com',

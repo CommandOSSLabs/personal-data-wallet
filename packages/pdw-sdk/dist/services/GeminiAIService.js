@@ -1,4 +1,3 @@
-"use strict";
 /**
  * GeminiAIService - Real Google Gemini AI Integration
  *
@@ -7,13 +6,11 @@
  *
  * Using @google/genai (the actively maintained SDK, not the deprecated @google/generative-ai)
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.GeminiAIService = void 0;
-const genai_1 = require("@google/genai");
+import { GoogleGenAI } from '@google/genai';
 /**
  * Google Gemini AI service for advanced text analysis and knowledge extraction
  */
-class GeminiAIService {
+export class GeminiAIService {
     constructor(config) {
         this.config = {
             model: config.model || 'gemini-2.5-flash',
@@ -22,7 +19,7 @@ class GeminiAIService {
             timeout: config.timeout || 30000,
             ...config
         };
-        this.genAI = new genai_1.GoogleGenAI({ apiKey: this.config.apiKey });
+        this.genAI = new GoogleGenAI({ apiKey: this.config.apiKey });
     }
     /**
      * Extract entities and relationships from text using Gemini AI
@@ -269,6 +266,5 @@ JSON:`;
         };
     }
 }
-exports.GeminiAIService = GeminiAIService;
-exports.default = GeminiAIService;
+export default GeminiAIService;
 //# sourceMappingURL=GeminiAIService.js.map

@@ -1,64 +1,59 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MoveTuple = exports.MoveEnum = exports.MoveStruct = void 0;
-exports.getPureBcsSchema = getPureBcsSchema;
-exports.normalizeMoveArguments = normalizeMoveArguments;
-const bcs_1 = require("@mysten/sui/bcs");
-const utils_1 = require("@mysten/sui/utils");
-const transactions_1 = require("@mysten/sui/transactions");
-const MOVE_STDLIB_ADDRESS = (0, utils_1.normalizeSuiAddress)('0x1');
-const SUI_FRAMEWORK_ADDRESS = (0, utils_1.normalizeSuiAddress)('0x2');
-const SUI_SYSTEM_ADDRESS = (0, utils_1.normalizeSuiAddress)('0x3');
-function getPureBcsSchema(typeTag) {
-    const parsedTag = typeof typeTag === 'string' ? bcs_1.TypeTagSerializer.parseFromStr(typeTag) : typeTag;
+import { bcs, TypeTagSerializer, BcsStruct, BcsEnum, BcsTuple } from '@mysten/sui/bcs';
+import { normalizeSuiAddress } from '@mysten/sui/utils';
+import { isArgument } from '@mysten/sui/transactions';
+const MOVE_STDLIB_ADDRESS = normalizeSuiAddress('0x1');
+const SUI_FRAMEWORK_ADDRESS = normalizeSuiAddress('0x2');
+const SUI_SYSTEM_ADDRESS = normalizeSuiAddress('0x3');
+export function getPureBcsSchema(typeTag) {
+    const parsedTag = typeof typeTag === 'string' ? TypeTagSerializer.parseFromStr(typeTag) : typeTag;
     if ('u8' in parsedTag) {
-        return bcs_1.bcs.U8;
+        return bcs.U8;
     }
     else if ('u16' in parsedTag) {
-        return bcs_1.bcs.U16;
+        return bcs.U16;
     }
     else if ('u32' in parsedTag) {
-        return bcs_1.bcs.U32;
+        return bcs.U32;
     }
     else if ('u64' in parsedTag) {
-        return bcs_1.bcs.U64;
+        return bcs.U64;
     }
     else if ('u128' in parsedTag) {
-        return bcs_1.bcs.U128;
+        return bcs.U128;
     }
     else if ('u256' in parsedTag) {
-        return bcs_1.bcs.U256;
+        return bcs.U256;
     }
     else if ('address' in parsedTag) {
-        return bcs_1.bcs.Address;
+        return bcs.Address;
     }
     else if ('bool' in parsedTag) {
-        return bcs_1.bcs.Bool;
+        return bcs.Bool;
     }
     else if ('vector' in parsedTag) {
         const type = getPureBcsSchema(parsedTag.vector);
-        return type ? bcs_1.bcs.vector(type) : null;
+        return type ? bcs.vector(type) : null;
     }
     else if ('struct' in parsedTag) {
         const structTag = parsedTag.struct;
-        const pkg = (0, utils_1.normalizeSuiAddress)(parsedTag.struct.address);
+        const pkg = normalizeSuiAddress(parsedTag.struct.address);
         if (pkg === MOVE_STDLIB_ADDRESS) {
             if ((structTag.module === 'ascii' || structTag.module === 'string') &&
                 structTag.name === 'String') {
-                return bcs_1.bcs.String;
+                return bcs.String;
             }
             if (structTag.module === 'option' && structTag.name === 'Option') {
                 const type = getPureBcsSchema(structTag.typeParams[0]);
-                return type ? bcs_1.bcs.vector(type) : null;
+                return type ? bcs.vector(type) : null;
             }
         }
         if (pkg === SUI_FRAMEWORK_ADDRESS && structTag.module === 'Object' && structTag.name === 'ID') {
-            return bcs_1.bcs.Address;
+            return bcs.Address;
         }
     }
     return null;
 }
-function normalizeMoveArguments(args, argTypes, parameterNames) {
+export function normalizeMoveArguments(args, argTypes, parameterNames) {
     const argLen = Array.isArray(args) ? args.length : Object.keys(args).length;
     if (parameterNames && argLen !== parameterNames.length) {
         throw new Error(`Invalid number of arguments, expected ${parameterNames.length}, got ${argLen}`);
@@ -100,7 +95,7 @@ function normalizeMoveArguments(args, argTypes, parameterNames) {
             }
         }
         index += 1;
-        if (typeof arg === 'function' || (0, transactions_1.isArgument)(arg)) {
+        if (typeof arg === 'function' || isArgument(arg)) {
             normalizedArgs.push(arg);
             continue;
         }
@@ -119,15 +114,12 @@ function normalizeMoveArguments(args, argTypes, parameterNames) {
     }
     return normalizedArgs;
 }
-class MoveStruct extends bcs_1.BcsStruct {
+export class MoveStruct extends BcsStruct {
 }
-exports.MoveStruct = MoveStruct;
-class MoveEnum extends bcs_1.BcsEnum {
+export class MoveEnum extends BcsEnum {
 }
-exports.MoveEnum = MoveEnum;
-class MoveTuple extends bcs_1.BcsTuple {
+export class MoveTuple extends BcsTuple {
 }
-exports.MoveTuple = MoveTuple;
 function stringify(val) {
     if (typeof val === 'object') {
         return JSON.stringify(val, (val) => val);

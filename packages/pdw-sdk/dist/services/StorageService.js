@@ -1,4 +1,3 @@
-"use strict";
 /**
  * StorageService - Production Walrus Storage using writeBlobFlow
  *
@@ -10,7 +9,6 @@
  * - Upload relay preferred (only working method on testnet)
  * - Content integrity verification
  * - SEAL encryption integration ready
- * - Proper network configuration with undici agent
  *
  * Performance: ~13 seconds per blob upload on testnet
  * Test Status: ✅ All tests passing (4/4 - 65.7s total)
@@ -18,49 +16,14 @@
  * Based on official examples:
  * https://github.com/MystenLabs/ts-sdks/tree/main/packages/walrus/examples
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.StorageService = void 0;
-const client_1 = require("@mysten/sui/client");
-const walrus_1 = require("@mysten/walrus");
-const MemoryIndexService_1 = require("./MemoryIndexService");
-const GraphService_1 = require("../graph/GraphService");
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+import { WalrusClient } from '@mysten/walrus';
+import { MemoryIndexService } from './MemoryIndexService';
+import { GraphService } from '../graph/GraphService';
 /**
  * StorageService - Unified Walrus Storage Implementation with HNSW Search
  */
-class StorageService {
+export class StorageService {
     constructor(config) {
         this.config = config;
         this.knowledgeGraphs = new Map(); // userAddress -> KnowledgeGraph
@@ -70,15 +33,13 @@ class StorageService {
         this.suiClient = clients.suiClient;
         this.walrusWithRelay = clients.walrusWithRelay;
         this.walrusWithoutRelay = clients.walrusWithoutRelay;
-        // Configure network asynchronously
-        this.initializeNetworkConfiguration();
     }
     /**
      * Initialize memory indexing and search capabilities
      */
     initializeSearch(embeddingService, memoryIndexService) {
         this.embeddingService = embeddingService;
-        this.memoryIndexService = memoryIndexService || new MemoryIndexService_1.MemoryIndexService(this);
+        this.memoryIndexService = memoryIndexService || new MemoryIndexService(this);
         this.memoryIndexService.initialize(embeddingService, this);
         console.log('✅ StorageService: Memory indexing and search capabilities initialized');
     }
@@ -92,7 +53,7 @@ class StorageService {
         try {
             if (!this.graphService) {
                 // Initialize GraphService with embedding service for AI extraction
-                this.graphService = new GraphService_1.GraphService({
+                this.graphService = new GraphService({
                     enableEmbeddings: !!this.embeddingService,
                     confidenceThreshold: graphConfig?.confidenceThreshold || 0.7,
                     maxHops: graphConfig?.maxHops || 3,
@@ -113,36 +74,19 @@ class StorageService {
         }
     }
     /**
-     * Configure network settings for reliability (from official examples)
-     */
-    async initializeNetworkConfiguration() {
-        if (typeof window === 'undefined') {
-            try {
-                const { Agent, setGlobalDispatcher } = await Promise.resolve().then(() => __importStar(require('undici')));
-                setGlobalDispatcher(new Agent({
-                    connectTimeout: 60000,
-                    connect: { timeout: 60000 }
-                }));
-            }
-            catch (error) {
-                console.warn('Could not configure undici agent:', error);
-            }
-        }
-    }
-    /**
      * Create Walrus clients with upload relay support (from benchmark example)
      */
     createClients() {
         const network = this.config.network || 'testnet';
-        const baseClient = this.config.suiClient || new client_1.SuiClient({
-            url: (0, client_1.getFullnodeUrl)(network),
+        const baseClient = this.config.suiClient || new SuiClient({
+            url: getFullnodeUrl(network),
             network: network,
         });
         const uploadRelayHost = network === 'mainnet'
             ? 'https://upload-relay.mainnet.walrus.space'
             : 'https://upload-relay.testnet.walrus.space';
         // Client with upload relay (preferred)
-        const clientWithRelay = baseClient.$extend(walrus_1.WalrusClient.experimental_asClientExtension({
+        const clientWithRelay = baseClient.$extend(WalrusClient.experimental_asClientExtension({
             network: network,
             uploadRelay: {
                 host: uploadRelayHost,
@@ -154,7 +98,7 @@ class StorageService {
             },
         }));
         // Client without upload relay (fallback)
-        const clientWithoutRelay = baseClient.$extend(walrus_1.WalrusClient.experimental_asClientExtension({
+        const clientWithoutRelay = baseClient.$extend(WalrusClient.experimental_asClientExtension({
             network: network,
             storageNodeClientOptions: {
                 timeout: 60000,
@@ -1110,7 +1054,7 @@ class StorageService {
      */
     async attachMetadataToBlob(blobId, metadata, signer) {
         try {
-            const { Transaction } = await Promise.resolve().then(() => __importStar(require('@mysten/sui/transactions')));
+            const { Transaction } = await import('@mysten/sui/transactions');
             const tx = new Transaction();
             // Convert WalrusMemoryMetadata to VecMap<String, String> format
             const metadataEntries = [];
@@ -1334,5 +1278,4 @@ class StorageService {
         return [];
     }
 }
-exports.StorageService = StorageService;
 //# sourceMappingURL=StorageService.js.map

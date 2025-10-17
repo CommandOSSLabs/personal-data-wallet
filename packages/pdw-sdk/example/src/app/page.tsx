@@ -1,18 +1,38 @@
 'use client';
 
+import { useState } from 'react';
 import { ConnectButton, useCurrentAccount } from '@mysten/dapp-kit';
 import { CreateMemory } from '@/components/CreateMemory';
 import { MemoryList } from '@/components/MemoryList';
 import { RetrieveMemory } from '@/components/RetrieveMemory';
+import { SearchMemory } from '@/components/SearchMemory';
+import { MemoryChat } from '@/components/MemoryChat';
+import { KnowledgeGraph } from '@/components/KnowledgeGraph';
+import { AccessControl } from '@/components/AccessControl';
+import { ContextWallets } from '@/components/ContextWallets';
+
+type Tab = 'create' | 'list' | 'retrieve' | 'search' | 'chat' | 'graph' | 'access' | 'contexts';
 
 export default function Home() {
   const account = useCurrentAccount();
+  const [activeTab, setActiveTab] = useState<Tab>('create');
+
+  const tabs = [
+    { id: 'create' as Tab, label: 'Create', icon: '➕' },
+    { id: 'list' as Tab, label: 'List', icon: '📋' },
+    { id: 'retrieve' as Tab, label: 'Retrieve', icon: '🔍' },
+    { id: 'search' as Tab, label: 'Vector Search', icon: '🎯' },
+    { id: 'chat' as Tab, label: 'AI Chat', icon: '💬' },
+    { id: 'graph' as Tab, label: 'Knowledge Graph', icon: '🕸️' },
+    { id: 'access' as Tab, label: 'Access Control', icon: '🔐' },
+    { id: 'contexts' as Tab, label: 'Contexts', icon: '📁' },
+  ];
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
-        <header className="mb-12">
+        <header className="mb-8">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-4xl font-bold text-white mb-2">
@@ -39,18 +59,39 @@ export default function Home() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Left Column - Actions */}
-            <div className="space-y-8">
-              <CreateMemory />
-              <RetrieveMemory />
+          <>
+            {/* Tabs Navigation */}
+            <div className="mb-6 bg-white/5 backdrop-blur-lg rounded-lg p-2 border border-white/10">
+              <div className="flex flex-wrap gap-2">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                      activeTab === tab.id
+                        ? 'bg-primary/30 text-white border border-primary/50'
+                        : 'bg-white/5 text-slate-300 hover:bg-white/10 border border-transparent'
+                    }`}
+                  >
+                    <span>{tab.icon}</span>
+                    <span className="font-medium">{tab.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Right Column - Memory List */}
-            <div>
-              <MemoryList />
+            {/* Tab Content */}
+            <div className="transition-all duration-300">
+              {activeTab === 'create' && <CreateMemory />}
+              {activeTab === 'list' && <MemoryList />}
+              {activeTab === 'retrieve' && <RetrieveMemory />}
+              {activeTab === 'search' && <SearchMemory />}
+              {activeTab === 'chat' && <MemoryChat />}
+              {activeTab === 'graph' && <KnowledgeGraph />}
+              {activeTab === 'access' && <AccessControl />}
+              {activeTab === 'contexts' && <ContextWallets />}
             </div>
-          </div>
+          </>
         )}
       </div>
     </main>

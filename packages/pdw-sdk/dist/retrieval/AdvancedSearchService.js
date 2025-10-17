@@ -1,4 +1,3 @@
-"use strict";
 /**
  * AdvancedSearchService - Sophisticated Search & Filtering
  *
@@ -10,17 +9,15 @@
  * - Search aggregations and analytics
  * - Custom scoring algorithms
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.AdvancedSearchService = void 0;
-const EmbeddingService_1 = require("../services/EmbeddingService");
-const KnowledgeGraphManager_1 = require("../graph/KnowledgeGraphManager");
+import { EmbeddingService } from '../services/EmbeddingService';
+import { KnowledgeGraphManager } from '../graph/KnowledgeGraphManager';
 /**
  * Advanced Search Service with sophisticated filtering and analysis
  */
-class AdvancedSearchService {
+export class AdvancedSearchService {
     constructor(config) {
-        this.embeddingService = config?.embeddingService ?? new EmbeddingService_1.EmbeddingService();
-        this.graphManager = config?.graphManager ?? new KnowledgeGraphManager_1.KnowledgeGraphManager();
+        this.embeddingService = config?.embeddingService ?? new EmbeddingService();
+        this.graphManager = config?.graphManager ?? new KnowledgeGraphManager();
     }
     // ==================== ADVANCED SEARCH METHODS ====================
     /**
@@ -384,5 +381,4 @@ class AdvancedSearchService {
         return [];
     }
 }
-exports.AdvancedSearchService = AdvancedSearchService;
 //# sourceMappingURL=AdvancedSearchService.js.map
