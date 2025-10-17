@@ -1,47 +1,69 @@
 'use client';
 
-import { useState } from 'react';
-import { useCurrentAccount } from '@mysten/dapp-kit';
-import { useCreateMemory } from 'personal-data-wallet-sdk';
+import { useState, useMemo } from 'react';
+import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from '@mysten/dapp-kit';
+import { ClientMemoryManager } from 'personal-data-wallet-sdk';
 
 export function CreateMemory() {
   const account = useCurrentAccount();
+  const client = useSuiClient();
+  const { mutate: signAndExecute } = useSignAndExecuteTransaction();
+
   const [content, setContent] = useState('');
+  const [status, setStatus] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const { mutate: createMemory, isPending, progress, error, isSuccess } = useCreateMemory({
-    config: {
-      packageId: process.env.NEXT_PUBLIC_PACKAGE_ID!,
-      accessRegistryId: process.env.NEXT_PUBLIC_ACCESS_REGISTRY_ID!,
-      walrusAggregator: process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR!,
-      geminiApiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY!,
-    },
-    onSuccess: (result) => {
-      console.log('✅ Memory created! Blob ID:', result.blobId);
-      setContent('');
-    },
-    onError: (error) => {
-      console.error('❌ Error creating memory:', error);
-    },
-    onProgress: (progress) => {
-      console.log('📍', progress.message);
-    }
-  });
+  // Initialize ClientMemoryManager
+  const memoryManager = useMemo(() => {
+    return new ClientMemoryManager({
+      packageId: process.env.NEXT_PUBLIC_PACKAGE_ID || '',
+      accessRegistryId: process.env.NEXT_PUBLIC_ACCESS_REGISTRY_ID || '',
+      walrusAggregator: process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR || '',
+      geminiApiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY || '',
+    });
+  }, []);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     console.log('\n🚀 ========== Starting Memory Creation ==========');
 
     if (!content.trim()) {
+      setStatus('Please enter some content');
       return;
     }
 
     if (!account) {
+      setStatus('Please connect your wallet');
       return;
     }
 
-    createMemory({
-      content,
-      category: 'general'
-    });
+    setIsLoading(true);
+    setStatus('Starting memory creation...');
+
+    try {
+      const blobId = await memoryManager.createMemory({
+        content,
+        account,
+        signAndExecute: signAndExecute as any,
+        client: client as any,
+        onProgress: (status) => {
+          console.log('📍', status);
+          setStatus(status);
+        }
+      });
+
+      console.log('🎉 ========== Memory Creation Complete! ==========');
+      console.log('📦 Blob ID:', blobId);
+      setStatus(`Memory created! Blob ID: ${blobId}`);
+
+      // Clear form
+      setContent('');
+    } catch (error: any) {
+      console.error('❌ ========== Error creating memory ==========');
+      console.error(error);
+      setStatus(`Error: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -59,39 +81,21 @@ export function CreateMemory() {
             placeholder="Enter your memory content..."
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            disabled={isPending}
+            disabled={isLoading}
           />
         </div>
 
         <button
           onClick={handleCreate}
-          disabled={isPending || !content.trim() || !account}
+          disabled={isLoading || !content.trim()}
           className="w-full bg-primary hover:bg-primary/80 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-lg transition-colors"
         >
-          {isPending ? 'Creating...' : 'Create Memory'}
+          {isLoading ? 'Creating...' : 'Create Memory'}
         </button>
 
-        {!account && (
-          <div className="mt-4 p-4 bg-yellow-500/20 border border-yellow-500/50 rounded-lg">
-            <p className="text-sm text-yellow-300">Please connect your wallet</p>
-          </div>
-        )}
-
-        {progress && (
-          <div className="mt-4 p-4 bg-blue-500/20 border border-blue-500/50 rounded-lg">
-            <p className="text-sm text-blue-300">{progress.message}</p>
-          </div>
-        )}
-
-        {error && (
-          <div className="mt-4 p-4 bg-red-500/20 border border-red-500/50 rounded-lg">
-            <p className="text-sm text-red-300">Error: {error.message}</p>
-          </div>
-        )}
-
-        {isSuccess && !isPending && (
-          <div className="mt-4 p-4 bg-green-500/20 border border-green-500/50 rounded-lg">
-            <p className="text-sm text-green-300">Memory created successfully!</p>
+        {status && (
+          <div className="mt-4 p-4 bg-white/5 border border-white/10 rounded-lg">
+            <p className="text-sm text-slate-300 break-all">{status}</p>
           </div>
         )}
       </div>

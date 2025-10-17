@@ -41,24 +41,32 @@
  * }
  * ```
  */
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useSuiClient, useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { useMemoryManager } from './useMemoryManager';
-import { cacheKeys } from './utils/cache';
 /**
  * Hook for creating memories with automatic state management
+ * No React Query dependency - uses plain React state
  */
 export function useCreateMemory(options = {}) {
-    const { onSuccess, onError, onProgress, config, invalidateQueries = true, } = options;
-    const queryClient = useQueryClient();
+    const { onSuccess, onError, onProgress, config, } = options;
     const client = useSuiClient();
     const account = useCurrentAccount();
     const { mutate: signAndExecute } = useSignAndExecuteTransaction();
     const manager = useMemoryManager(config);
+    // State management
+    const [isPending, setIsPending] = useState(false);
+    const [isSuccess, setIsSuccess] = useState(false);
+    const [isError, setIsError] = useState(false);
+    const [data, setData] = useState();
+    const [error, setError] = useState(null);
     const [progress, setProgress] = useState();
+    // Use ref to track if component is mounted (prevent state updates after unmount)
+    const isMountedRef = useRef(true);
     // Progress handler
     const handleProgress = useCallback((status) => {
+        if (!isMountedRef.current)
+            return;
         let stage = 'analyzing';
         if (status.includes('Analyzing')) {
             stage = 'analyzing';
@@ -85,64 +93,84 @@ export function useCreateMemory(options = {}) {
         setProgress(progressUpdate);
         onProgress?.(progressUpdate);
     }, [onProgress]);
-    // Create memory mutation
-    const mutation = useMutation({
-        mutationFn: async (input) => {
-            if (!manager) {
-                throw new Error('Memory manager not initialized. Check your configuration.');
-            }
-            if (!account) {
-                throw new Error('No wallet connected. Please connect your wallet.');
-            }
-            if (!client) {
-                throw new Error('Sui client not available.');
-            }
+    // Async mutation function
+    const mutateAsync = useCallback(async (input) => {
+        if (!manager) {
+            throw new Error('Memory manager not initialized. Check your configuration.');
+        }
+        if (!account) {
+            throw new Error('No wallet connected. Please connect your wallet.');
+        }
+        if (!client) {
+            throw new Error('Sui client not available.');
+        }
+        if (!isMountedRef.current)
+            return { blobId: '' };
+        // Reset state
+        setIsPending(true);
+        setIsSuccess(false);
+        setIsError(false);
+        setError(null);
+        setData(undefined);
+        try {
             // Create memory
             const blobId = await manager.createMemory({
                 content: input.content,
                 category: input.category,
                 account,
-                signAndExecute: signAndExecute, // Type compatibility workaround
-                client: client, // Type compatibility workaround
+                signAndExecute: signAndExecute,
+                client: client,
                 onProgress: handleProgress,
             });
-            return {
-                blobId,
-            };
-        },
-        onSuccess: (data) => {
-            // Invalidate relevant queries
-            if (invalidateQueries && account) {
-                queryClient.invalidateQueries({
-                    queryKey: cacheKeys.walletMemories(account.address),
-                });
-                queryClient.invalidateQueries({
-                    queryKey: cacheKeys.memoryStats(account.address),
+            const result = { blobId };
+            if (isMountedRef.current) {
+                setData(result);
+                setIsSuccess(true);
+                setIsPending(false);
+            }
+            onSuccess?.(result);
+            return result;
+        }
+        catch (err) {
+            const errorObj = err instanceof Error ? err : new Error(String(err));
+            if (isMountedRef.current) {
+                setError(errorObj);
+                setIsError(true);
+                setIsPending(false);
+                setProgress({
+                    stage: 'error',
+                    message: errorObj.message,
                 });
             }
-            onSuccess?.(data);
-        },
-        onError: (error) => {
-            setProgress({
-                stage: 'error',
-                message: error.message,
-            });
-            onError?.(error);
-        },
-    });
+            onError?.(errorObj);
+            throw errorObj;
+        }
+    }, [manager, account, client, signAndExecute, handleProgress, onSuccess, onError]);
+    // Fire-and-forget mutation function
+    const mutate = useCallback((input) => {
+        mutateAsync(input).catch(() => {
+            // Error already handled in mutateAsync
+        });
+    }, [mutateAsync]);
+    // Reset function
+    const reset = useCallback(() => {
+        setIsPending(false);
+        setIsSuccess(false);
+        setIsError(false);
+        setData(undefined);
+        setError(null);
+        setProgress(undefined);
+    }, []);
     return {
-        mutate: mutation.mutate,
-        mutateAsync: mutation.mutateAsync,
-        isPending: mutation.isPending,
-        isSuccess: mutation.isSuccess,
-        isError: mutation.isError,
-        data: mutation.data,
-        error: mutation.error,
+        mutate,
+        mutateAsync,
+        isPending,
+        isSuccess,
+        isError,
+        data,
+        error,
         progress,
-        reset: () => {
-            mutation.reset();
-            setProgress(undefined);
-        },
+        reset,
     };
 }
 export default useCreateMemory;
