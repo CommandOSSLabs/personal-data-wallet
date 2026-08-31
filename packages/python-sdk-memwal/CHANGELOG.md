@@ -2,6 +2,10 @@
 
 ## 0.1.9
 
+### Added
+
+- `restore()` results include `failed` (default `0`) for permanent decrypt/UTF-8 failures instead of folding them into `skipped` or dropping them silently.
+
 ### Fixed
 
 - HTTP 503 with `x-auth-error: AUTH_UPSTREAM_UNAVAILABLE` is reported as a retryable credential-verification outage, not a sign-in failure. Other 503s keep the generic sanitized body.

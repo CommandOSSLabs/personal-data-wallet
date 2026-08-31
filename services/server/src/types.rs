@@ -1826,6 +1826,10 @@ pub struct RestoreRequest {
 pub struct RestoreResponse {
     pub restored: usize,
     pub skipped: usize,
+    /// Permanent decrypt/UTF-8 failures for this owner+namespace: the
+    /// `restore_failed_blobs` negative cache plus any new permanent
+    /// failures recorded in this call. Additive JSON field (COMG-719).
+    pub failed: usize,
     pub total: usize,
     pub namespace: String,
     pub owner: String,

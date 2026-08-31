@@ -6,6 +6,7 @@
 
 - `recall()` results include optional `created_at` (RFC3339 write-time of the stored fact).
 - `RecallOptions` accepts `sort: "relevance" | "recent"` and `scoringWeights`. `sort: "recent"` over-fetches semantic candidates (5x `limit`, capped at 50), orders them by write-time descending, then truncates to `limit`.
+- `restore()` results include optional `failed` for permanent decrypt/UTF-8 failures instead of folding them into `skipped` or dropping them silently.
 
 ### Fixed
 
