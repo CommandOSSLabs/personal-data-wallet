@@ -24,6 +24,11 @@ export interface MemWalSession {
     delegatePubKeyHex: string;
     namespace?: string;
     memwal: MemWal;
+    /** Relayer base URL this session is bound to. WALM-390: memwal_health
+     *  reports it so a client pointed at the wrong network can see that,
+     *  rather than discovering it via missing memories. MemWal keeps its
+     *  own copy private, so we carry it alongside. */
+    relayerUrl: string;
     authMethod: "delegate-key";
     oauthScope?: string;
     /** Stable coding-agent id (`claude-code`, `codex`, `other`, …). */
@@ -156,6 +161,7 @@ export async function resolveAuth(
         delegatePubKeyHex,
         namespace,
         memwal,
+        relayerUrl: serverUrl,
         authMethod: "delegate-key",
         oauthScope,
     };

@@ -28,6 +28,9 @@ interface ParsedArgs {
     webUrl?: string;
     label?: string;
     namespace?: string;
+    /** Args parseArgs did not recognise, in the order seen. WALM-390: these
+     *  used to be dropped on the floor; main() now names them on stderr. */
+    unknown: string[];
 }
 
 /** Per-environment URL shortcuts. `--dev`/`--staging`/`--local` set both
@@ -39,8 +42,8 @@ const ENV_PRESETS: Record<string, { relayer: string; web: string }> = {
     local: { relayer: "http://127.0.0.1:8000", web: "http://localhost:5173" },
 };
 
-function parseArgs(argv: string[]): ParsedArgs {
-    const out: ParsedArgs = { help: false, logout: false, forceLogin: false };
+export function parseArgs(argv: string[]): ParsedArgs {
+    const out: ParsedArgs = { help: false, logout: false, forceLogin: false, unknown: [] };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         const next = () => argv[++i];
@@ -89,7 +92,22 @@ function parseArgs(argv: string[]): ParsedArgs {
                 else if (a?.startsWith("--label=")) out.label = a.split("=", 2)[1];
                 else if (a?.startsWith("--namespace=")) out.namespace = a.split("=", 2)[1];
                 else if (a?.startsWith("--ns=")) out.namespace = a.split("=", 2)[1];
-                // Unknown flag: ignore silently.
+                // WALM-390: anything still unmatched is a typo, or a flag
+                // from a newer build. Record it. Swallowing it here is what
+                // let `--prod` look supported for months while doing nothing.
+                // Values of KNOWN value-taking flags never reach this branch
+                // — `next()` already consumed them.
+                else if (a !== undefined) {
+                    out.unknown.push(a);
+                    // An unknown flag may take a value too. Consume a
+                    // following non-flag token as that value so `--namesapce
+                    // work` warns once about `--namesapce` rather than twice,
+                    // the second naming the user's data. Keeps a mistyped
+                    // secret (`--tokenn hunter2`) out of stderr and the logs.
+                    if (a.startsWith("-") && argv[i + 1] !== undefined && !argv[i + 1].startsWith("-")) {
+                        i++;
+                    }
+                }
                 break;
         }
     }
@@ -98,6 +116,17 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
     const args = parseArgs(argv);
+
+    // WALM-390: name what we could not parse. Runs before the --help branch
+    // so `memwal-mcp --typo --help` still calls the typo out. Warn, never
+    // exit: an unknown flag from a newer config must not brick the server.
+    for (const flag of args.unknown) {
+        log.warn("cli.unrecognised_arg", { arg: flag });
+        note(
+            `Unrecognised option \`${flag}\` — ignored. ` +
+                `Run \`memwal-mcp --help\` for the supported options.`
+        );
+    }
 
     if (args.help) {
         printHelp();
@@ -255,6 +284,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 }
 
 function printHelp(): void {
+    process.stderr.write(helpText() + "\n");
+}
+
+/** The `--help` body. Exported so tests can assert it stays in step with the
+ *  flags parseArgs actually accepts — WALM-390 was reported precisely because
+ *  it had drifted. */
+export function helpText(): string {
+    // Rendered from ENV_PRESETS rather than retyped, so a new preset cannot
+    // ship undocumented the way --prod did.
+    const presetLines = Object.entries(ENV_PRESETS).flatMap(([name, urls]) => [
+        `  ${`--${name}`.padEnd(33)}relayer: ${urls.relayer}`,
+        `  ${"".padEnd(33)}web:     ${urls.web}`,
+    ]);
     const help = [
         "memwal-mcp — Walrus Memory Model Context Protocol client",
         "",
@@ -279,7 +321,7 @@ function printHelp(): void {
         "                                   Default: https://memory.walrus.xyz",
         "  --label <text>                   Friendly delegate-key label",
         "                                   registered on-chain. Default:",
-        '                                   "Walrus Memory MCP"',
+        '                                   "MCP Client"',
         "  --namespace <name>               Default memory namespace applied",
         "                                   to memwal_remember / recall /",
         "                                   analyze / restore when the agent",
@@ -287,6 +329,12 @@ function printHelp(): void {
         "                                   namespace always wins. Unset →",
         '                                   relayer uses its "default".',
         "                                   Alias: --ns",
+        "",
+        "Network presets (set --relayer and --web-url together):",
+        ...presetLines,
+        "",
+        "                                   An explicit --relayer or --web-url",
+        "                                   overrides the preset it follows.",
         "",
         "Environment (equivalent to options):",
         "  MEMWAL_SERVER_URL                same as --relayer",
@@ -332,7 +380,7 @@ function printHelp(): void {
         "  }",
         "",
     ].join("\n");
-    process.stderr.write(help + "\n");
+    return help;
 }
 
 // Re-exports — handy if someone wants to embed this in another tool.
