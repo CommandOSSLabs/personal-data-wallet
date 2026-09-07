@@ -546,6 +546,65 @@ fn clamp_restore_limit(limit: usize) -> usize {
     limit.clamp(1, 100)
 }
 
+/// Explain restore's `skipped` count instead of returning a bare integer
+/// (WALM-385).
+///
+/// `skipped` collapses three unrelated outcomes into one number: blobs
+/// already in the index (benign), blobs the `restore_failed_blobs` negative
+/// cache excludes (a permanent dead end — nothing in the relayer clears that
+/// cache), and blobs deferred past `limit` (returns next call). A namespace
+/// whose ciphertexts were all written under a superseded SEAL package lands
+/// entirely in the middle bucket and reports `restored: 0, skipped: N,
+/// total: N` — byte-identical to a fully-restored namespace — while `recall`
+/// returns nothing.
+///
+/// `indexed` and `failed` are passed separately, *not* pre-unioned as
+/// `restore_unbounded` does for its missing-blob filter: a blob can be in
+/// both, and the union would make the two buckets double-count it. Counting
+/// intersects with `all_blob_ids` so only blobs discovered by this call are
+/// classified — a stale negative-cache row for a blob the owner no longer
+/// holds must not inflate the total.
+///
+/// `restorable_this_page` is `missing_blob_ids.len()` after pagination.
+/// Deriving `over_limit` from it (rather than counting it) is what keeps
+/// `already_indexed + permanently_failed + over_limit == skipped` true by
+/// construction.
+///
+/// Kept a free function over plain data so it is unit-testable without an
+/// `AppState` or a database, like the other restore helpers above.
+fn classify_skipped(
+    all_blob_ids: &[String],
+    indexed: &std::collections::HashSet<&str>,
+    failed: &std::collections::HashMap<&str, &str>,
+    restorable_this_page: usize,
+) -> SkipBreakdown {
+    let mut breakdown = SkipBreakdown::default();
+
+    for blob_id in all_blob_ids {
+        let blob_id = blob_id.as_str();
+        if indexed.contains(blob_id) {
+            // Checked first so a blob that is both indexed and negative-cached
+            // is counted exactly once, matching the union used to build
+            // `all_missing`.
+            breakdown.already_indexed += 1;
+        } else if let Some(reason) = failed.get(blob_id) {
+            breakdown.permanently_failed += 1;
+            *breakdown
+                .by_reason
+                .entry((*reason).to_string())
+                .or_insert(0) += 1;
+        }
+    }
+
+    let missing = all_blob_ids
+        .len()
+        .saturating_sub(breakdown.already_indexed)
+        .saturating_sub(breakdown.permanently_failed);
+    breakdown.over_limit = missing.saturating_sub(restorable_this_page);
+
+    breakdown
+}
+
 /// POST /api/restore
 ///
 /// Restore a namespace from Walrus:
@@ -652,6 +711,8 @@ async fn restore_unbounded(
             total: 0,
             namespace: namespace.clone(),
             owner: owner.clone(),
+            // Nothing was discovered, so nothing was skipped for any reason.
+            skipped_reasons: SkipBreakdown::default(),
             truncated: restore_is_truncated(false, source_capped, 0, limit),
         }));
     }
@@ -664,11 +725,20 @@ async fn restore_unbounded(
     // re-decrypt-attempted on a later call; it's already correctly reported
     // as "skipped", same as any other missing-but-excluded blob.
     let existing_blob_ids = state.db.get_blobs_by_namespace(owner, namespace).await?;
-    let failed_blob_ids = state.db.get_failed_blob_ids(owner, namespace).await?;
-    let existing_set: std::collections::HashSet<&str> = existing_blob_ids
+    let failed_blob_reasons = state.db.get_failed_blob_reasons(owner, namespace).await?;
+    // Kept as two lookups rather than one merged set: the union below decides
+    // what to restore, while `classify_skipped` needs to tell the two causes
+    // apart to explain `skipped` (WALM-385).
+    let indexed_set: std::collections::HashSet<&str> =
+        existing_blob_ids.iter().map(|s| s.as_str()).collect();
+    let failed_map: std::collections::HashMap<&str, &str> = failed_blob_reasons
         .iter()
-        .map(|s| s.as_str())
-        .chain(failed_blob_ids.iter().map(|s| s.as_str()))
+        .map(|(blob_id, reason)| (blob_id.as_str(), reason.as_str()))
+        .collect();
+    let existing_set: std::collections::HashSet<&str> = indexed_set
+        .iter()
+        .copied()
+        .chain(failed_map.keys().copied())
         .collect();
     let all_missing: Vec<String> = all_blob_ids
         .iter()
@@ -694,15 +764,28 @@ async fn restore_unbounded(
         limit,
     );
     let skipped = total - missing_blob_ids.len();
+    // Explain that `skipped` rather than shipping a bare count: an all-
+    // permanently-failed namespace is otherwise indistinguishable from a
+    // fully-restored one (WALM-385).
+    let skipped_reasons = classify_skipped(
+        &all_blob_ids,
+        &indexed_set,
+        &failed_map,
+        missing_blob_ids.len(),
+    );
     tracing::info!(
-        "restore: total={} on-chain, existing={}, negative-cached={}, missing={} (limited to {}, truncated={}, source_capped={}) for ns={}",
+        "restore: total={} on-chain, existing={}, negative-cached={}, missing={} (limited to {}, truncated={}, source_capped={}) skipped={} (already_indexed={}, permanently_failed={}, over_limit={}) for ns={}",
         total,
         existing_blob_ids.len(),
-        failed_blob_ids.len(),
+        failed_map.len(),
         missing_blob_ids.len(),
         limit,
         truncated,
         source_capped,
+        skipped,
+        skipped_reasons.already_indexed,
+        skipped_reasons.permanently_failed,
+        skipped_reasons.over_limit,
         namespace
     );
 
@@ -713,6 +796,7 @@ async fn restore_unbounded(
             total,
             namespace: namespace.clone(),
             owner: owner.clone(),
+            skipped_reasons,
             truncated,
         }));
     }
@@ -784,6 +868,7 @@ async fn restore_unbounded(
             total,
             namespace: namespace.clone(),
             owner: owner.clone(),
+            skipped_reasons,
             truncated,
         }));
     }
@@ -971,6 +1056,7 @@ async fn restore_unbounded(
         total,
         namespace: namespace.clone(),
         owner: owner.clone(),
+        skipped_reasons,
         truncated,
     }))
 }
@@ -978,7 +1064,14 @@ async fn restore_unbounded(
 #[cfg(test)]
 mod tests {
     use super::encode_untrusted_memory_context;
-    use crate::types::{RecallResult, RestoreResponse};
+    use crate::types::{RecallResult, RestoreResponse, SkipBreakdown};
+    use std::collections::{HashMap, HashSet};
+
+    /// Build the `(all_blob_ids, indexed, failed)` trio `classify_skipped`
+    /// takes, from plain `&str` fixtures.
+    fn blob_ids(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|s| s.to_string()).collect()
+    }
 
     // ── Memory context stays structured, untrusted JSON ──────────
 
@@ -1143,9 +1236,188 @@ mod tests {
             total: 20,
             namespace: "ns".to_string(),
             owner: "0xabc".to_string(),
+            skipped_reasons: SkipBreakdown::default(),
             truncated: true,
         };
         assert!(resp.truncated);
+    }
+
+    // ── restore() skip classification (WALM-385) ───────────────────────
+    //
+    // A namespace whose ciphertexts were written under a superseded SEAL
+    // package fails decrypt deterministically, lands in the
+    // `restore_failed_blobs` negative cache, and from then on reports
+    // `restored: 0, skipped: N, total: N` on every call — byte-identical to
+    // a namespace that is already fully restored — while `recall` returns
+    // nothing. Nothing in the relayer clears that cache, so the state is
+    // permanent as well as silent. These pin the breakdown that tells the
+    // two apart, exercising the real `super::classify_skipped` so a wiring
+    // bug fails here rather than a re-derived copy of the same arithmetic.
+
+    #[test]
+    fn classify_skipped_reports_a_wholly_negative_cached_namespace_as_permanent() {
+        // The reported repro: every discovered blob is negative-cached, so
+        // restore can never make progress no matter how often it is called.
+        let all = blob_ids(&["b1", "b2", "b3"]);
+        let indexed = HashSet::new();
+        let failed: HashMap<&str, &str> = all
+            .iter()
+            .map(|id| (id.as_str(), "decrypt_permanent"))
+            .collect();
+
+        let breakdown = super::classify_skipped(&all, &indexed, &failed, 0);
+
+        assert_eq!(breakdown.permanently_failed, 3);
+        assert_eq!(breakdown.already_indexed, 0);
+        assert_eq!(breakdown.over_limit, 0);
+        assert_eq!(breakdown.by_reason.get("decrypt_permanent"), Some(&3));
+    }
+
+    #[test]
+    fn classify_skipped_reports_a_fully_indexed_namespace_as_benign() {
+        // Same `skipped` total as the case above and the one the caller must
+        // NOT be warned about — nothing is wrong here.
+        let all = blob_ids(&["b1", "b2", "b3"]);
+        let indexed: HashSet<&str> = all.iter().map(|id| id.as_str()).collect();
+        let failed = HashMap::new();
+
+        let breakdown = super::classify_skipped(&all, &indexed, &failed, 0);
+
+        assert_eq!(breakdown.already_indexed, 3);
+        assert_eq!(breakdown.permanently_failed, 0);
+        assert_eq!(breakdown.over_limit, 0);
+        assert!(breakdown.by_reason.is_empty());
+    }
+
+    #[test]
+    fn classify_skipped_splits_mixed_causes_and_both_failure_reasons() {
+        let all = blob_ids(&["indexed", "utf8", "decrypt", "restorable"]);
+        let indexed: HashSet<&str> = ["indexed"].into_iter().collect();
+        let failed: HashMap<&str, &str> =
+            [("utf8", "invalid_utf8"), ("decrypt", "decrypt_permanent")]
+                .into_iter()
+                .collect();
+
+        // One blob ("restorable") is actually being restored this call.
+        let breakdown = super::classify_skipped(&all, &indexed, &failed, 1);
+
+        assert_eq!(breakdown.already_indexed, 1);
+        assert_eq!(breakdown.permanently_failed, 2);
+        assert_eq!(breakdown.over_limit, 0);
+        assert_eq!(breakdown.by_reason.get("invalid_utf8"), Some(&1));
+        assert_eq!(breakdown.by_reason.get("decrypt_permanent"), Some(&1));
+    }
+
+    #[test]
+    fn classify_skipped_counts_a_blob_in_both_sets_exactly_once() {
+        // `restore_unbounded` unions the two lookups to build `all_missing`,
+        // so a blob that is indexed *and* negative-cached is excluded once.
+        // Counting it in both buckets would push the breakdown above
+        // `skipped`.
+        let all = blob_ids(&["both"]);
+        let indexed: HashSet<&str> = ["both"].into_iter().collect();
+        let failed: HashMap<&str, &str> = [("both", "decrypt_permanent")].into_iter().collect();
+
+        let breakdown = super::classify_skipped(&all, &indexed, &failed, 0);
+
+        assert_eq!(breakdown.already_indexed, 1);
+        assert_eq!(breakdown.permanently_failed, 0);
+        assert!(breakdown.by_reason.is_empty());
+    }
+
+    #[test]
+    fn classify_skipped_ignores_negative_cache_rows_not_discovered_this_call() {
+        // The negative cache is keyed by owner+namespace and never pruned, so
+        // it can hold blobs the owner no longer holds on chain. Those must
+        // not inflate the breakdown past this call's discovered set.
+        let all = blob_ids(&["discovered"]);
+        let indexed = HashSet::new();
+        let failed: HashMap<&str, &str> = [
+            ("discovered", "decrypt_permanent"),
+            ("long-gone", "decrypt_permanent"),
+        ]
+        .into_iter()
+        .collect();
+
+        let breakdown = super::classify_skipped(&all, &indexed, &failed, 0);
+
+        assert_eq!(breakdown.permanently_failed, 1);
+        assert_eq!(breakdown.by_reason.get("decrypt_permanent"), Some(&1));
+    }
+
+    #[test]
+    fn classify_skipped_attributes_paginated_out_blobs_to_over_limit() {
+        // Restorable blobs deferred past `limit` are skipped too, but they
+        // come back next call — the one bucket a retry actually helps.
+        let all = blob_ids(&["b1", "b2", "b3", "b4", "b5"]);
+        let indexed = HashSet::new();
+        let failed = HashMap::new();
+
+        let breakdown = super::classify_skipped(&all, &indexed, &failed, 2);
+
+        assert_eq!(breakdown.over_limit, 3);
+        assert_eq!(breakdown.already_indexed, 0);
+        assert_eq!(breakdown.permanently_failed, 0);
+    }
+
+    #[test]
+    fn classify_skipped_partitions_skipped_exactly() {
+        // The invariant `restore_unbounded` relies on: the three buckets must
+        // sum to `total - missing_blob_ids.len()` — the `skipped` the caller
+        // is shown — for every mix, or the breakdown contradicts the number
+        // it claims to explain.
+        let all = blob_ids(&["indexed", "failed", "page", "deferred"]);
+        let indexed: HashSet<&str> = ["indexed"].into_iter().collect();
+        let failed: HashMap<&str, &str> = [("failed", "decrypt_permanent")].into_iter().collect();
+
+        for restorable_this_page in 0..=2 {
+            let breakdown = super::classify_skipped(&all, &indexed, &failed, restorable_this_page);
+            assert_eq!(
+                breakdown.already_indexed + breakdown.permanently_failed + breakdown.over_limit,
+                all.len() - restorable_this_page,
+                "breakdown must sum to skipped for page={}",
+                restorable_this_page
+            );
+        }
+    }
+
+    #[test]
+    fn classify_skipped_on_an_empty_namespace_is_all_zeroes() {
+        let breakdown = super::classify_skipped(&[], &HashSet::new(), &HashMap::new(), 0);
+
+        assert_eq!(breakdown.already_indexed, 0);
+        assert_eq!(breakdown.permanently_failed, 0);
+        assert_eq!(breakdown.over_limit, 0);
+        assert!(breakdown.by_reason.is_empty());
+    }
+
+    #[test]
+    fn restore_response_carries_skip_breakdown() {
+        let resp = RestoreResponse {
+            restored: 0,
+            skipped: 3,
+            total: 3,
+            namespace: "ns".to_string(),
+            owner: "0xabc".to_string(),
+            skipped_reasons: super::classify_skipped(
+                &blob_ids(&["b1", "b2", "b3"]),
+                &HashSet::new(),
+                &[
+                    ("b1", "decrypt_permanent"),
+                    ("b2", "decrypt_permanent"),
+                    ("b3", "decrypt_permanent"),
+                ]
+                .into_iter()
+                .collect(),
+                0,
+            ),
+            truncated: true,
+        };
+
+        assert_eq!(resp.skipped_reasons.permanently_failed, resp.skipped);
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["skipped_reasons"]["permanently_failed"], 3);
+        assert_eq!(json["skipped_reasons"]["by_reason"]["decrypt_permanent"], 3);
     }
 
     // ── /api/forget + /api/stats empty-namespace validation ─────────────
