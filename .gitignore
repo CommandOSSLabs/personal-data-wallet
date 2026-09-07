@@ -22,6 +22,8 @@ pnpm-debug.log*
 # Environment variables
 .env
 .env*.local
+.env.local.*
+.env*.bak
 .env.production
 .env.test
 */.env.test
@@ -116,3 +118,31 @@ tmp-smashblob/
 
 # Railway sensitive docs
 railway-*.md
+
+# Per-developer MCP client config (user paths)
+.mcp.json
+# ...but the marketplace plugin must ship its own MCP config
+!packages/mcp/plugin/.mcp.json
+
+# Personal/internal planning notes — never include in repo
+plans/
+.local-plans/
+
+# Local secrets, env, and dev state — never commit
+.local/
+
+# Benchmark archives + working analysis notes
+# Kept locally under
+# /Users/toiancom/WorkProjects/memwal/whole-system-documents/benchmark-archive/
+# instead — see that README. Result JSONs are large (~10-25MB per run),
+# add no value to source-tree clones, and have already lived their
+# reviewable life in past PRs.
+services/server/review/
+claudedocs/
+
+# Temp File
+temp/
+
+
+# Devstack local state (private keys, docker/container state — never commit)
+.devstack/

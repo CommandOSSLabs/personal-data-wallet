@@ -1,6 +1,35 @@
 ---
 title: "Quick Start"
-description: "Install the MemWal memory plugin for NemoClaw/OpenClaw and verify it works."
+description: >-
+  Install the Walrus Memory plugin for NemoClaw/OpenClaw and verify it works.
+  Covers prerequisites, installation, credential setup, configuration, and end-to-end testing.
+keywords:
+  - OpenClaw
+  - Walrus Memory
+  - MemWal
+  - quick start
+  - installation
+  - plugin setup
+goal:
+  description: Install the OpenClaw Walrus Memory plugin, connect it to your account, and run a test conversation to confirm automatic recall and save are working.
+  requires:
+    - has_frontmatter:
+        - title
+        - description
+        - keywords
+      label: Has required frontmatter fields
+    - min_words: 300
+      label: Needs more content depth
+    - has_questions: true
+      label: Needs questions for AI search visibility
+    - has_answer: true
+      label: Needs answer summary for AI citation
+questions:
+  - How do I install the Walrus Memory plugin for OpenClaw?
+  - How do I configure the MemWal OpenClaw plugin with my delegate key?
+  - How do I verify that the OpenClaw memory plugin is working?
+answer: >-
+  Install the Walrus Memory OpenClaw plugin with openclaw plugins install @mysten-incubation/oc-memwal. Configure it in ~/.openclaw/openclaw.json with your delegate key (via MEMWAL_PRIVATE_KEY env var), account ID, and relayer URL. Restart the gateway and verify by running openclaw memwal stats, then test the memory loop by storing a fact in one conversation and recalling it in another.
 ---
 
 Get the plugin running and test the memory loop in a few minutes.
@@ -9,7 +38,7 @@ Get the plugin running and test the memory loop in a few minutes.
 
 - [OpenClaw](https://openclaw.ai) `>=2026.3.11` installed and running
 
-You'll also need a **delegate key**, **account ID**, and **relayer URL** from MemWal — the steps below will guide you through getting these.
+You'll also need a **delegate key**, **account ID**, and **relayer URL** from Walrus Memory — the steps below will guide you through getting these.
 
 ## Installation
 
@@ -23,24 +52,24 @@ You'll also need a **delegate key**, **account ID**, and **relayer URL** from Me
   </Step>
 
   <Step>
-    ### Get your MemWal credentials
+    ### Get your Walrus Memory credentials
 
-    The plugin needs three values to connect to MemWal:
+    The plugin needs three values to connect to Walrus Memory:
 
     | Value | What it is |
     |-------|-----------|
     | **Delegate Key** | A private key (64-char hex) used to sign requests and encrypt memories |
     | **Account ID** | Your MemWalAccount object ID on Sui (`0x...`) |
-    | **Relayer URL** | The MemWal relayer endpoint that handles search, storage, and encryption |
+    | **Relayer URL** | The Walrus Memory relayer endpoint that handles search, storage, and encryption |
 
-    The easiest way to get your delegate key and account ID is through the [MemWal dashboard](https://memwal.ai). See the [main Quick Start](/getting-started/quick-start) for detailed setup instructions.
+    The easiest way to get your delegate key and account ID is through the [Walrus Memory dashboard](https://memory.walrus.xyz). See the [main Quick Start](/getting-started/quick-start) for detailed setup instructions.
 
     For the relayer URL, use a managed endpoint or deploy your own:
 
     | Environment | Relayer URL |
     |-------------|-------------|
-    | **Production** (mainnet) | `https://relayer.memwal.ai` |
-    | **Development** (testnet) | `https://relayer.dev.memwal.ai` |
+    | **Production** (mainnet) | `https://relayer.memory.walrus.xyz` |
+    | **Staging** (testnet) | `https://relayer-staging.memory.walrus.xyz` |
 
     <Info>
     These managed relayer endpoints are provided as a public good by Walrus Foundation.
@@ -66,20 +95,34 @@ You'll also need a **delegate key**, **account ID**, and **relayer URL** from Me
     ```jsonc
     {
       "plugins": {
-        "slots": { "memory": "oc-memwal" },
+        "slots": { "memory": "memory-memwal" },
         "entries": {
-          "oc-memwal": {
+          "memory-memwal": {
             "enabled": true,
+            // Required for auto-capture. OpenClaw blocks the agent_end hook for
+            // non-bundled plugins unless conversation access is granted here.
+            "hooks": { "allowConversationAccess": true },
             "config": {
               "privateKey": "${MEMWAL_PRIVATE_KEY}",           // References the env var
               "accountId": "0x3247e3da...",                     // Your account ID from the dashboard
-              "serverUrl": "https://relayer.dev.memwal.ai"     // Or your self-hosted relayer
+              "serverUrl": "https://relayer-staging.memory.walrus.xyz"     // Or your self-hosted relayer
             }
           }
         }
       }
     }
     ```
+
+    <Warning>
+    The config key is **`memory-memwal`**, the plugin's manifest id, not the npm
+    package name `oc-memwal`. The installer reports this as
+    `using manifest id as the config key`. Using `oc-memwal` leaves the plugin
+    unbound, and it never loads.
+
+    `hooks.allowConversationAccess` is equally load-bearing. Without it, OpenClaw
+    logs `typed hook "agent_end" blocked` at startup and **auto-capture silently
+    never runs**, even though the gateway reports the plugin as connected.
+    </Warning>
 
     <Accordion title="Optional settings">
       You can add these to the `config` block to tune behavior. The defaults work well for most setups.
@@ -92,6 +135,7 @@ You'll also need a **delegate key**, **account ID**, and **relayer URL** from Me
       | `minRelevance` | `0.3` | Relevance threshold (0-1) for memory injection |
       | `captureMaxMessages` | `10` | How many recent messages to analyze for facts |
       | `defaultNamespace` | `"default"` | Memory scope for the main agent |
+      | `requestTimeoutMs` | `10000` | Deadline in ms for each relayer call. Raise it for a slow self-hosted relayer |
     </Accordion>
   </Step>
 
@@ -105,8 +149,8 @@ You'll also need a **delegate key**, **account ID**, and **relayer URL** from Me
     You should see in the logs:
 
     ```
-    oc-memwal: registered (server: https://..., key: e21d...ed9b, namespace: default)
-    oc-memwal: connected (status: ok, version: ...)
+    memory-memwal: registered (server: https://..., key: e21d...ed9b, namespace: default)
+    memory-memwal: connected (status: ok, version: ...)
     ```
 
     <Tip>
@@ -140,7 +184,7 @@ Bot: (responds normally)
 
 Check logs — you should see:
 ```
-oc-memwal: auto-captured 1 facts (agent: main, namespace: default)
+memory-memwal: auto-captured 1 facts (agent: main, namespace: default)
 ```
 
 **2. Recall it** — in a **new conversation**, ask about it:
@@ -151,7 +195,7 @@ You: What programming languages do I like?
 
 Check logs — you should see:
 ```
-oc-memwal: auto-recall injected 1 memories (agent: main, namespace: default)
+memory-memwal: auto-recall injected 1 memories (agent: main, namespace: default)
 ```
 
 **3. Search from terminal** — confirm the memory exists via CLI:

@@ -43,7 +43,40 @@
             "pages": [
               "getting-started/what-is-memwal",
               "getting-started/quick-start",
-              "getting-started/choose-your-path"
+              "getting-started/choose-your-path",
+              "examples/example-apps",
+              "examples/chatbot",
+              "examples/noter",
+              "examples/researcher"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/system-prompt-templates",
+              "guides/agent-runtimes",
+              "guides/delete-old-memories",
+              "guides/delete-memories-programmatically"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/system-prompt-templates",
+              "guides/returning-user",
+              "guides/manage-your-memory",
+              "guides/delete-old-memories",
+              "guides/delete-memories-programmatically"
             ]
           }
         ]
@@ -54,8 +87,11 @@
           {
             "group": "Concepts",
             "pages": [
+              "fundamentals/concepts/how-agent-memory-works",
+              "fundamentals/concepts/where-to-store-agent-data",
               "fundamentals/concepts/memory-space",
-              "fundamentals/concepts/ownership-and-access"
+              "fundamentals/concepts/ownership-and-access",
+              "fundamentals/concepts/verifiable-memory"
             ]
           },
           {
@@ -63,18 +99,22 @@
             "pages": [
               "fundamentals/architecture/core-components",
               "fundamentals/architecture/how-storage-works",
+              "fundamentals/architecture/funding-storage",
+              "fundamentals/architecture/tracking-agent-storage",
               "fundamentals/architecture/data-flow-security-model"
             ]
           }
         ]
       },
       {
-        "tab": "SDK",
+        "tab": "TypeScript SDK",
         "groups": [
           {
-            "group": "SDK",
+            "group": "TypeScript SDK",
             "pages": [
+              "sdk/overview",
               "sdk/quick-start",
+              "sdk/headless-setup",
               {
                 "group": "Usage",
                 "root": "sdk/usage",
@@ -84,8 +124,42 @@
                   "sdk/usage/with-memwal"
                 ]
               },
+              "sdk/advanced-usage",
+              "sdk/ai-integration",
+              "sdk/cookbook-multi-tenant",
+              "sdk/codebase-memory",
+              "sdk/cloudflare-workers",
+              "sdk/agent-storage-loop",
+              "sdk/production-readiness",
+              "sdk/versioned-datasets",
+              "sdk/example-map",
+              "sdk/examples",
+              "sdk/research-app-example",
               "sdk/api-reference",
               "sdk/changelog"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Python SDK",
+        "groups": [
+          {
+            "group": "Python SDK",
+            "pages": [
+              "python-sdk/quick-start",
+              "python-sdk/colab",
+              {
+                "group": "Usage",
+                "root": "python-sdk/usage",
+                "pages": [
+                  "python-sdk/usage/memwal",
+                  "python-sdk/usage/memwal-manual",
+                  "python-sdk/usage/with-memwal"
+                ]
+              },
+              "python-sdk/api-reference",
+              "python-sdk/changelog"
             ]
           }
         ]
@@ -99,7 +173,33 @@
               "relayer/overview",
               "relayer/public-relayer",
               "relayer/self-hosting",
+              "relayer/nautilus-tee",
+              "relayer/observability",
+              "relayer/synthetic-seal-cross-account",
+              "relayer/versioning-and-compatibility",
               "relayer/api-reference"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "MCP",
+        "groups": [
+          {
+            "group": "Model Context Protocol",
+            "pages": [
+              "mcp/overview",
+              "mcp/quickstart",
+              "mcp/claude-code",
+              "mcp/codex",
+              "mcp/cursor",
+              "mcp/claude-desktop",
+              "mcp/claude-connector",
+              "mcp/antigravity",
+              "mcp/opencode",
+              "guides/system-prompt-templates",
+              "mcp/reference",
+              "mcp/changelog"
             ]
           }
         ]
@@ -153,6 +253,17 @@
             "pages": [
               "reference/configuration",
               "reference/environment-variables"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Troubleshooting",
+        "groups": [
+          {
+            "group": "Troubleshooting",
+            "pages": [
+              "troubleshooting/overview"
             ]
           }
         ]

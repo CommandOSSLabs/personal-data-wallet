@@ -1,8 +1,8 @@
 {
   "name": "@mysten-incubation/oc-memwal",
-  "version": "0.0.1",
+  "version": "0.0.6",
   "type": "module",
-  "description": "NemoClaw/OpenClaw memory plugin — encrypted, decentralized long-term memory via MemWal + Walrus",
+  "description": "NemoClaw/OpenClaw memory plugin — encrypted, decentralized long-term memory via Walrus Memory",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -22,9 +22,18 @@
     "openclaw.plugin.json",
     "README.md"
   ],
+  "keywords": [
+    "ai",
+    "memory",
+    "walrus-memory",
+    "walrus",
+    "openclaw",
+    "nemoclaw"
+  ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "test": "tsc && node --test \"test/**/*.test.mjs\"",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "prepublishOnly": "npm run clean && npm run build"
   },
@@ -32,7 +41,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@mysten-incubation/memwal": "^0.0.1",
+    "@mysten-incubation/memwal": "workspace:*",
     "@sinclair/typebox": "0.34.48",
     "zod": "^3.23.0"
   },

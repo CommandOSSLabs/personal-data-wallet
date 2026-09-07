@@ -1,4 +1,5 @@
 import { getSession } from "@/lib/auth/session";
+import { sessionMemoryCredentials } from "@/lib/auth/session-memory";
 import { getChatById, getSprintByChatId, createSprintBlob } from "@/lib/db/queries";
 import { generateSprintReport } from "@/lib/sprint/report";
 import { rememberSprintReport } from "@/lib/sprint/memwal";
@@ -34,15 +35,15 @@ export async function POST(request: Request) {
     return new ChatbotError("bad_request:api").toResponse();
   }
 
-  const memwalKey = session.user.privateKey || process.env.MEMWAL_KEY;
-  const memwalAccountId = session.user.accountId || process.env.MEMWAL_ACCOUNT_ID;
-  if (!memwalKey) {
+  const credentials = sessionMemoryCredentials(session.user);
+  if (!credentials) {
     return new ChatbotError(
       "bad_request:api",
-      "No MemWal key provided"
+      "No Walrus Memory key provided"
     ).toResponse();
   }
 
+  const { key: memwalKey, accountId: memwalAccountId } = credentials;
   console.log(`[sprint:save] Starting SSE save for chat=${chatId}, user=${userId.slice(0, 8)}...`);
 
   const encoder = new TextEncoder();
@@ -125,9 +126,9 @@ export async function POST(request: Request) {
         console.log(`[sprint:save] ${sources.length} unique sources`);
         send("step", { step: "build-sources", status: "done", message: `${sources.length} sources processed` });
 
-        // Step 5: Store in MemWal
-        send("step", { step: "store-memwal", status: "start", message: "Storing in MemWal..." });
-        console.log(`[sprint:save] Storing in MemWal...`);
+        // Step 5: Store in Walrus Memory
+        send("step", { step: "store-memwal", status: "start", message: "Storing in Walrus Memory..." });
+        console.log(`[sprint:save] Storing in Walrus Memory...`);
 
         const memwalResult = await rememberSprintReport({
           key: memwalKey,
@@ -138,8 +139,8 @@ export async function POST(request: Request) {
           sources,
         });
 
-        console.log(`[sprint:save] MemWal stored. blobId=${memwalResult.blob_id}`);
-        send("step", { step: "store-memwal", status: "done", message: "Stored in MemWal" });
+        console.log(`[sprint:save] Walrus Memory stored. blobId=${memwalResult.blob_id}`);
+        send("step", { step: "store-memwal", status: "done", message: "Stored in Walrus Memory" });
 
         // Step 6: Save to database
         send("step", { step: "save-db", status: "start", message: "Saving to database..." });

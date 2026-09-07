@@ -368,12 +368,26 @@ export async function getDocumentsById({ id }: { id: string }) {
   }
 }
 
-export async function getDocumentById({ id }: { id: string }) {
+// Owner-scoped lookup: filters on both the document id AND the owner, so a
+// caller can never resolve a document that belongs to another user. This is the
+// single lookup for any path that acts on the result, mirroring the ownership
+// check the HTTP route (app/(chat)/api/document/route.ts) already enforces.
+// Returns undefined when the id does not exist OR is not owned by `userId` —
+// callers cannot distinguish the two, so document existence is not disclosed.
+// (An unscoped by-id lookup was deliberately removed: it was the footgun behind
+// the document-tool IDOR — any future by-id lookup must include the owner.)
+export async function getDocumentByIdForUser({
+  id,
+  userId,
+}: {
+  id: string;
+  userId: string;
+}) {
   try {
     const [selectedDocument] = await db
       .select()
       .from(document)
-      .where(eq(document.id, id))
+      .where(and(eq(document.id, id), eq(document.userId, userId)))
       .orderBy(desc(document.createdAt));
 
     return selectedDocument;
@@ -429,16 +443,26 @@ export async function saveSuggestions({
   }
 }
 
-export async function getSuggestionsByDocumentId({
+// Owner-scoped lookup: filters on both documentId AND userId so a caller can
+// never resolve another user's suggestion text. An unscoped by-documentId
+// lookup was the footgun behind the getSuggestions IDOR (WALM-438 / GH #786).
+export async function getSuggestionsByDocumentIdForUser({
   documentId,
+  userId,
 }: {
   documentId: string;
+  userId: string;
 }) {
   try {
     return await db
       .select()
       .from(suggestion)
-      .where(eq(suggestion.documentId, documentId));
+      .where(
+        and(
+          eq(suggestion.documentId, documentId),
+          eq(suggestion.userId, userId)
+        )
+      );
   } catch (_error) {
     throw new ChatbotError(
       "bad_request:database",

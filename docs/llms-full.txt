@@ -4,7 +4,6 @@
 
 Important notes:
 
-- MemWal is currently in beta
 - The SDK talks to a relayer service that handles embedding, SEAL encryption, Walrus upload/download, and vector search
 - All content is end-to-end encrypted — only the owner and authorized delegates can decrypt
 - Delegate keys provide scoped access — agents can read/write memory without holding the owner's private key
@@ -33,8 +32,8 @@ pnpm add @mysten/sui @mysten/seal @mysten/walrus
 ### Prerequisites
 
 - Node.js v18+ or Bun v1+
-- A delegate key and account ID (generate at https://memwal.ai or https://memwal.wal.app)
-- A relayer URL (use `https://relayer.memwal.ai` for production or `https://relayer.staging.memwal.ai` for staging)
+- A delegate key and account ID (generate at https://memory.walrus.xyz)
+- A relayer URL (use `https://relayer.memory.walrus.xyz` for production or `https://relayer-staging.memory.walrus.xyz` for staging)
 
 ### First Memory
 
@@ -44,14 +43,15 @@ import { MemWal } from "@mysten-incubation/memwal";
 const memwal = MemWal.create({
   key: "<your-ed25519-private-key>",
   accountId: "<your-memwal-account-id>",
-  serverUrl: "https://relayer.memwal.ai",
+  serverUrl: "https://relayer.memory.walrus.xyz",
   namespace: "demo",
 });
 
 await memwal.health();
-await memwal.remember("I live in Hanoi and prefer dark mode.");
+const job = await memwal.remember("I live in Hanoi and prefer dark mode.");
+await memwal.waitForRememberJob(job.job_id);
 
-const result = await memwal.recall("What do we know about this user?");
+const result = await memwal.recall({ query: "What do we know about this user?" });
 console.log(result.results);
 ```
 
@@ -82,28 +82,31 @@ Config:
 |---|---|---|---|---|
 | `key` | `string` | Yes | — | Ed25519 delegate private key in hex |
 | `accountId` | `string` | Yes | — | MemWalAccount object ID on Sui |
-| `serverUrl` | `string` | No | `http://localhost:8000` | Relayer URL |
+| `serverUrl` | `string` | No | `https://relayer.memory.walrus.xyz` | Relayer URL |
 | `namespace` | `string` | No | `"default"` | Default namespace for memory isolation |
 
-### `remember(text, namespace?): Promise<RememberResult>`
+### `remember(text, namespace?): Promise<RememberAcceptedResult>`
 
-Store one memory through the relayer. The relayer handles embedding, SEAL encryption, Walrus upload, and vector indexing.
+Submit one memory through the relayer. The relayer returns after creating a background job; embedding, SEAL encryption, Walrus upload, and vector indexing continue asynchronously.
 
 Returns:
 ```ts
 {
-  id: string;        // UUID for this entry
-  blob_id: string;   // Walrus blob ID
-  owner: string;     // Owner Sui address
-  namespace: string; // Namespace used
+  job_id: string; // Polling id
+  status: string; // Usually "running"
 }
 ```
 
-### `recall(query, limit?, namespace?): Promise<RecallResult>`
+Use `rememberAndWait(text, namespace?, opts?)` or `waitForRememberJob(job_id, opts?)` to resolve the completed `{ id, job_id, blob_id, owner, namespace }` result.
+
+### `recall(params): Promise<RecallResult>`
 
 Search for memories matching a natural language query, scoped to `owner + namespace`.
 
-- `limit` defaults to `10`
+- Preferred form: `recall({ query, limit?, topK?, namespace?, maxDistance? })`
+- `limit` defaults to `10`; `topK` is an alias and wins when both are set
+- Legacy positional forms still work: `recall(query)`, `recall(query, limit)`, `recall(query, limit, namespace)`, and `recall(query, options)`
+- `maxDistance` filters weak matches client-side by dropping results where `distance >= maxDistance`
 
 Returns:
 ```ts
@@ -119,26 +122,30 @@ Returns:
 
 ### `analyze(text, namespace?): Promise<AnalyzeResult>`
 
-Extract memorable facts from text using an LLM, then store each fact as a separate memory.
+Extract memorable facts from text using an LLM, then return accepted background jobs for storing each fact.
 
 Returns:
 ```ts
 {
+  job_ids: string[];
   facts: Array<{
     text: string;     // Extracted fact
-    id: string;       // UUID
-    blob_id: string;  // Walrus blob ID
+    id: string;       // Same value as job_id
+    job_id: string;   // Polling id
   }>;
-  total: number;
+  fact_count: number;
+  status: string;     // Usually "pending"
   owner: string;
 }
 ```
+
+Use `analyzeAndWait(text, namespace?, opts?)` to wait for every extracted fact job to finish.
 
 ### `restore(namespace, limit?): Promise<RestoreResult>`
 
 Rebuild missing indexed entries for one namespace from Walrus. Incremental — only re-indexes blobs that aren't already in the local database.
 
-- `limit` defaults to `50`
+- `limit` defaults to `10`
 
 Returns:
 ```ts
@@ -187,6 +194,7 @@ Manual client flow — embed locally, SEAL encrypt locally, send encrypted paylo
 | `embeddingApiBase` | No | Default: `https://api.openai.com/v1` |
 | `embeddingModel` | No | Default: `text-embedding-3-small` |
 | `packageId` | Yes | MemWal package ID on Sui |
+| `registryId` | Yes | AccountRegistry shared object ID on Sui |
 | `suiPrivateKey` or `walletSigner` | One required | Local keypair or connected wallet |
 | `suiNetwork` | No | Default: `mainnet` |
 
@@ -208,7 +216,7 @@ import { withMemWal } from "@mysten-incubation/memwal/ai";
 const model = withMemWal(openai("gpt-4o"), {
   key: "<your-delegate-key>",
   accountId: "<your-account-id>",
-  serverUrl: "https://relayer.memwal.ai",
+  serverUrl: "https://relayer.memory.walrus.xyz",
   namespace: "chat",
   maxMemories: 5,
   autoSave: true,
@@ -260,6 +268,8 @@ import {
 | `addDelegateKey(opts)` | Add a delegate key to an account (owner only) |
 | `removeDelegateKey(opts)` | Remove a delegate key from an account (owner only) |
 
+`addDelegateKey` and `removeDelegateKey` require the shared `registryId` alongside the package and account IDs.
+
 ---
 
 ## Utility Functions
@@ -285,7 +295,7 @@ Used by `MemWal.create(config)` and `withMemWal(model, options)`.
 |---|---|---|
 | `key` | yes | Delegate private key in hex |
 | `accountId` | yes | MemWalAccount object ID on Sui |
-| `serverUrl` | no | Relayer URL. Default: `http://localhost:8000` |
+| `serverUrl` | no | Relayer URL. Default: `https://relayer.memory.walrus.xyz` |
 | `namespace` | no | Default memory boundary. Default: `"default"` |
 
 ### MemWalManualConfig
@@ -300,6 +310,7 @@ Used by `MemWalManual.create(config)`.
 | `embeddingApiBase` | no | Default: `https://api.openai.com/v1` |
 | `embeddingModel` | no | Default: `text-embedding-3-small` |
 | `packageId` | yes | MemWal package ID on Sui |
+| `registryId` | yes | AccountRegistry shared object ID on Sui |
 | `accountId` | yes | MemWalAccount object ID |
 | `namespace` | no | Default namespace |
 | `suiPrivateKey` | one of two | Use for local signing |
@@ -310,8 +321,8 @@ Used by `MemWalManual.create(config)`.
 
 | Network | Relayer URL |
 |---|---|
-| **Production** (mainnet) | `https://relayer.memwal.ai` |
-| **Staging** (testnet) | `https://relayer.staging.memwal.ai` |
+| **Production** (mainnet) | `https://relayer.memory.walrus.xyz` |
+| **Staging** (testnet) | `https://relayer-staging.memory.walrus.xyz` |
 
 ---
 
@@ -334,15 +345,19 @@ The relayer is the backend that turns SDK calls into memory operations:
 | `x-public-key` | Hex-encoded Ed25519 public key (32 bytes) |
 | `x-signature` | Hex-encoded Ed25519 signature (64 bytes) |
 | `x-timestamp` | Unix timestamp in seconds (5-minute validity window) |
-| `x-account-id` | Optional — MemWalAccount object ID hint |
+| `x-nonce` | UUID v4 nonce for replay protection |
+| `x-account-id` | MemWalAccount object ID hint included in the canonical signature by official SDKs |
+| `x-seal-session` | Exported SEAL SessionKey for TypeScript and Python relayer-mode decrypt flows |
+| `x-delegate-key` | Legacy decrypt credential; deprecated where `x-seal-session` is supported |
 
-Signature format: `{timestamp}.{method}.{path}.{body_sha256}`
+Signature format: `{timestamp}.{method}.{path_and_query}.{body_sha256}.{nonce}.{account_id}`
 
 ### Relayer API Routes
 
 | Method | Route | Description |
 |--------|-------|-------------|
-| `GET` | `/health` | Service health check (no auth) |
+| `GET` | `/health` | Service health check and compatibility metadata (no auth) |
+| `GET` | `/version` | Relayer/API compatibility metadata (no auth) |
 | `POST` | `/api/remember` | Store text as encrypted memory |
 | `POST` | `/api/recall` | Semantic search for memories |
 | `POST` | `/api/remember/manual` | Register client-encrypted payload |
@@ -381,7 +396,7 @@ Add to `~/.openclaw/openclaw.json`:
         "config": {
           "privateKey": "${MEMWAL_PRIVATE_KEY}",
           "accountId": "0x...",
-          "serverUrl": "https://relayer.memwal.ai"
+          "serverUrl": "https://relayer.memory.walrus.xyz"
         }
       }
     }
@@ -419,7 +434,9 @@ Add to `~/.openclaw/openclaw.json`:
 | `DATABASE_URL` | PostgreSQL connection string. `pgvector` must already exist |
 | `MEMWAL_PACKAGE_ID` | Sui package ID |
 | `MEMWAL_REGISTRY_ID` | Onchain registry object ID |
-| `SEAL_KEY_SERVERS` | Comma-separated SEAL key server object IDs |
+
+`SEAL_SERVER_CONFIGS` and `SEAL_KEY_SERVERS` are optional overrides for encrypt/decrypt. Prefer `SEAL_SERVER_CONFIGS` for custom committees.
+If neither SEAL variable is set, the sidecar uses built-in defaults for `SUI_NETWORK`: Mysten's initial committee aggregator on `testnet`, and the legacy independent key server pair on `mainnet` until an official mainnet committee aggregator is available. Deployments with existing memories encrypted by the previous testnet independent key server defaults should pin `SEAL_KEY_SERVERS=0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75,0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8` until the data is migrated or re-encrypted.
 
 ### Usually Required
 
@@ -446,7 +463,7 @@ MEMWAL_REGISTRY_ID=0x0da982cefa26864ae834a8a0504b904233d49e20fcc17c373c8bed99c75
 
 ## Links
 
-- **Docs**: https://docs.memwal.ai
+- **Docs**: https://docs.wal.app/walrus-memory/getting-started/what-is-memwal
 - **SDK on npm**: https://www.npmjs.com/package/@mysten-incubation/memwal
-- **GitHub**: https://github.com/CommandOSSLabs/MemWal
-- **Dashboard**: https://memwal.ai
+- **GitHub**: https://github.com/MystenLabs/MemWal
+- **Dashboard**: https://memory.walrus.xyz

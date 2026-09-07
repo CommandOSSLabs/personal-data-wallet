@@ -88,13 +88,13 @@ export function Chat({
   });
   const [memwalKey, setMemwalKey] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('memwalKey') || '';
+      return sessionStorage.getItem('memwalKey') || '';
     }
     return '';
   });
   const [memwalAccountId, setMemwalAccountId] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('memwalAccountId') || '';
+      return sessionStorage.getItem('memwalAccountId') || '';
     }
     return '';
   });
@@ -115,18 +115,18 @@ export function Chat({
   useEffect(() => {
     memwalKeyRef.current = memwalKey;
     if (memwalKey) {
-      localStorage.setItem('memwalKey', memwalKey);
+      sessionStorage.setItem('memwalKey', memwalKey);
     } else {
-      localStorage.removeItem('memwalKey');
+      sessionStorage.removeItem('memwalKey');
     }
   }, [memwalKey]);
 
   useEffect(() => {
     memwalAccountIdRef.current = memwalAccountId;
     if (memwalAccountId) {
-      localStorage.setItem('memwalAccountId', memwalAccountId);
+      sessionStorage.setItem('memwalAccountId', memwalAccountId);
     } else {
-      localStorage.removeItem('memwalAccountId');
+      sessionStorage.removeItem('memwalAccountId');
     }
   }, [memwalAccountId]);
 
@@ -216,20 +216,16 @@ export function Chat({
 
   const searchParams = useSearchParams();
   const query = searchParams.get("query");
-
-  const [hasAppendedQuery, setHasAppendedQuery] = useState(false);
+  const hasPrefilledQueryRef = useRef(false);
 
   useEffect(() => {
-    if (query && !hasAppendedQuery) {
-      sendMessage({
-        role: "user" as const,
-        parts: [{ type: "text", text: query }],
-      });
-
-      setHasAppendedQuery(true);
+    if (query && !hasPrefilledQueryRef.current) {
+      // Deep links may suggest text, but only an explicit user action may send it.
+      setInput(query.slice(0, 8000));
+      hasPrefilledQueryRef.current = true;
       window.history.replaceState({}, "", `/chat/${id}`);
     }
-  }, [query, sendMessage, hasAppendedQuery, id]);
+  }, [query, id]);
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,

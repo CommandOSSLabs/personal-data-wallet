@@ -42,14 +42,14 @@ import { uuidv7 } from "uuidv7";
  *    - Both checked on session validation via isSessionExpired() helper
  *    - Expired sessions are invalid for authentication but remain in DB for audit
  *
- * 6. NOTES SYSTEM (Apple Notes / Notion-like with MemWal):
+ * 6. NOTES SYSTEM (Apple Notes / Notion-like with Walrus Memory):
  *    - notes: User-created notes with Lexical editor content
  *    - notes.content: Lexical EditorState JSON for rich text editing
  *    - notes.plainText: Extracted plain text for AI memory detection and search
  *    - noteMemoryHighlights: AI-detected memory snippets with blockchain persistence
  *      - Status workflow: preparing → pending → signing → uploading → indexing → saved
  *      - Stores highlighted text, AI-extracted metadata (title, content, entities)
- *      - MemWal blockchain metadata: blobId (Walrus), graphObjectId (Nautilus), transactionId
+ *      - Walrus Memory metadata: blobId (Walrus), graphObjectId (Nautilus), transactionId
  *      - Knowledge graph: Entities (["person:Alice", "place:Paris"]) and relationships
  *      - Approval workflow: User approves/rejects before blockchain upload
  *
@@ -179,27 +179,6 @@ export const walletSessions = pgTable(
 );
 
 // ════════════════════════════════════════════════════════════════
-// WALLET CHALLENGES (one-time nonces for replay protection)
-// ════════════════════════════════════════════════════════════════
-
-export const walletChallenges = pgTable(
-  "wallet_challenges",
-  {
-    id: uuid()
-      .primaryKey()
-      .$defaultFn(() => uuidv7()),
-    createdAt: timestamp().defaultNow().notNull(),
-
-    // Server-generated random nonce
-    nonce: text().notNull(),
-
-    // Challenge expiration (5 minutes)
-    expiresAt: timestamp().notNull(),
-  },
-  (t) => [index().on(t.expiresAt)]
-);
-
-// ════════════════════════════════════════════════════════════════
 // NOTES (Apple Notes / Notion-like)
 // ════════════════════════════════════════════════════════════════
 
@@ -228,7 +207,7 @@ export const notes = pgTable(
 );
 
 // ════════════════════════════════════════════════════════════════
-// NOTE MEMORY HIGHLIGHTS (MemWal blockchain integration)
+// NOTE MEMORY HIGHLIGHTS (Walrus Memory integration)
 // ════════════════════════════════════════════════════════════════
 
 export const memoryStatus = pgEnum("memory_status", [
@@ -277,7 +256,7 @@ export const noteMemoryHighlights = pgTable(
     entities: jsonb().$type<string[]>(), // ["person:Alice", "place:Paris", "event:Meeting"]
     relationships: jsonb().$type<EntityRelationship[]>(),
 
-    // MemWal blockchain metadata
+    // Walrus Memory metadata
     status: memoryStatus().default("preparing").notNull(),
     blobId: text(),           // Walrus blob ID (after upload)
     graphObjectId: text(),    // Nautilus graph object ID (after indexing)

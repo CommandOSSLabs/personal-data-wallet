@@ -1,8 +1,8 @@
 /**
- * memwal — Core Types
+ * Walrus Memory — Core Types
  *
  * Ed25519 delegate key based SDK that communicates with
- * the MemWal Rust server (TEE).
+ * the Walrus Memory Rust server (TEE).
  */
 
 // ============================================================
@@ -10,11 +10,14 @@
 // ============================================================
 
 export interface MemWalConfig {
-    /** Ed25519 private key (hex string). This is the delegate key from app.memwal.com */
-    key: string;
-    /** MemWalAccount object ID on Sui (ensures correct account when delegate key exists in multiple accounts) */
+    /**
+     * Ed25519 private key — the Walrus Memory delegate key. Accepts hex (with
+     * or without `0x`), a Sui `suiprivkey1...` bech32 string, or raw bytes.
+     */
+    key: string | Uint8Array;
+    /** Walrus Memory account object ID on Sui (ensures correct account when delegate key exists in multiple accounts) */
     accountId: string;
-    /** Server URL (default: http://localhost:8000) */
+    /** Server URL (default: https://relayer.memory.walrus.xyz) */
     serverUrl?: string;
     /** Default namespace for memory isolation (default: "default") */
     namespace?: string;
@@ -24,9 +27,28 @@ export interface MemWalConfig {
 // API Types
 // ============================================================
 
-/** Result from remember() */
+/** Result from remember() / rememberAsync() */
+export interface RememberAcceptedResult {
+    job_id: string;
+    status: string;
+}
+
+/** Status returned for an async remember job */
+export interface RememberJobStatus {
+    job_id: string;
+    status: "pending" | "running" | "uploaded" | "done" | "failed" | "not_found";
+    owner?: string;
+    namespace?: string;
+    blob_id?: string;
+    error?: string;
+}
+
+/** Result from rememberAndWait() / waitForRememberJob() */
 export interface RememberResult {
+    /** Stable server job_id used as the vector row id. */
     id: string;
+    /** Async job id returned by remember(). */
+    job_id?: string;
     blob_id: string;
     owner: string;
     namespace: string;
@@ -37,12 +59,208 @@ export interface RecallMemory {
     blob_id: string;
     text: string;
     distance: number;
+    /**
+     * RFC3339 write-time of the memory, as recorded by the relayer when the
+     * fact was stored. Lets a caller implement "newest wins" deterministically
+     * instead of re-ranking on a date parsed back out of `text` (WALM-383).
+     *
+     * This is the *write* time, not any event time the text itself describes.
+     *
+     * Optional because relayers older than this field omit it. Results are
+     * ranked by relevance, not recency, unless you ask for a recency
+     * ordering via `RecallOptions.sort`.
+     */
+    created_at?: string;
+}
+
+/**
+ * Token-budget metadata attached to a RecallResult when a `maxTokens` budget was
+ * requested. Lets callers/telemetry assert "this recall cost ≤ N tokens".
+ */
+export interface RecallTokenMeta {
+    /**
+     * Estimated token count of the RETURNED `results` payload (sum of per-hit
+     * estimates, after any truncation). This is the value a caller can assert a
+     * budget against, e.g. `meta.tokenEstimate <= maxTokens`. It is the
+     * post-truncation cost, not the pre-truncation total.
+     */
+    tokenEstimate: number;
+    /** True if any hit was dropped or shortened to fit the `maxTokens` budget. */
+    truncated: boolean;
 }
 
 /** Result from recall() */
 export interface RecallResult {
     results: RecallMemory[];
     total: number;
+    /**
+     * Present only when a `maxTokens` budget was supplied to recall(). Additive
+     * and optional — omitted for budget-less recalls, so existing callers are
+     * unaffected.
+     */
+    meta?: RecallTokenMeta;
+    /** Matches omitted because blob download or decrypt failed. Omitted when 0. */
+    dropped_count?: number;
+}
+
+/**
+ * How recall trims recalled memories to fit a `maxTokens` budget.
+ *
+ * - `high-relevance-only` (default): keep the lowest-distance hits whole, in
+ *   order, until the next hit would exceed the budget; drop the rest. No hit is
+ *   ever partially shown.
+ * - `per-hit-cap`: cap each hit's text to an equal share of the budget
+ *   (`floor(maxTokens / hitCount)`). Hits whose share rounds to zero (more hits
+ *   than budget tokens) are dropped rather than returned empty.
+ * - `drop-tail`: preserve order and keep whole hits from the front, then
+ *   truncate the single boundary hit that straddles the budget so the payload
+ *   fills to the end of the concatenated budget. The last kept hit may be a
+ *   shortened partial (this is what distinguishes it from `high-relevance-only`).
+ */
+export type TruncationStrategy = "high-relevance-only" | "per-hit-cap" | "drop-tail";
+
+/** Options for recall(). */
+export interface RecallOptions {
+    /** Max number of nearest memories to request from the relayer (default: 10). */
+    limit?: number;
+    /** Alias for limit, useful when describing top-K search behaviour. */
+    topK?: number;
+    /** Namespace override (default: config namespace or "default"). */
+    namespace?: string;
+    /** Drop memories whose distance is greater than or equal to this value. */
+    maxDistance?: number;
+    /**
+     * Client-side token budget for the returned payload. When set, recall trims
+     * the results (per `truncationStrategy`) so their estimated token count fits,
+     * and attaches `meta.tokenEstimate` / `meta.truncated`. Omit for the current
+     * (unbudgeted) behavior. Counting is an estimate — see `countTokens`.
+     */
+    maxTokens?: number;
+    /**
+     * Strategy used when `maxTokens` is set. Default: `high-relevance-only`.
+     * Ignored when `maxTokens` is not set.
+     */
+    truncationStrategy?: TruncationStrategy;
+    /**
+     * Custom exact token counter (e.g. a tiktoken binding). When omitted, a
+     * zero-dependency character-based approximation (~chars/4) is used. Only
+     * consulted when `maxTokens` is set.
+     */
+    countTokens?: (text: string) => number;
+    /**
+     * Composite-scoring weights applied by the relayer's ranker before results
+     * are returned.
+     *
+     * Omit for the default behaviour: pure semantic ranking by cosine
+     * distance, with no recency guarantee. Supply `recency` to blend
+     * write-time into the score.
+     *
+     * IMPORTANT — this re-ranks the candidates the vector search already
+     * returned; it does not widen the search. The relayer selects the cosine
+     * top-`limit` first and the ranker reorders only those, so a record that
+     * fell outside the window (because an older one matched your wording more
+     * literally) cannot be recovered by any weighting. Weighting also has to
+     * overcome the semantic gap to reorder: with the default 30-day half-life,
+     * two records days apart barely differ on the recency term.
+     *
+     * For newest-wins, use `sort: "recent"` instead. It over-fetches
+     * candidates server-side before ordering them by write-time.
+     */
+    scoringWeights?: ScoringWeights;
+    /**
+     * How the relayer orders results. Defaults to `"relevance"`.
+     *
+     * - `"relevance"` — semantic similarity only, the cosine order.
+     * - `"recent"` — newest-among-matches. The relayer over-fetches semantic
+     *   candidates, orders them by write-time descending, then truncates to
+     *   `limit`.
+     *
+     * Prefer this over `scoringWeights` for anything newest-wins. `sort`
+     * widens the candidate set; weights only re-rank the set that was already
+     * returned, so weights alone cannot surface a record that fell outside
+     * the window.
+     */
+    sort?: "relevance" | "recent";
+}
+
+/** Recommended object-style recall input — preferred over positional args. */
+export interface RecallParams extends RecallOptions {
+    /** Search query text. */
+    query: string;
+}
+
+/** Optional composite-scoring weights for recall ranking. */
+export interface ScoringWeights {
+    /** Weight applied to semantic similarity (`1.0 - distance`). Default: 1. */
+    semantic?: number;
+    /** Weight applied to recency decay. Default: 0. */
+    recency?: number;
+    /** Half-life for the recency term, in days. Default: 30. */
+    recencyHalfLifeDays?: number;
+    /** Weight applied to memory importance. Default: 0. */
+    importance?: number;
+}
+
+/** Result from rememberBulk() / rememberBulkAsync() */
+export interface RememberBulkAcceptedResult {
+    job_ids: string[];
+    total: number;
+    status: string;
+}
+
+/** Per-item status returned from the bulk status endpoint */
+export interface RememberBulkStatusItem {
+    job_id: string;
+    status: "pending" | "running" | "uploaded" | "done" | "failed" | "not_found";
+    blob_id?: string;
+    error?: string;
+}
+
+/** Result from getRememberBulkStatus() */
+export interface RememberBulkStatusResult {
+    results: RememberBulkStatusItem[];
+}
+
+/** One item in a bulk remember request */
+export interface RememberBulkItem {
+    /** The text to remember */
+    text: string;
+    /** Optional per-item namespace override (falls back to client default) */
+    namespace?: string;
+}
+
+/** Options for remember bulk polling behaviour */
+export interface RememberBulkOptions {
+    /** How often to poll each job_id (default: 1500ms) */
+    pollIntervalMs?: number;
+    /** Max total wait time before throwing (default: 120_000ms) */
+    timeoutMs?: number;
+}
+
+/** Per-item result returned from rememberBulkAndWait() / waitForRememberJobs() */
+export interface RememberBulkItemResult {
+    /** job_id returned by the server */
+    id: string;
+    /** Walrus blob_id once the job completes ("" if failed) */
+    blob_id: string;
+    /** Final status reported by the server: "done" | "failed" | "timeout" */
+    status: "done" | "failed" | "timeout";
+    /** Namespace the memory was stored under */
+    namespace: string;
+    /** Error message if status !== "done" */
+    error?: string;
+}
+
+/** Result from rememberBulkAndWait() / waitForRememberJobs() */
+export interface RememberBulkResult {
+    /** One result per input item, in the same order */
+    results: RememberBulkItemResult[];
+    /** Total items submitted */
+    total: number;
+    /** Count of items that reached status=done */
+    succeeded: number;
+    /** Count of items that failed or timed out */
+    failed: number;
 }
 
 /** Result from embed() */
@@ -50,24 +268,100 @@ export interface EmbedResult {
     vector: number[];
 }
 
-/** A single extracted fact */
+/** Options for analyze() / analyzeAndWait(). */
+export interface AnalyzeOptions {
+    /** Override the default namespace for this call. */
+    namespace?: string;
+    /**
+     * Optional valid-time timestamp for the analyzed input — when the
+     * conversation/event actually happened. When supplied, the server
+     * extractor uses it as a temporal anchor and resolves in-turn
+     * relative references ("last Friday", "yesterday") into absolute
+     * dates inside the resulting fact text (and the embedding) before
+     * encryption.
+     *
+     * Accepts a `Date` object (preferred) or an ISO-8601 / RFC-3339
+     * string. The wire format sent to the server is RFC-3339 UTC with
+     * a trailing `Z` (e.g. `"2023-05-25T17:50:00Z"`).
+     *
+     * Omit when no anchor is available — the server will not invent
+     * one (no `now()` fallback; silence is honest). The resolved date
+     * lives only inside the encrypted fact text + embedding; there is
+     * no server-readable metadata column for it (Architecture A).
+     */
+    occurredAt?: string | Date;
+}
+
+/** A fact extracted by analyze() and accepted for background storage. */
 export interface AnalyzedFact {
     text: string;
+    /** Stable job id/vector row id for this extracted fact. */
     id: string;
-    blob_id: string;
+    /** Polling id for this extracted fact. */
+    job_id?: string;
+    /** Walrus blob_id once the background job completes. */
+    blob_id?: string;
 }
 
 /** Result from analyze() */
 export interface AnalyzeResult {
+    job_ids: string[];
     facts: AnalyzedFact[];
-    total: number;
+    fact_count: number;
+    status: string;
+    owner: string;
+}
+
+/** Result from analyzeAndWait() */
+export interface AnalyzeWaitResult extends RememberBulkResult {
+    facts: AnalyzedFact[];
     owner: string;
 }
 
 /** Server health response */
-export interface HealthResult {
+export interface HealthResult extends Partial<RelayerVersionMetadata> {
     status: string;
+    /** Backward-compatible relayer package version alias. */
     version: string;
+    /** "production" or "benchmark" when returned by modern relayers. */
+    mode?: string;
+    /** False when writes are not ready; omit means the relayer did not report it. */
+    write_ready?: boolean;
+    prompt_versions?: {
+        extract: string;
+        ask: string;
+    };
+}
+
+/** Minimum SDK versions accepted by a relayer API contract. */
+export interface MinSupportedSdk {
+    typescript: string;
+    python: string;
+    mcp: string;
+}
+
+/** Public deprecation metadata returned by GET /version and GET /health. */
+export interface RelayerDeprecationNotice {
+    surface: string;
+    deprecatedSince: string;
+    removalApiVersion: string;
+    guidance: string;
+}
+
+/** Public build metadata returned by GET /version and GET /health. */
+export interface RelayerBuildMetadata {
+    commit?: string;
+    buildTimestamp?: string;
+}
+
+/** Runtime compatibility metadata returned by GET /version. */
+export interface RelayerVersionMetadata {
+    relayerVersion: string;
+    apiVersion: string;
+    minSupportedSdk: MinSupportedSdk;
+    featureFlags: Record<string, boolean>;
+    deprecations: RelayerDeprecationNotice[];
+    build: RelayerBuildMetadata;
 }
 
 // ============================================================
@@ -76,8 +370,8 @@ export interface HealthResult {
 
 /** Options for rememberManual() on MemWal class */
 export interface RememberManualOptions {
-    /** Walrus blob ID (user already uploaded encrypted data) */
-    blobId: string;
+    /** Base64-encoded SEAL-encrypted bytes. The relayer uploads them to Walrus. */
+    encryptedData: string;
     /** Embedding vector (user already generated) */
     vector: number[];
     /** Namespace (default: config namespace or "default") */
@@ -100,12 +394,55 @@ export interface RecallManualOptions {
     limit?: number;
     /** Namespace (default: config namespace or "default") */
     namespace?: string;
+    /** Optional composite-scoring weights applied before returning hits. */
+    scoringWeights?: ScoringWeights;
 }
 
 /** A single search hit — raw blobId + distance (no decrypted text) */
 export interface RecallManualHit {
     blob_id: string;
     distance: number;
+}
+
+/** One namespace in a `listNamespaces()` page. Mirrors the relayer wire shape. */
+export interface NamespaceSummary {
+    id: string;
+    name: string;
+    memory_count: number;
+    storage_used: number;
+    /**
+     * `MAX(updated_at)` across the namespace's memories — the same value the
+     * keyset cursor is built from, surfaced so callers can tell *what*
+     * changed rather than only that their watermark moved.
+     */
+    updated_at: string;
+}
+
+/** Result from listNamespaces() */
+export interface NamespacesResult {
+    namespaces: NamespaceSummary[];
+    /**
+     * Watermark to hand back as `cursor` on the next call. Populated on every
+     * page, including the last, so a caller that has finished syncing still
+     * has a checkpoint to poll from later.
+     */
+    next_cursor: string | null;
+    /**
+     * Authoritative "keep paginating" signal. Do NOT infer this from page
+     * length: the server silently clamps `limit`, so a caller asking for more
+     * than the cap gets exactly the cap back and would wrongly conclude it
+     * was done.
+     */
+    has_more: boolean;
+    snapshot_version: number;
+}
+
+/** Options for listNamespaces() */
+export interface ListNamespacesOptions {
+    /** Previous page's `next_cursor`, to continue a walk or poll incrementally. */
+    cursor?: string;
+    /** Page size. Server defaults to 100 and clamps to 500. */
+    limit?: number;
 }
 
 /** Result from restore() */
@@ -115,17 +452,48 @@ export interface RestoreResult {
     total: number;
     namespace: string;
     owner: string;
+    /**
+     * True when this restore is known-incomplete: more on-chain blobs were
+     * missing locally than `limit` allowed this call to restore, or the
+     * sidecar's owner-wide candidate fetch hit its cap *and* raising
+     * `limit` can still expand that fetch (`limit < 20`). Once the cap is
+     * saturated, truncation follows this call's missing-blob page, not
+     * on-chain `total`, so a fully restored namespace does not loop
+     * (WALM-431 / GH #762).
+     *
+     * `truncated=false` is not proof the sidecar saw every on-chain blob.
+     * Blobs beyond the owner-wide sidecar candidate cap can still be
+     * missing. Follow-up field: WALM-451 (`sourceCapped`).
+     *
+     * Relayers older than WALM-319 don't send this field at all; the SDK
+     * defaults it to `false` in that case rather than requiring it.
+     */
+    truncated: boolean;
 }
 
 // ============================================================
 // Full Client-Side Manual Flow — MemWalManual class
 // ============================================================
 
+/** Full @mysten/seal server config. Committee servers require aggregatorUrl. */
+export interface SealServerConfig {
+    /** On-chain SEAL key server or committee object ID */
+    objectId: string;
+    /** Server weight for threshold encryption. Defaults to 1. */
+    weight?: number;
+    /** Committee aggregator URL. Required for committee mode servers. */
+    aggregatorUrl?: string;
+    /** Optional API key header name for permissioned key servers */
+    apiKeyName?: string;
+    /** Optional API key value for permissioned key servers */
+    apiKey?: string;
+}
+
 /** Config for MemWalManual (full client-side: SEAL + Walrus + embedding) */
 export interface MemWalManualConfig {
-    /** Ed25519 delegate private key (hex) for server auth */
-    key: string;
-    /** Server URL (default: http://localhost:8000) */
+    /** Ed25519 delegate private key (hex, `suiprivkey1...`, or Uint8Array) for server auth */
+    key: string | Uint8Array;
+    /** Server URL (default: https://relayer.memory.walrus.xyz) */
     serverUrl?: string;
     /**
      * Sui private key (bech32 suiprivkey1...) for SEAL + Walrus signing.
@@ -150,18 +518,33 @@ export interface MemWalManualConfig {
     embeddingApiBase?: string;
     /** Embedding model name (default: text-embedding-3-small) */
     embeddingModel?: string;
-    /** MemWal contract package ID on Sui */
+    /** Immutable first-published package ID used by SEAL encryption and SessionKey */
     packageId: string;
-    /** MemWalAccount object ID (for SEAL seal_approve) */
+    /** Current package containing account::seal_approve (defaults to packageId) */
+    sealPolicyPackageId?: string;
+    /** Walrus Memory account object ID (for SEAL seal_approve) */
     accountId: string;
+    /** AccountRegistry shared object ID passed to SEAL seal_approve */
+    registryId: string;
     /** Sui network (default: mainnet) */
     suiNetwork?: "testnet" | "mainnet";
     /**
-     * Custom SEAL key server object IDs (overrides built-in defaults per network).
+     * Full SEAL server configs, including committee aggregators.
+     * Takes priority over legacy sealKeyServers when provided.
+     */
+    sealServerConfigs?: SealServerConfig[];
+    /**
+     * Legacy custom SEAL independent key server object IDs.
      * Array of on-chain object IDs, e.g. ["0x..."].
-     * If omitted, uses built-in defaults for the selected suiNetwork.
+     * If omitted, uses sealServerConfigs or built-in defaults for the selected suiNetwork.
      */
     sealKeyServers?: string[];
+    /**
+     * SEAL threshold — number of key server shares required for encrypt/decrypt.
+     * Must be ≤ the total configured SEAL server weight.
+     * Default: 2, capped to the total configured SEAL server weight.
+     */
+    sealThreshold?: number;
     /** Walrus storage epochs (default: 50) */
     walrusEpochs?: number;
     /** Walrus aggregator URL for direct blob downloads (default: mainnet aggregator) */
@@ -179,14 +562,28 @@ export interface MemWalManualConfig {
 export interface WalletSigner {
     /** Wallet address (Sui address, 0x...) */
     address: string;
-    /** Sign and execute a transaction, returns the digest */
+    /** Sign and execute a transaction, returning either the legacy or v2 result shape */
     signAndExecuteTransaction: (input: {
         transaction: any;
-    }) => Promise<{ digest: string }>;
+    }) => Promise<
+        | { digest: string }
+        | { $kind: "Transaction"; Transaction: { digest: string }; FailedTransaction?: never }
+        | { $kind: "FailedTransaction"; Transaction?: never; FailedTransaction: { digest: string } }
+    >;
     /** Sign a personal message (for SEAL SessionKey) */
     signPersonalMessage: (input: {
         message: Uint8Array;
     }) => Promise<{ signature: string }>;
+}
+
+/** Options for MemWalManual.recallManual(). */
+export interface MemWalManualRecallOptions {
+    /** Max number of results (default: 10). */
+    limit?: number;
+    /** Namespace (default: config namespace or "default"). */
+    namespace?: string;
+    /** Optional composite-scoring weights applied before returning hits. */
+    scoringWeights?: ScoringWeights;
 }
 
 /** A recalled memory with decrypted text (from MemWalManual.recallManual) */
@@ -208,7 +605,7 @@ export interface RecallManualResult {
 
 /** Base options for on-chain account transactions */
 interface AccountTxOpts {
-    /** MemWal contract package ID on Sui */
+    /** Walrus Memory contract package ID on Sui */
     packageId: string;
     /**
      * Sui private key (bech32 suiprivkey1...) for signing.
@@ -237,7 +634,7 @@ export interface CreateAccountOpts extends AccountTxOpts {
 
 /** Result from createAccount() */
 export interface CreateAccountResult {
-    /** Created MemWalAccount object ID */
+    /** Created Walrus Memory account object ID */
     accountId: string;
     /** Owner Sui address */
     owner: string;
@@ -247,8 +644,10 @@ export interface CreateAccountResult {
 
 /** Options for addDelegateKey() */
 export interface AddDelegateKeyOpts extends AccountTxOpts {
-    /** MemWalAccount object ID */
+    /** Walrus Memory account object ID */
     accountId: string;
+    /** AccountRegistry shared object ID */
+    registryId: string;
     /** Ed25519 public key (32 bytes Uint8Array or hex string) */
     publicKey: Uint8Array | string;
     /** Human-readable label (e.g. "MacBook Pro", "Production Server") */
@@ -267,8 +666,10 @@ export interface AddDelegateKeyResult {
 
 /** Options for removeDelegateKey() */
 export interface RemoveDelegateKeyOpts extends AccountTxOpts {
-    /** MemWalAccount object ID */
+    /** Walrus Memory account object ID */
     accountId: string;
+    /** AccountRegistry shared object ID */
+    registryId: string;
     /** Ed25519 public key to remove (32 bytes Uint8Array or hex string) */
     publicKey: Uint8Array | string;
 }

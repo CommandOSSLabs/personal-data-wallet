@@ -27,20 +27,33 @@ export function useAuth() {
   // Wallet disconnect (clears dapp-kit autoConnect state)
   const { mutateAsync: disconnectWallet } = useDisconnectWallet();
 
+  const utils = trpc.useUtils();
+
   // tRPC mutations
   const connectEnokiMutation = trpc.auth.connectEnoki.useMutation();
   const connectDelegateKeyMutation = trpc.auth.connectDelegateKey.useMutation();
   const logoutMutation = trpc.auth.logout.useMutation();
 
-  // Session validation query
-  const sessionQuery = trpc.auth.getSession.useQuery(
-    { sessionId: session?.sessionId || "" },
-    {
-      enabled: !!session?.sessionId,
-      retry: false,
-      refetchOnWindowFocus: false,
-      refetchOnMount: true,
-    }
+  // Session validation query. It takes no input: the server reads the session id
+  // from the x-session-id header that TRPCProvider attaches, so the cache key no
+  // longer varies per session and every session change has to reset it — see
+  // resetSessionQuery below.
+  const sessionQuery = trpc.auth.getSession.useQuery(undefined, {
+    enabled: !!session?.sessionId,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnMount: true,
+  });
+
+  /**
+   * Drop the cached session lookup so a result fetched for one session is never
+   * read as the answer for the next one. Without this a cached null (a session
+   * that had expired) would make the effect below clear the session that was
+   * just established.
+   */
+  const resetSessionQuery = useCallback(
+    () => utils.auth.getSession.reset(),
+    [utils]
   );
 
   /** Initialize authentication from persisted session. */
@@ -63,18 +76,23 @@ export function useAuth() {
 
   /** Connect with Enoki zkLogin (two-phase: check returning user, then register). */
   const connectEnoki = useCallback(
-    async (params: { suiAddress: string; privateKey?: string; accountId?: string }) => {
+    async (params: {
+      suiAddress: string;
+      challengeId: string;
+      signature: string;
+      privateKey?: string;
+      accountId?: string;
+    }) => {
       try {
-        setLoading(true);
         const result = await connectEnokiMutation.mutateAsync(params);
 
         if ("needsSetup" in result && result.needsSetup) {
-          setLoading(false);
           return result;
         }
 
         if (result.sessionData) {
           setSession(result.sessionData);
+          await resetSessionQuery();
         }
 
         if (result.user) {
@@ -88,22 +106,21 @@ export function useAuth() {
 
         return result;
       } catch (error) {
-        setLoading(false);
         console.error("Enoki connection failed:", error);
         throw error;
       }
     },
-    [connectEnokiMutation, setSession, setAuthenticated, setLoading]
+    [connectEnokiMutation, setSession, setAuthenticated, resetSessionQuery]
   );
 
   /** Connect with delegate key (manual key + account ID). */
   const connectDelegateKey = useCallback(
     async (params: { privateKey: string; accountId: string }) => {
       try {
-        setLoading(true);
         const result = await connectDelegateKeyMutation.mutateAsync(params);
 
         setSession(result.sessionData);
+        await resetSessionQuery();
 
         setAuthenticated({
           isAuthenticated: true,
@@ -114,19 +131,24 @@ export function useAuth() {
 
         return result;
       } catch (error) {
-        setLoading(false);
         console.error("Delegate key connection failed:", error);
         throw error;
       }
     },
-    [connectDelegateKeyMutation, setSession, setAuthenticated, setLoading]
+    [
+      connectDelegateKeyMutation,
+      setSession,
+      setAuthenticated,
+      resetSessionQuery,
+    ]
   );
 
   /** Logout — clear session, auth state, and disconnect wallet (prevents autoConnect). */
   const logout = useCallback(async () => {
     try {
       if (session?.sessionId) {
-        await logoutMutation.mutateAsync({ sessionId: session.sessionId });
+        // No argument: the server ends the session behind the request header.
+        await logoutMutation.mutateAsync();
       }
     } catch (error) {
       console.error("Logout failed:", error);
@@ -138,7 +160,14 @@ export function useAuth() {
       // Wallet may already be disconnected
     }
     clearAuth();
-  }, [session, logoutMutation, disconnectWallet, clearAuth]);
+    await resetSessionQuery();
+  }, [
+    session,
+    logoutMutation,
+    disconnectWallet,
+    clearAuth,
+    resetSessionQuery,
+  ]);
 
   return {
     ...auth,

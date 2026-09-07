@@ -1,15 +1,18 @@
-# MemWal
+# Walrus Memory
 
-Privacy-first AI memory layer for storing encrypted memories on Walrus and
-retrieving them with semantic search.
+Portable agent memory — take your agent's memory anywhere.
 
-> MemWal is currently in beta and actively evolving. While fully usable today, we continue to refine the developer experience and operational guidance. We welcome feedback from early builders as we continue to improve the product.
+Walrus Memory enables AI agents to operate reliably across apps and sessions,
+without losing context. Portable, verifiable, and fully controlled by you, it's
+the memory layer that lets agents handle complex workflows and coordinate using
+data they can trust.
+
+> Walrus Memory is currently in beta and actively evolving. While fully usable today, we continue to refine the developer experience and operational guidance. We welcome feedback from early builders as we continue to improve the product.
 
 ## For AI Agents
 
 - **Single-file guide**: Read [`SKILL.md`](SKILL.md) for a complete integration reference (install, configure, API surface, troubleshooting)
-- **LLM-friendly docs**: [`llms.txt`](https://docs.memwal.ai/llms.txt) — structured overview following the [llmstxt.org](https://llmstxt.org) standard
-- **Full context**: [`llms-full.txt`](https://docs.memwal.ai/llms-full.txt) — expanded version with inlined page content
+- **LLM-friendly docs**: [`llms.txt`](https://docs.wal.app/walrus-memory/llms.txt) — structured overview following the [llmstxt.org](https://llmstxt.org) standard
 
 ## Install
 
@@ -30,22 +33,23 @@ import { MemWal } from "@mysten-incubation/memwal";
 
 const memwal = MemWal.create({
   key: "your-delegate-key-hex",
-  accountId: "your-memwal-account-id",
+  accountId: "your-walrus-memory-account-id",
   serverUrl: "https://your-relayer-url.com",
   namespace: "demo",
 });
 
-await memwal.remember("User prefers dark mode and uses TypeScript.");
-const memories = await memwal.recall("What are the user's preferences?");
+const job = await memwal.remember("User prefers dark mode and uses TypeScript.");
+await memwal.waitForRememberJob(job.job_id);
+const memories = await memwal.recall({ query: "What are the user's preferences?" });
 await memwal.restore("demo");
 ```
 
 ## Documentation
 
-- Full docs at [docs.memwal.ai](https://docs.memwal.ai)
+- Full docs at [memory.walrus.xyz](https://memory.walrus.xyz)
 - Docs source of truth: `docs/`
 - Docs site entry points:
-  - [What is MemWal?](docs/getting-started/what-is-memwal.md)
+  - [What is Walrus Memory?](docs/getting-started/what-is-memwal.md)
   - [Quick Start](docs/getting-started/quick-start.md)
   - [SDK Quick Start](docs/sdk/quick-start.md)
   - [Relayer Overview](docs/relayer/overview.md)
@@ -53,7 +57,7 @@ await memwal.restore("demo");
 
 ## Contributing
 
-We want to be explicit about this while MemWal is in beta: feedback, bug reports, docs fixes,
+We want to be explicit about this while Walrus Memory is in beta: feedback, bug reports, docs fixes,
 examples, and implementation contributions are all welcome.
 
 If you spot rough edges or missing guidance, please open an issue or send a PR.
@@ -95,7 +99,7 @@ For the full step-by-step setup guide, see:
 
 ## OpenClaw / NemoClaw Plugin
 
-[`@mysten-incubation/oc-memwal`](packages/openclaw-memory-memwal) — a memory plugin for [OpenClaw](https://openclaw.ai) agents. It gives OpenClaw persistent, encrypted memory via MemWal with automatic recall and capture hooks.
+[`@mysten-incubation/oc-memwal`](packages/openclaw-memory-memwal) — a memory plugin for [OpenClaw](https://openclaw.ai) agents. It gives OpenClaw agents portable, verifiable memory through Walrus Memory with automatic recall and capture hooks.
 
 ```bash
 openclaw plugins install @mysten-incubation/oc-memwal

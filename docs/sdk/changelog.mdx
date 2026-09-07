@@ -1,0 +1,199 @@
+---
+title: "Changelog"
+description: >-
+  Release history for the MemWal TypeScript SDK, covering all versions from the initial release through the latest updates including bulk remember, async jobs, compatibility checks, and security enhancements.
+keywords:
+  - Walrus Memory
+  - MemWal
+  - changelog
+  - release history
+  - SDK versions
+  - updates
+goal:
+  description: Track breaking changes, new methods, and deprecations across SDK releases to plan safe version upgrades.
+  requires:
+    - has_frontmatter:
+        - title
+        - description
+        - keywords
+      label: Has required frontmatter fields
+    - min_words: 300
+      label: Needs more content depth
+    - has_questions: true
+      label: Needs questions for AI search visibility
+    - has_answer: true
+      label: Needs answer summary for AI citation
+questions:
+  - What changed in the latest version of the MemWal SDK?
+  - When was bulk remember added to the Walrus Memory SDK?
+  - What security improvements have been made to the MemWal SDK?
+answer: >-
+  The latest TypeScript SDK release is 0.1.6. It adds optional `created_at` on `recall()` results, plus `sort` and `scoringWeights` on `RecallOptions`. HTTP 503 from the relayer is reported as a retryable upstream outage instead of a sign-in failure. 0.1.5 added `dropped_count` on recall results and `write_ready` on health, switched `rememberManual` to sending `encryptedData`, and hardened hex decoding and error redaction.
+---
+
+## 0.1.6
+
+This release adds write-time on recall results, lets callers sort by recency or pass scoring weights, and stops mapping relayer 503s to a sign-in failure.
+
+### Added
+
+- `recall()` results include optional `created_at` (RFC3339 write-time of the stored fact).
+- `RecallOptions` accepts `sort: "relevance" | "recent"` and `scoringWeights`. `sort: "recent"` over-fetches semantic candidates (5x `limit`, capped at 50), orders them by write-time descending, then truncates to `limit`.
+
+### Fixed
+
+- HTTP 503 from the relayer is reported as a retryable upstream outage, not a sign-in failure. Empty-body 401s still point at `memwal_login`.
+
+## 0.1.5
+
+This release surfaces partial recall results and write-path health, and aligns manual remember with the relayer contract.
+
+### Added
+
+- `recall()` results include `dropped_count` when the relayer omitted matches that failed to download or decrypt.
+- `health()` surfaces optional `write_ready` when the relayer reports write-path sidecar liveness.
+
+### Changed
+
+- `rememberManual` now sends `encryptedData` (base64 SEAL ciphertext) instead of a pre-uploaded `blobId`, matching `POST /api/remember/manual`.
+
+### Fixed
+
+- Manual recall decodes SEAL object ids with `hexToBytes` instead of an unguarded `parseInt` / `.match!` path that could coerce `NaN` to `0` or throw on empty input.
+- HTTP error messages and remember-job error strings no longer forward `localhost` / `127.0.0.1` URLs to callers.
+
+## 0.1.4
+
+This release points empty-body 401s at `memwal_login` instead of `<no message>`.
+
+### Fixed
+
+- Empty-body 401s now tell first-time MCP callers to run `memwal_login` instead of showing `<no message>`. Credential 401s still point at the AUTH_REJECTED troubleshooting guide.
+
+## 0.1.3
+
+### Added
+
+- Added client-side token estimation and recall token budgets with configurable truncation strategies.
+
+### Fixed
+
+- Updated the default SDK relayer URL to `https://relayer.memory.walrus.xyz`.
+
+## 0.1.2
+
+### Added
+
+- Added deterministic offline mock clients for credential-free tests.
+- Added idempotency keys to collapse retries onto one paid remember job.
+
+### Fixed
+
+- Isolated foreign manual-recall blobs and encoded large encrypted payloads safely.
+- Added Zod 3 and Zod 4 peer compatibility.
+
+## 0.1.1
+
+### Added
+
+- Added `flush()` for pending `withMemWal` auto-saves.
+- Added `truncated` to restore results for incomplete recovery.
+
+### Fixed
+
+- Linked `AUTH_REJECTED` errors to troubleshooting guidance.
+
+## 0.1.0
+
+### Added
+
+- Added sponsor authorization helpers for sponsored transaction flows.
+- Added migration-aware account/manual configuration, including registry and current Sui transaction result support.
+
+### Security
+
+- Recalled AI memory is now nonce-delimited, explicitly untrusted data rather than content injected directly into the system role.
+
+### Fixed
+
+- Improved account transaction result handling and failure diagnostics across legacy and current Sui response shapes.
+
+## 0.0.7
+
+### Patch Changes
+
+- Added optional `occurredAt` to `analyze()` and `analyzeAndWait()` for temporal anchoring of extracted facts.
+
+## 0.0.6
+
+### Added
+
+- Added `RecallParams` for object-style `recall(...)` calls.
+
+### Changed
+
+- Marked the positional `recall(...)` overload as deprecated in favor of `recall({ query, limit, namespace })`.
+- Documented `restore()` response fields, default limit, pagination behavior, and performance expectations.
+
+## 0.0.5
+
+### Added
+
+- Added relayer compatibility metadata checks before protected requests.
+- Added `compatibility()` and exported compatibility types/errors so callers can inspect SDK/relayer support explicitly.
+- Added `RecallOptions` for `topK`, namespace override, and `maxDistance`.
+
+### Changed
+
+- Prefer Sui gRPC for SEAL sessions, with JSON-RPC fallback.
+- Updated docs/examples for `MEMWAL_PRIVATE_KEY` and hosted relayer defaults.
+
+### Fixed
+
+- Made `401` relayer errors more actionable.
+
+## 0.0.4
+
+### Added
+
+- Added `getRememberStatus(jobId)` so clients can poll and display the full async remember state machine.
+- Added `SealServerConfig` and `sealServerConfigs` for manual-mode SEAL committee aggregator configuration.
+
+### Changed
+
+- Manual mode now normalizes full SEAL server configs, validates optional API key pairs, and caps the default threshold to configured server weight.
+- Manual mode keeps testnet defaults on the legacy independent key servers for compatibility with hosted testnet relayer data.
+
+## 0.0.3
+
+### Changed
+
+- Updated `remember()` for the relayer's async `/api/remember` flow. It now returns the accepted job payload immediately.
+- Added `rememberAsync()`, `waitForRememberJob()`, and `rememberAndWait()` for callers that need the final `blob_id`.
+- Added bulk remember helpers: `rememberBulk()`, `rememberBulkAsync()`, `waitForRememberJobs()`, and `rememberBulkAndWait()`.
+- Updated `analyze()` for async fact storage and added `analyzeAndWait()`.
+
+### Compatibility
+
+- `recall()` and `restore()` remain wire-compatible with the existing relayer responses.
+- The SDK continues to use `x-seal-session` for relayer-mode decrypt credentials.
+
+## 0.0.2
+
+### Security
+
+- Added per-request `x-nonce` signing to block replay within the timestamp window.
+- Added `x-account-id` to the canonical signed message so account hints cannot be rebound in transit.
+- Replaced relayer-mode `x-delegate-key` transport with ephemeral `x-seal-session`; manual-mode requests no longer send delegate private key material.
+- SDK versions that do not send `x-nonce` are no longer supported by the server and receive `426 Upgrade Required`.
+
+## 0.0.1
+
+### Initial Release
+
+- `MemWal` default client — relayer-handled embedding, SEAL encryption, Walrus upload, vector search
+- `MemWalManual` manual client — client-side embedding and SEAL operations
+- `withMemWal` Vercel AI SDK middleware — automatic memory recall and save
+- Account management utilities — `createAccount`, `addDelegateKey`, `removeDelegateKey`, `generateDelegateKey`
+- Ed25519 delegate key authentication
+- Namespace-scoped memory isolation

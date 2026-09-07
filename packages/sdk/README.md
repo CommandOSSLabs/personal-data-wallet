@@ -1,12 +1,12 @@
 # @mysten-incubation/memwal
 
-Privacy-first AI memory SDK for storing encrypted memories on Walrus and retrieving them with semantic search.
+Walrus Memory SDK for storing encrypted AI memories on Walrus and retrieving them with semantic search.
 
-> MemWal is currently in beta and actively evolving. While fully usable today, we continue to refine the developer experience and operational guidance. We welcome feedback from early builders as we continue to improve the product.
+> Walrus Memory is currently in beta and actively evolving. While fully usable today, we continue to refine the developer experience and operational guidance. We welcome feedback from early builders as we continue to improve the product.
 
 ## Documentation
 
-For full documentation, visit [docs.memwal.ai](https://docs.memwal.ai).
+For full documentation, visit [memory.walrus.xyz](https://memory.walrus.xyz).
 
 ## Install
 
@@ -20,30 +20,66 @@ Peer dependencies (install as needed):
 pnpm add @mysten/sui @mysten/seal @mysten/walrus ai zod
 ```
 
+### Version compatibility
+
+`@mysten/seal` and `@mysten/walrus` must both resolve to versions that accept the same `@mysten/sui` major. Known-good matrix:
+
+| Package | Version |
+| --- | --- |
+| `@mysten/sui` | `^2.16.2` |
+| `@mysten/seal` | `^1.1.3` |
+| `@mysten/walrus` | `^1.1.7` |
+
+`@mysten/walrus@0.x` bundles `@mysten/sui@1.x` and cannot coexist with `@mysten/seal@1.x`, which requires `@mysten/sui@^2.x`. If `npm install` fails with `ERESOLVE` mentioning `@mysten/sui@^1.x`, upgrade `@mysten/walrus` to `^1.1.7`, refresh your lockfile, and run `npm why @mysten/sui` to find any remaining dependency that pins sui v1.
+
 ## Quick Start
 
 ```ts
 import { MemWal } from "@mysten-incubation/memwal";
 
 const memwal = MemWal.create({
-  key: "your-delegate-key-hex",
-  accountId: "your-memwal-account-id",
-  serverUrl: "https://your-relayer-url.com",
+  key: process.env.MEMWAL_PRIVATE_KEY!,
+  accountId: process.env.MEMWAL_ACCOUNT_ID!,
+  serverUrl: process.env.MEMWAL_SERVER_URL ?? "https://relayer.memory.walrus.xyz",
   namespace: "demo",
 });
 
-await memwal.remember("User prefers dark mode and uses TypeScript.");
-const memories = await memwal.recall("What are the user's preferences?");
+await memwal.rememberAndWait(
+  "User prefers dark mode and uses TypeScript.",
+  undefined,
+  { timeoutMs: 30_000 },
+);
+const memories = await memwal.recall({
+  query: "What are the user's preferences?",
+  topK: 10,
+  maxDistance: 0.7,
+});
 await memwal.restore("demo");
 ```
 
 If you are self-hosting the relayer and do not have an account ID yet, see [Self-Hosting](../../docs/relayer/self-hosting.md) for the account creation and delegate key setup flow.
 
+## Offline tests and CI
+
+`MemWalMock` implements the core async memory API entirely in memory. It requires no key, account, relayer, chain, or paid storage and uses deterministic token-overlap ranking.
+
+```ts
+import { MemWalMock } from "@mysten-incubation/memwal";
+
+const memwal = MemWalMock.create({ namespace: "test-user" });
+await memwal.rememberAndWait("The user prefers dark mode");
+
+const result = await memwal.recall({ query: "display preference" });
+expect(result.results[0].text).toContain("dark mode");
+```
+
+The mock supports remember/job polling, bulk remember, recall, analyze, embed, health, restore, `forget(blobId)`, and `clear(namespace?)`. For deterministic behavior, `analyze` stores its full input as one fact instead of invoking an LLM extractor. Its simple relevance score is for application tests, not production search-quality evaluation.
+
 ## Exports
 
 | Entry | Description |
 |---|---|
-| `@mysten-incubation/memwal` | Default client (`MemWal`). The relayer handles embedding, encryption, Walrus upload/download, retrieval, and restore. |
+| `@mysten-incubation/memwal` | Default client (`MemWal`) and offline test client (`MemWalMock`). The production client delegates embedding, encryption, storage, retrieval, and restore to the relayer. |
 | `@mysten-incubation/memwal/manual` | Manual client flow (`MemWalManual`). You handle embedding calls and local SEAL operations. The relayer still handles upload relay, registration, search, and restore. |
 | `@mysten-incubation/memwal/ai` | Vercel AI SDK integration - wraps `MemWal` as middleware for use with `streamText`, `generateText`, etc. |
 

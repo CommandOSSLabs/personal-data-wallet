@@ -42,6 +42,25 @@ export function escapeForPrompt(text: string): string {
 }
 
 /**
+ * Map pgvector cosine distance `[0, 2]` to similarity in `[0, 1]`.
+ * Non-finite values clamp to 0 so a bad hit cannot print negative %.
+ */
+export function cosineSimilarity(distance: number): number {
+  if (!Number.isFinite(distance)) return 0;
+  return Math.min(1, Math.max(0, 1 - distance));
+}
+
+/** Integer 0–100 relevance for prompt display. */
+export function relevancePercent(distance: number): number {
+  return Math.round(cosineSimilarity(distance) * 100);
+}
+
+/** Two-decimal 0–1 relevance for tool/CLI details. */
+export function relevanceRatio(distance: number): number {
+  return Math.round(cosineSimilarity(distance) * 100) / 100;
+}
+
+/**
  * Format recalled memories for prompt injection with security warning.
  *
  * Wraps memories in `<memwal-memories>` tags with an instruction header
@@ -134,6 +153,45 @@ export function toolError(message: string, err: unknown) {
  * @returns Result of `fn` on first success
  * @throws Last error if all attempts fail
  */
+/**
+ * Race an async operation against a deadline.
+ *
+ * SDK coverage is uneven: `recall()` aborts itself after 15s, but `analyze()`
+ * goes through `signedRequest` with no signal, and the compatibility preflight
+ * (`GET /version`, falling back to `/health`) that runs ahead of every
+ * protected request is unguarded. So a relayer that accepts the socket and then
+ * goes silent stalls in the preflight before `recall()`'s own abort can apply,
+ * and blocks the agent turn. An unreachable host fails fast at DNS; a hung one
+ * does not. This bounds the whole call regardless of which leg stalls.
+ *
+ * @param fn - Async function to execute
+ * @param ms - Deadline in milliseconds
+ * @param label - Operation name, used in the timeout error message
+ * @returns Result of `fn` if it settles before the deadline
+ * @throws {Error} `<label> timed out after <ms>ms` if the deadline passes first
+ */
+export async function withTimeout<T>(
+  fn: () => Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} timed out after ${ms}ms`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    // Always clear, or a pending timer keeps the process alive after success
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export async function withRetry<T>(
   fn: () => Promise<T>,
   retries: number = DEFAULT_RETRY_COUNT,

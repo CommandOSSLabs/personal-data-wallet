@@ -102,7 +102,7 @@ export function DocumentPreview({
   }
 
   return (
-    <div className="relative w-full max-w-[450px] cursor-pointer">
+    <div className="relative w-full max-w-[450px] cursor-pointer" data-testid="document-preview">
       <HitboxLayer
         hitboxRef={hitboxRef}
         result={result}
@@ -148,7 +148,7 @@ const PureHitboxLayer = ({
   result,
   setArtifact,
 }: {
-  hitboxRef: React.RefObject<HTMLDivElement>;
+  hitboxRef: React.RefObject<HTMLDivElement | null>;
   result: any;
   setArtifact: (
     updaterFn: UIArtifact | ((currentArtifact: UIArtifact) => UIArtifact)

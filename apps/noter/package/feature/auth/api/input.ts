@@ -8,63 +8,21 @@
  */
 
 import { z } from "zod";
-import {
-  uuidv7Schema,
-  idInputSchema,
-  userInsertSchema,
-  walletSessionInsertSchema,
-} from "@/shared/db/type";
+import { walletSessionInsertSchema } from "@/shared/db/type";
+
+// Session id is deliberately absent here: getSession and logout take it from the
+// x-session-id header via the tRPC context, so it can never be supplied as input.
 
 // ═══════════════════════════════════════════════════════════════
-// OAuth Flow Inputs
+// Shared Field Schemas
 // ═══════════════════════════════════════════════════════════════
 
-/**
- * Input for initiating OAuth login flow
- * Derives provider from users table, adds flow-specific redirectUri
- */
-export const initiateLoginInput = userInsertSchema
-  .pick({ provider: true })
-  .extend({
-    provider: z.enum(["google"]), // Only Google supported for now (subset of DB enum)
-    redirectUri: z.string().url().optional(), // Flow-specific field
-  });
-
-export type InitiateLoginInput = z.infer<typeof initiateLoginInput>;
-
-/**
- * Input for completing OAuth login (callback handler)
- */
-export const completeLoginInput = z.object({
-  jwt: z.string().min(1), // ID token from OAuth provider
-  sessionId: uuidv7Schema, // Session ID from initiate flow
-});
-
-export type CompleteLoginInput = z.infer<typeof completeLoginInput>;
-
-// ═══════════════════════════════════════════════════════════════
-// Session Management Inputs
-// ═══════════════════════════════════════════════════════════════
-
-/**
- * Input for validating existing session
- * Uses common idInputSchema pattern, aliased as sessionId
- */
-export const validateSessionInput = z.object({
-  sessionId: uuidv7Schema, // Same as idInputSchema.shape.id
-});
-
-export type ValidateSessionInput = z.infer<typeof validateSessionInput>;
-
-/**
- * Input for refreshing ZK proof
- */
-export const refreshProofInput = z.object({
-  sessionId: uuidv7Schema,
-  jwt: z.string().min(1), // Fresh JWT token
-});
-
-export type RefreshProofInput = z.infer<typeof refreshProofInput>;
+// Canonical Sui address: 0x + 64 hex. Reject malformed input at the boundary so
+// it never reaches normalizeSuiAddress (which would silently left-pad garbage
+// into a valid-looking-but-wrong address) or a DB lookup.
+export const suiAddressSchema = z
+  .string()
+  .regex(/^0x[0-9a-f]{64}$/i, "Invalid Sui address");
 
 // ═══════════════════════════════════════════════════════════════
 // Wallet Auth Inputs
@@ -73,13 +31,19 @@ export type RefreshProofInput = z.infer<typeof refreshProofInput>;
 /**
  * Input for wallet authentication
  * Derives field types from walletSessionInsertSchema
- * Uses client-friendly names (address/message instead of walletAddress/signedMessage)
+ * Uses client-friendly names (address instead of walletAddress)
+ *
+ * The caller does NOT supply the message that was signed: it proves ownership of
+ * `address` by signing a server-issued single-use challenge (issueWalletChallenge)
+ * and returning that challenge's id. Accepting a caller-chosen message would let
+ * anyone replay one captured {message, signature, address} triple into an
+ * unlimited number of 24-hour sessions.
  */
 export const connectWalletInput = z.object({
   walletType: walletSessionInsertSchema.shape.walletType.pipe(z.enum(["slush"])), // Subset validation
-  address: walletSessionInsertSchema.shape.walletAddress, // Maps to walletAddress in DB
-  signature: walletSessionInsertSchema.shape.signature,
-  challengeId: uuidv7Schema, // Server-issued challenge ID (replaces client message)
+  address: suiAddressSchema, // Maps to walletAddress in DB
+  challengeId: z.string().min(1),
+  signature: z.string().min(1),
 });
 
 export type ConnectWalletInput = z.infer<typeof connectWalletInput>;

@@ -1,0 +1,1691 @@
+"""
+Walrus Memory — SDK Client
+
+Ed25519 delegate key based client that communicates with the Walrus Memory
+Rust server (TEE). All data processing (encryption, embedding, Walrus)
+happens server-side -- the SDK just signs requests and sends text.
+
+The SDK only needs a single Ed25519 private key (the "delegate key").
+The server derives the owner address from the public key via onchain
+lookup in MemWalAccount.delegate_keys.
+
+Example::
+
+    from memwal import MemWal
+
+    memwal = MemWal.create(
+        key="abcdef...",
+        account_id="0x...",
+    )
+
+    # Async usage
+    result = await memwal.remember("I'm allergic to peanuts")
+    matches = await memwal.recall(RecallParams(query="food allergies"))
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+import logging
+import random
+import re
+import time
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
+from urllib.parse import ParseResult, urlparse
+
+import httpx
+import nacl.signing
+
+from .compatibility import compatibility_error
+from .types import (
+    AnalyzedFact,
+    AnalyzeResult,
+    AnalyzeWaitResult,
+    AskMemory,
+    AskResult,
+    EmbedResult,
+    HealthResult,
+    MemWalConfig,
+    RecallManualHit,
+    RecallManualOptions,
+    RecallManualResult,
+    RecallMemory,
+    RecallParams,
+    RecallResult,
+    RememberAcceptedResult,
+    RememberBulkAcceptedResult,
+    RememberBulkItem,
+    RememberBulkItemResult,
+    RememberBulkOptions,
+    RememberBulkResult,
+    RememberBulkStatusItem,
+    RememberBulkStatusResult,
+    RememberManualOptions,
+    RememberManualResult,
+    RememberResult,
+    RestoreResult,
+)
+from .utils import (
+    build_seal_session_personal_message,
+    build_signature_message,
+    build_signing_key,
+    bytes_to_hex,
+    delegate_key_to_sui_address,
+    encode_sui_private_key,
+    normalize_private_key,
+    sha256_hex,
+    sign_message,
+    sign_sui_personal_message,
+)
+
+T = TypeVar("T")
+SEAL_SESSION_TTL_MIN = 5
+
+# Networks with a public Sui GraphQL read endpoint (https://graphql.<network>.sui.io).
+PUBLIC_SUI_GRAPHQL_NETWORKS = ("mainnet", "testnet", "devnet")
+
+# Fail the package-version preflight fast instead of hanging client init when a
+# Sui read endpoint is unresponsive.
+PACKAGE_VERSION_CHECK_TIMEOUT_S = 10.0
+SEAL_SESSION_SAFETY_MARGIN_MS = 30_000
+AUTH_REJECTED_MESSAGE = (
+    "401 from relayer: typically wrong private key, key not registered on this "
+    "account, account ID mismatch, or staging/mainnet mismatch. Check .env.local "
+    "and dashboard credentials. Full troubleshooting: "
+    "https://docs.wal.app/walrus-memory/troubleshooting/overview#401-auth_rejected-errors"
+)
+AUTH_UPSTREAM_UNAVAILABLE = "AUTH_UPSTREAM_UNAVAILABLE"
+UPSTREAM_UNAVAILABLE_MESSAGE = (
+    "Walrus Memory temporarily cannot verify credentials (upstream unavailable). "
+    "Retry; this is not a sign-in failure."
+)
+
+
+logger = logging.getLogger("memwal")
+
+
+def _server_url_for_log(parsed: ParseResult) -> str:
+    """Scheme/host/port only — never userinfo, path, query, or fragment."""
+
+    host = parsed.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    if parsed.port is not None:
+        return f"{parsed.scheme}://{host}:{parsed.port}"
+    return f"{parsed.scheme}://{host}"
+
+
+def normalize_server_url(url: str) -> str:
+    """Strip a trailing slash and warn on plaintext HTTP to a remote host.
+
+    Ports the TypeScript ``normalizeServerUrl`` helper: localhost,
+    ``127.0.0.1``, ``::1``, and ``*.localhost`` are exempt. Invalid URLs
+    are returned trimmed so the HTTP client can surface the error later.
+
+    The warning logs only scheme/host/port so URL userinfo (HTTPX
+    credentials) and other sensitive components are not written to logs.
+    The returned URL is otherwise unchanged and still used for transport.
+    """
+
+    trimmed = url.rstrip("/")
+    try:
+        parsed = urlparse(trimmed)
+        host = (parsed.hostname or "").lower()
+        is_local = (
+            host == "localhost"
+            or host == "127.0.0.1"
+            or host == "::1"
+            or host.endswith(".localhost")
+        )
+        if parsed.scheme == "http" and host and not is_local:
+            logger.warning(
+                '[memwal] serverUrl "%s" uses plaintext HTTP on a non-localhost host. '
+                "Signed requests and any bearer material will be visible to the network. "
+                "Use https:// in production.",
+                _server_url_for_log(parsed),
+            )
+    except ValueError:
+        # invalid URL — let the HTTP call surface the error at request time
+        pass
+    return trimmed
+
+
+# ============================================================
+# Polling helpers (PR #121 parity with TS SDK)
+# ============================================================
+
+
+def _now_ms() -> int:
+    return int(time.monotonic() * 1000)
+
+
+async def _sleep_ms(ms: int) -> None:
+    await asyncio.sleep(max(ms, 0) / 1000.0)
+
+
+def _polling_delay_ms(base_ms: int, attempt: int) -> int:
+    """Jittered exponential backoff matching TS ``pollingDelayMs``.
+
+    base * 1.5^min(attempt, 6), capped at 10s, with ±25% jitter so
+    concurrent clients don't synchronise.
+    """
+
+    base = max(100, base_ms)
+    capped = min(10_000, base * (1.5 ** min(attempt, 6)))
+    jitter = 0.75 + random.random() * 0.5
+    return int(capped * jitter)
+
+
+def _is_transient_polling_status(status: int) -> bool:
+    """Classify HTTP status codes for the polling retry loop.
+
+    Mirrors TS ``isTransientPollingStatus``: connection drop (0), rate
+    limit (429), or any 5xx → retry. Anything else (including 4xx other
+    than 404 which is special-cased upstream) → surface to caller.
+    """
+
+    return status == 0 or status == 429 or status >= 500
+
+
+def _occurred_at_to_wire(
+    occurred_at: Optional[Union[str, datetime]],
+) -> Optional[str]:
+    """Render an ``occurred_at`` argument to the wire format.
+
+    The server's ``AnalyzeRequest.occurred_at`` field expects RFC-3339
+    UTC with a trailing ``Z``. Output precision matches the TS SDK's
+    ``Date.toISOString()`` (milliseconds), e.g.
+    ``"2023-05-25T17:50:00.000Z"`` — so the two SDKs produce
+    byte-identical wire payloads for the same instant.
+
+    Aware ``datetime`` objects are converted to UTC. **Naïve datetimes
+    are rejected** with ``ValueError``: silently assuming UTC would
+    produce timezone-off-by-N anchors for callers outside UTC and
+    undermine WALM-55's "honest temporal anchoring" guarantee. Callers
+    should pass ``datetime.now(timezone.utc)`` or attach a ``tzinfo``
+    explicitly.
+
+    String inputs are validated as RFC-3339 / ISO-8601 (accepting
+    trailing ``Z`` as a UTC shorthand, per RFC-3339 §4.2) and
+    re-formatted to canonical form. Invalid strings raise
+    ``ValueError`` at the SDK boundary rather than being forwarded as
+    a 400 from the server.
+
+    Returns ``None`` when no anchor is supplied so the field is
+    omitted from the request body.
+    """
+
+    if occurred_at is None:
+        return None
+    if isinstance(occurred_at, datetime):
+        if occurred_at.tzinfo is None:
+            raise ValueError(
+                "occurred_at datetime must be timezone-aware. Pass "
+                "datetime.now(timezone.utc), datetime(..., tzinfo=...), "
+                "or an RFC-3339 string. Naïve datetimes are rejected "
+                "because they would be silently mis-anchored for "
+                "callers outside UTC."
+            )
+        dt = occurred_at.astimezone(timezone.utc)
+        # Drop tzinfo before `isoformat` to suppress the "+00:00"
+        # suffix; we append "Z" manually to match the TS SDK + server
+        # canonical form. `timespec="milliseconds"` matches JS
+        # `Date.toISOString()` precision so the two SDKs are
+        # byte-identical for the same instant.
+        return dt.replace(tzinfo=None).isoformat(timespec="milliseconds") + "Z"
+    if isinstance(occurred_at, str):
+        # Validate at the SDK boundary so a bad timestamp doesn't
+        # bring down the whole analyze() call with an opaque 400 from
+        # the server's serde layer. RFC-3339 §4.2 allows "Z" as a UTC
+        # shorthand; `fromisoformat` only accepts it on Python 3.11+,
+        # so we normalise to "+00:00" before parsing for 3.9/3.10
+        # compatibility.
+        normalised = (
+            occurred_at.replace("Z", "+00:00", 1)
+            if occurred_at.endswith("Z")
+            else occurred_at
+        )
+        try:
+            parsed = datetime.fromisoformat(normalised)
+        except ValueError as exc:
+            raise ValueError(
+                f"occurred_at must be RFC-3339 / ISO-8601, got: {occurred_at!r}"
+            ) from exc
+        # Round-trip through the datetime branch so the wire format is
+        # canonical (UTC, milliseconds, trailing "Z"). Naïve inputs
+        # here are rare but possible; reuse the aware-required guard
+        # by attaching tzinfo if the string carried one.
+        if parsed.tzinfo is None:
+            raise ValueError(
+                f"occurred_at string must carry a UTC offset or 'Z' suffix, "
+                f"got: {occurred_at!r}"
+            )
+        return _occurred_at_to_wire(parsed)
+    raise TypeError(
+        f"occurred_at must be datetime, str, or None; got {type(occurred_at).__name__}"
+    )
+
+
+class MemWal:
+    """Async-native Walrus Memory client.
+
+    All API methods are ``async``. For synchronous usage, wrap calls with
+    ``asyncio.run()`` or use the :class:`MemWalSync` convenience wrapper.
+    """
+
+    def __init__(self, config: MemWalConfig) -> None:
+        self._private_key_hex = normalize_private_key(config.key)
+        self._signing_key = build_signing_key(self._private_key_hex)
+        self._account_id = config.account_id
+        self._server_url = normalize_server_url(config.server_url)
+        self._namespace = config.namespace
+        self._client: Optional[httpx.AsyncClient] = None
+        self._server_config: Optional[Dict[str, str]] = None
+        self._session_cache: Optional[Tuple[str, int]] = None
+        self._session_build_task: Optional[asyncio.Task[str]] = None
+        self._relayer_version_metadata: Optional[Dict[str, Any]] = None
+        self._compatibility_lock: Optional[asyncio.Lock] = None
+        # Preserve a generated key across an ambiguous transport failure. A
+        # subsequent identical call then collapses onto the accepted paid job.
+        self._pending_remember_keys: Dict[str, str] = {}
+
+    @classmethod
+    def create(
+        cls,
+        key: str,
+        account_id: str,
+        server_url: str = "http://localhost:8000",
+        namespace: str = "default",
+        env: Optional[str] = None,
+    ) -> "MemWal":
+        """Create a new Walrus Memory client instance.
+
+        Args:
+            key: Ed25519 private key hex string (the delegate key).
+            account_id: Walrus Memory account object ID on Sui.
+            server_url: Server URL (default: ``http://localhost:8000``).
+            namespace: Default namespace for memory isolation (default: ``"default"``).
+            env: Optional relayer preset — ``"prod"``, ``"dev"``, ``"staging"``,
+                or ``"local"``. Resolves ``server_url`` to the matching hosted
+                relayer unless an explicit non-default ``server_url`` is given.
+                Precedence: explicit ``server_url`` > ``env`` > default.
+
+        Returns:
+            A configured :class:`MemWal` instance.
+        """
+        config = MemWalConfig(
+            key=key,
+            account_id=account_id,
+            server_url=server_url,
+            namespace=namespace,
+            env=env,
+        )
+        return cls(config)
+
+    @property
+    def _http(self) -> httpx.AsyncClient:
+        """Lazily create the async HTTP client."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=60.0)
+        return self._client
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
+
+    async def __aenter__(self) -> "MemWal":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.close()
+
+    # ============================================================
+    # Core API
+    # ============================================================
+
+    async def remember(
+        self,
+        text: str,
+        namespace: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> RememberAcceptedResult:
+        """Submit a remember request and return as soon as the server accepts it.
+
+        Per PR #121 (ENG-1406): the server returns ``HTTP 202 + job_id``
+        immediately (~500ms). The actual Walrus upload + on-chain commit run
+        in a background worker. Use :meth:`wait_for_remember_job` to follow
+        the job to completion, or :meth:`remember_and_wait` for a single
+        call that does both.
+
+        Args:
+            text: The text to remember.
+            namespace: Override the default namespace.
+
+        Returns:
+            :class:`RememberAcceptedResult` with ``job_id`` and initial
+            status (``"pending"``).
+        """
+        resolved_namespace = namespace or self._namespace
+        request_identity = f"{resolved_namespace}\0{text}"
+        generated_key = idempotency_key is None
+        resolved_key = idempotency_key or self._pending_remember_keys.get(request_identity)
+        if resolved_key is None:
+            resolved_key = str(uuid.uuid4())
+        if generated_key:
+            self._pending_remember_keys[request_identity] = resolved_key
+
+        data = await self._signed_request(
+            "POST",
+            "/api/remember",
+            {
+                "text": text,
+                "namespace": resolved_namespace,
+                "idempotency_key": resolved_key,
+            },
+            accepted_statuses=(200, 202),
+        )
+        if generated_key:
+            self._pending_remember_keys.pop(request_identity, None)
+        return RememberAcceptedResult(
+            job_id=data["job_id"],
+            status=data.get("status", "pending"),
+        )
+
+    # Alias for parity with TS SDK ``rememberAsync``.
+    async def remember_async(
+        self,
+        text: str,
+        namespace: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> RememberAcceptedResult:
+        return await self.remember(text, namespace, idempotency_key)
+
+    async def wait_for_remember_job(
+        self,
+        job_id: str,
+        poll_interval_ms: int = 1500,
+        timeout_ms: int = 60_000,
+    ) -> RememberResult:
+        """Poll an accepted remember job until it reaches a terminal state.
+
+        Mirrors TS ``waitForRememberJob``:
+
+        - Accepts 200 + 404 from the status endpoint and dispatches on
+          ``status`` field (404 / ``status == "not_found"`` raises).
+        - Transient HTTP errors (429, 5xx, network drop) are retried until
+          the timeout, not surfaced as polling failures.
+        - Backoff is jittered exponential (1.5x cap 10s, ±25%) to avoid
+          thundering-herd at scale.
+        """
+
+        deadline_ms = _now_ms() + timeout_ms
+        attempt = 0
+
+        while _now_ms() < deadline_ms:
+            await _sleep_ms(_polling_delay_ms(poll_interval_ms, attempt))
+            attempt += 1
+
+            try:
+                data = await self._signed_request(
+                    "GET",
+                    f"/api/remember/{job_id}",
+                    {},
+                    accepted_statuses=(200, 404),
+                )
+            except _HttpStatusError as err:
+                if _is_transient_polling_status(err.status):
+                    continue
+                raise
+
+            status_str = data.get("status")
+            if status_str is None or status_str == "not_found":
+                raise MemWalRememberJobNotFound(job_id)
+
+            if status_str == "done":
+                return RememberResult(
+                    id=data.get("job_id", job_id),
+                    blob_id=data.get("blob_id") or "",
+                    owner=data.get("owner") or "",
+                    namespace=data.get("namespace") or self._namespace,
+                )
+
+            if status_str == "failed":
+                raise MemWalRememberJobFailed(
+                    job_id=job_id, error=data.get("error") or "unknown error"
+                )
+
+            # pending / running / uploaded — keep polling.
+
+        raise MemWalRememberJobTimeout(job_id=job_id, timeout_ms=timeout_ms)
+
+    async def remember_and_wait(
+        self,
+        text: str,
+        namespace: Optional[str] = None,
+        poll_interval_ms: int = 1500,
+        timeout_ms: int = 60_000,
+        idempotency_key: Optional[str] = None,
+    ) -> RememberResult:
+        """Submit a remember and wait for the background worker to finish.
+
+        Convenience wrapper around :meth:`remember` (returns ``job_id`` in
+        ~500ms) + :meth:`wait_for_remember_job` (polls until ``done`` or
+        ``failed``). Mirrors TS ``rememberAndWait``.
+        """
+
+        resolved_namespace = namespace or self._namespace
+        request_identity = f"{resolved_namespace}\0{text}"
+        generated_key = idempotency_key is None
+        resolved_key = idempotency_key or self._pending_remember_keys.get(request_identity)
+        if resolved_key is None:
+            resolved_key = str(uuid.uuid4())
+        if generated_key:
+            self._pending_remember_keys[request_identity] = resolved_key
+
+        accepted = await self.remember(text, resolved_namespace, resolved_key)
+        result = await self.wait_for_remember_job(
+            accepted.job_id,
+            poll_interval_ms=poll_interval_ms,
+            timeout_ms=timeout_ms,
+        )
+        if generated_key:
+            self._pending_remember_keys.pop(request_identity, None)
+        return result
+
+    # ============================================================
+    # Bulk remember (ENG-1408)
+    # ============================================================
+
+    async def remember_bulk_async(
+        self, items: Sequence[RememberBulkItem]
+    ) -> RememberBulkAcceptedResult:
+        """Submit a bulk remember and return as soon as the server accepts the batch.
+
+        Server returns ``HTTP 202`` with ``job_ids`` aligned positionally with
+        ``items``. Each item then progresses through the same async pipeline
+        as :meth:`remember` independently.
+
+        Up to ``MAX_BULK_ITEMS`` (= 20) items per call; each item's text
+        capped at ``MAX_REMEMBER_TEXT_BYTES`` (= 64 KiB).
+        """
+
+        if not items:
+            raise ValueError("remember_bulk_async: items must be a non-empty array")
+
+        payload_items: List[Dict[str, Any]] = [
+            {
+                "text": item.text,
+                "namespace": item.namespace or self._namespace,
+            }
+            for item in items
+        ]
+        data = await self._signed_request(
+            "POST",
+            "/api/remember/bulk",
+            {"items": payload_items},
+            accepted_statuses=(200, 202),
+        )
+        job_ids = data.get("job_ids")
+        returned = len(job_ids) if job_ids else 0
+        if not job_ids or returned != len(payload_items):
+            raise ValueError(
+                f"remember_bulk_async: server returned {returned} job_ids for "
+                f"{len(payload_items)} items"
+            )
+        return RememberBulkAcceptedResult(
+            job_ids=list(job_ids),
+            total=int(data.get("total", len(payload_items))),
+            status=data.get("status", "pending"),
+        )
+
+    # Alias for parity with TS SDK ``rememberBulk``.
+    async def remember_bulk(
+        self, items: Sequence[RememberBulkItem]
+    ) -> RememberBulkAcceptedResult:
+        return await self.remember_bulk_async(items)
+
+    async def get_remember_bulk_status(
+        self, job_ids: Sequence[str]
+    ) -> RememberBulkStatusResult:
+        """Poll the bulk-status endpoint for a batch of job_ids.
+
+        Returns one :class:`RememberBulkStatusItem` per requested job (order
+        not guaranteed; callers should index by ``job_id``).
+        """
+
+        data = await self._signed_request(
+            "POST",
+            "/api/remember/bulk/status",
+            {"job_ids": list(job_ids)},
+        )
+        return RememberBulkStatusResult(
+            results=[
+                RememberBulkStatusItem(
+                    job_id=item.get("job_id", ""),
+                    status=item.get("status", "pending"),
+                    blob_id=item.get("blob_id"),
+                    error=item.get("error"),
+                )
+                for item in data.get("results", [])
+            ]
+        )
+
+    async def wait_for_remember_jobs(
+        self,
+        job_ids: Sequence[str],
+        opts: Optional[RememberBulkOptions] = None,
+    ) -> RememberBulkResult:
+        """Poll the bulk-status endpoint until every job is terminal.
+
+        Mirrors TS ``waitForRememberJobs``:
+
+        - Each item settles to ``"done"``, ``"failed"``, or ``"timeout"``.
+        - Same transient-retry + jitter strategy as the single-job poll.
+        - Result list preserves the order of the input ``job_ids``.
+
+        Default ``timeout_ms`` is 120s — bulk pipelines run longer than
+        single remember.
+        """
+
+        opts = opts or RememberBulkOptions()
+        deadline_ms = _now_ms() + opts.timeout_ms
+
+        # Track per-job final state.
+        results: Dict[str, RememberBulkItemResult] = {
+            job_id: RememberBulkItemResult(
+                id=job_id,
+                blob_id="",
+                status="timeout",
+                error=None,
+            )
+            for job_id in job_ids
+        }
+        pending: List[str] = list(job_ids)
+        attempt = 0
+
+        while pending and _now_ms() < deadline_ms:
+            await _sleep_ms(_polling_delay_ms(opts.poll_interval_ms, attempt))
+            attempt += 1
+
+            try:
+                batch = await self.get_remember_bulk_status(pending)
+            except _HttpStatusError as err:
+                if _is_transient_polling_status(err.status):
+                    continue
+                raise
+
+            still_pending: List[str] = []
+            for item in batch.results:
+                if item.status == "done":
+                    results[item.job_id] = RememberBulkItemResult(
+                        id=item.job_id,
+                        blob_id=item.blob_id or "",
+                        status="done",
+                        error=None,
+                    )
+                elif item.status in ("failed", "not_found"):
+                    results[item.job_id] = RememberBulkItemResult(
+                        id=item.job_id,
+                        blob_id=item.blob_id or "",
+                        status="failed",
+                        error=item.error,
+                    )
+                else:
+                    still_pending.append(item.job_id)
+            pending = still_pending
+
+        ordered = [results[job_id] for job_id in job_ids]
+        succeeded = sum(1 for r in ordered if r.status == "done")
+        failed = sum(1 for r in ordered if r.status == "failed")
+        timed_out = sum(1 for r in ordered if r.status == "timeout")
+        return RememberBulkResult(
+            results=ordered,
+            total=len(ordered),
+            succeeded=succeeded,
+            failed=failed,
+            timed_out=timed_out,
+        )
+
+    async def remember_bulk_and_wait(
+        self,
+        items: Sequence[RememberBulkItem],
+        opts: Optional[RememberBulkOptions] = None,
+    ) -> RememberBulkResult:
+        """Submit bulk + wait for every item to settle.
+
+        Convenience wrapper around :meth:`remember_bulk_async` +
+        :meth:`wait_for_remember_jobs`. Mirrors TS ``rememberBulkAndWait``.
+        """
+
+        accepted = await self.remember_bulk_async(items)
+        return await self.wait_for_remember_jobs(accepted.job_ids, opts)
+
+    async def recall(
+        self,
+        query: "str | RecallParams",
+        limit: int = 10,
+        namespace: Optional[str] = None,
+        max_distance: Optional[float] = None,
+    ) -> RecallResult:
+        """Recall memories similar to a query.
+
+        Server handles: verify -> embed query -> search -> Walrus download -> decrypt.
+
+        **Preferred call style** is to pass a :class:`RecallParams`
+        object so the call site reads self-describingly:
+
+            await client.recall(RecallParams(
+                query="food allergies", limit=5, namespace="profile"))
+
+        The legacy positional call ``client.recall(query, limit, namespace)``
+        is still supported but is easy to mis-read as
+        ``recall(query, namespace)``. Prefer kwargs at minimum.
+
+        Args:
+            query: Search query, or a :class:`RecallParams` carrying query +
+                limit + namespace + max_distance in one object.
+            limit: Max number of results (default: 10). Ignored when ``query``
+                is a :class:`RecallParams`.
+            namespace: Override the default namespace. Ignored when ``query``
+                is a :class:`RecallParams`.
+            max_distance: Optional client-side relevance threshold. Memories
+                with ``distance >= max_distance`` are dropped. Ignored when
+                ``query`` is a :class:`RecallParams`.
+
+        Returns:
+            :class:`RecallResult` with decrypted text results.
+        """
+        if isinstance(query, RecallParams):
+            params = query
+            query_text = params.query
+            limit = params.limit
+            namespace = params.namespace
+            max_distance = params.max_distance
+        else:
+            query_text = query
+        data = await self._signed_request("POST", "/api/recall", {
+            "query": query_text,
+            "limit": limit,
+            "namespace": namespace or self._namespace,
+        })
+        memories = [
+            RecallMemory(
+                blob_id=m["blob_id"],
+                text=m["text"],
+                distance=m["distance"],
+            )
+            for m in data.get("results", [])
+        ]
+        raw_dropped = data.get("dropped_count") or 0
+        try:
+            dropped = int(raw_dropped)
+        except (TypeError, ValueError):
+            dropped = 0
+        if max_distance is not None:
+            memories = [m for m in memories if m.distance < max_distance]
+            return RecallResult(
+                results=memories, total=len(memories), dropped_count=dropped
+            )
+        return RecallResult(
+            results=memories,
+            total=data.get("total", len(memories)),
+            dropped_count=dropped,
+        )
+
+    async def analyze(
+        self,
+        text: str,
+        namespace: Optional[str] = None,
+        occurred_at: Optional[Union[str, datetime]] = None,
+    ) -> AnalyzeResult:
+        """Analyze conversation text and return as soon as facts are accepted.
+
+        Per PR #121: server extracts atomic facts synchronously via LLM, then
+        enqueues one background remember job per fact. Returns 202 with
+        ``job_ids`` aligned to ``facts``.
+
+        Use :meth:`analyze_and_wait` to also wait for every fact to finish
+        persisting (poll all job_ids together).
+
+        Args:
+            text: Conversation text to analyze.
+            namespace: Override the default namespace.
+            occurred_at: Optional valid-time timestamp — when the
+                conversation/event actually happened. When supplied, the
+                server extractor uses it as a temporal anchor and
+                resolves in-turn relative references ("last Friday",
+                "yesterday") into absolute dates inside the fact text
+                before embedding/encryption. Accepts a
+                :class:`datetime.datetime` (preferred — **must be
+                timezone-aware**; naïve datetimes raise ``ValueError``
+                because silently assuming UTC would mis-anchor by N
+                hours for callers outside UTC) or an ISO-8601 / RFC-3339
+                string (must carry a ``Z`` suffix or UTC offset; raises
+                ``ValueError`` if malformed or naïve). Wire format is
+                RFC-3339 UTC with millisecond precision and trailing
+                ``Z`` (byte-identical to the TypeScript SDK). Omit when
+                no anchor is available — the server will not invent one
+                (no ``now()`` fallback). The resolved date lives only
+                inside the encrypted fact text + embedding; there is no
+                server-readable metadata column for it (Architecture A).
+
+        Returns:
+            :class:`AnalyzeResult` with extracted ``facts`` + per-fact
+            ``job_ids`` for downstream polling.
+        """
+        body: Dict[str, Any] = {
+            "text": text,
+            "namespace": namespace or self._namespace,
+        }
+        wire_occurred_at = _occurred_at_to_wire(occurred_at)
+        if wire_occurred_at is not None:
+            body["occurred_at"] = wire_occurred_at
+        data = await self._signed_request(
+            "POST",
+            "/api/analyze",
+            body,
+            accepted_statuses=(200, 202),
+        )
+        # Backward-compat: older server shape returned `facts[].id` and
+        # `facts[].blob_id` directly. New async shape may omit `blob_id`
+        # at this point (set later by the worker) and add `job_ids`.
+        facts = [
+            AnalyzedFact(
+                text=f["text"],
+                id=f.get("id", ""),
+                blob_id=f.get("blob_id", ""),
+            )
+            for f in data.get("facts", [])
+        ]
+        job_ids = list(data.get("job_ids", []))
+        fact_count = int(data.get("fact_count", data.get("total", len(facts))))
+        return AnalyzeResult(
+            facts=facts,
+            fact_count=fact_count,
+            job_ids=job_ids,
+            status=data.get("status", "pending"),
+            owner=data.get("owner", ""),
+        )
+
+    async def analyze_and_wait(
+        self,
+        text: str,
+        namespace: Optional[str] = None,
+        opts: Optional[RememberBulkOptions] = None,
+        occurred_at: Optional[Union[str, datetime]] = None,
+    ) -> AnalyzeWaitResult:
+        """Analyze + wait for every extracted fact to finish persisting.
+
+        Mirrors TS ``analyzeAndWait``: calls :meth:`analyze` then
+        :meth:`wait_for_remember_jobs` on the returned ``job_ids``. The
+        result combines the analyze fact list with the bulk-style settled
+        per-job results.
+
+        ``occurred_at`` carries the same temporal-anchor semantics as
+        :meth:`analyze` — see that method's docstring for details.
+        """
+
+        accepted = await self.analyze(text, namespace, occurred_at=occurred_at)
+        completed = await self.wait_for_remember_jobs(accepted.job_ids, opts)
+        return AnalyzeWaitResult(
+            results=completed.results,
+            total=completed.total,
+            succeeded=completed.succeeded,
+            failed=completed.failed,
+            timed_out=completed.timed_out,
+            facts=accepted.facts,
+            owner=accepted.owner,
+        )
+
+    async def embed(self, text: str) -> EmbedResult:
+        """Compute the embedding vector for ``text`` without storing anything.
+
+        Calls ``POST /api/embed``. Useful for callers that want to do their
+        own indexing or vector math; for the standard "remember" flow, use
+        :meth:`remember` (server handles embed + encrypt + upload).
+        """
+
+        data = await self._signed_request(
+            "POST",
+            "/api/embed",
+            {"text": text},
+            include_seal_session=False,
+        )
+        return EmbedResult(vector=list(data.get("vector", [])))
+
+    async def ask(
+        self,
+        question: str,
+        limit: int = 5,
+        namespace: Optional[str] = None,
+    ) -> AskResult:
+        """Ask a question answered using your memories.
+
+        Server recalls relevant memories, injects them as context,
+        and calls an LLM to produce a personalized answer.
+
+        Args:
+            question: The question to ask.
+            limit: Max memories to use as context (default: 5).
+            namespace: Override the default namespace.
+
+        Returns:
+            :class:`AskResult` with answer, memories_used count, and memories list.
+        """
+        data = await self._signed_request("POST", "/api/ask", {
+            "question": question,
+            "limit": limit,
+            "namespace": namespace or self._namespace,
+        })
+        memories = [
+            AskMemory(blob_id=m["blob_id"], text=m["text"], distance=m["distance"])
+            for m in data.get("memories", [])
+        ]
+        return AskResult(
+            answer=data["answer"],
+            memories_used=data["memories_used"],
+            memories=memories,
+        )
+
+    async def restore(self, namespace: str, limit: int = 10) -> RestoreResult:
+        """Rebuild missing local index entries for ``namespace`` from Walrus.
+
+        The relayer queries Walrus for blobs the caller owns in ``namespace``,
+        ignores blobs already indexed locally, downloads the missing ones,
+        SEAL-decrypts them with the delegate key, re-embeds the plaintext, and
+        inserts a fresh vector row per blob.
+
+        Response semantics:
+
+        * ``restored`` — blobs that completed the full
+          download → decrypt → embed → DB insert pipeline this call.
+        * ``skipped`` — on-chain blobs already present in the local index
+          (no work needed). Decrypt / embed failures are dropped silently and
+          do **not** count as either restored or skipped.
+        * ``total`` — count of on-chain blobs the relayer saw for
+          ``(owner, namespace)`` before the limit was applied.
+        * ``truncated`` — True when this restore is known-incomplete (limit
+          truncation or an upstream on-chain candidate-fetch cap; see
+          :class:`~memwal.types.RestoreResult`). Defaults to ``False`` when
+          talking to a relayer older than WALM-319 that omits the field.
+
+        Args:
+            namespace: Namespace to restore. Exact match — no prefix or
+                hierarchy semantics (see SKILL.md "Namespace Semantics").
+            limit: Max blobs the relayer will *inspect* this call (default:
+                10, matches the server-side default and the TypeScript SDK).
+                The relayer selects up to this many missing blobs from the
+                candidates it sees, in unspecified order; it does **not** cap
+                ``restored`` separately.
+
+        Returns:
+            :class:`RestoreResult`.
+
+        Notes:
+            * **No pagination cursor** — restore is single-shot. A larger
+              ``limit`` may help when ``truncated`` is caused by the request
+              limit, but candidate discovery also has a per-owner source cap
+              shared across namespaces. Hitting that cap requires cursor/
+              pagination support for guaranteed full recovery; increasing
+              ``limit`` or retrying cannot guarantee it.
+            * **Performance** scales linearly in ``limit``: up to 10 Walrus
+              downloads in parallel, then 3 SEAL decrypts in parallel, then
+              embeddings. Expect seconds-per-blob on cold caches.
+        """
+        data = await self._signed_request("POST", "/api/restore", {
+            "namespace": namespace,
+            "limit": limit,
+        })
+        return RestoreResult(
+            restored=data["restored"],
+            skipped=data["skipped"],
+            total=data["total"],
+            namespace=data["namespace"],
+            owner=data["owner"],
+            # Relayers older than WALM-319 omit `truncated` entirely --
+            # treat "not present" as "not known to be truncated" rather
+            # than require every relayer version to send it.
+            truncated=data.get("truncated", False),
+        )
+
+    async def health(self) -> HealthResult:
+        """Check server health. No authentication required.
+
+        Returns:
+            :class:`HealthResult` with status and version.
+        """
+        response = await self._http.get(f"{self._server_url}/health")
+        if response.status_code != 200:
+            raise MemWalError(f"Health check failed: {response.status_code}")
+        data = response.json()
+        return HealthResult(
+            status=data["status"],
+            version=data["version"],
+            relayer_version=data.get("relayerVersion"),
+            api_version=data.get("apiVersion"),
+            min_supported_sdk=data.get("minSupportedSdk"),
+            feature_flags=data.get("featureFlags"),
+            deprecations=data.get("deprecations"),
+            build=data.get("build"),
+            mode=data.get("mode"),
+            write_ready=data.get("write_ready"),
+        )
+
+    async def compatibility(self) -> Dict[str, Any]:
+        """Fetch and validate the relayer compatibility contract."""
+
+        return await self._ensure_compatible_relayer()
+
+    # ============================================================
+    # Manual API (user handles SEAL + embedding + Walrus)
+    # ============================================================
+
+    async def remember_manual(self, opts: RememberManualOptions) -> RememberManualResult:
+        """Remember (manual mode).
+
+        User handles SEAL encrypt and embedding. The relayer uploads the
+        encrypted bytes to Walrus and stores the vector mapping.
+
+        Args:
+            opts: :class:`RememberManualOptions` with encrypted_data (base64),
+                vector, and optional namespace.
+
+        Returns:
+            :class:`RememberManualResult` with id, blob_id, owner, namespace.
+        """
+        data = await self._signed_request(
+            "POST",
+            "/api/remember/manual",
+            {
+                "encrypted_data": opts.encrypted_data,
+                "vector": opts.vector,
+                "namespace": opts.namespace or self._namespace,
+            },
+            include_seal_session=False,
+        )
+        return RememberManualResult(
+            id=data["id"],
+            blob_id=data["blob_id"],
+            owner=data["owner"],
+            namespace=data["namespace"],
+        )
+
+    async def recall_manual(self, opts: RecallManualOptions) -> RecallManualResult:
+        """Recall (manual mode).
+
+        User provides a pre-computed query vector. Server returns matching
+        blobIds + distances. User then downloads from Walrus + SEAL decrypts.
+
+        Args:
+            opts: :class:`RecallManualOptions` with vector, optional limit and namespace.
+
+        Returns:
+            :class:`RecallManualResult` with blob_id + distance pairs.
+        """
+        body: Dict[str, Any] = {
+            "vector": opts.vector,
+            "limit": opts.limit,
+            "namespace": opts.namespace or self._namespace,
+        }
+        if opts.scoring_weights is not None:
+            body["scoring_weights"] = opts.scoring_weights.to_wire()
+
+        data = await self._signed_request(
+            "POST",
+            "/api/recall/manual",
+            body,
+            include_seal_session=False,
+        )
+        hits = [
+            RecallManualHit(blob_id=h["blob_id"], distance=h["distance"])
+            for h in data.get("results", [])
+        ]
+        return RecallManualResult(results=hits, total=data.get("total", len(hits)))
+
+    async def get_public_key_hex(self) -> str:
+        """Get the Ed25519 public key as a hex string.
+
+        Returns:
+            Public key hex string.
+        """
+        return bytes_to_hex(bytes(self._signing_key.verify_key))
+
+    # ============================================================
+    # Internal: Signed HTTP Requests
+    # ============================================================
+
+    async def _ensure_compatible_relayer(self) -> Dict[str, Any]:
+        if self._relayer_version_metadata is not None:
+            return self._relayer_version_metadata
+
+        if self._compatibility_lock is None:
+            self._compatibility_lock = asyncio.Lock()
+
+        async with self._compatibility_lock:
+            if self._relayer_version_metadata is not None:
+                return self._relayer_version_metadata
+
+            version_response = await self._http.get(f"{self._server_url}/version")
+            if version_response.status_code == 200:
+                metadata = version_response.json()
+            elif version_response.status_code in (404, 405):
+                health_response = await self._http.get(f"{self._server_url}/health")
+                if health_response.status_code != 200:
+                    raise MemWalError(
+                        "Walrus Memory compatibility check failed: "
+                        f"GET /version returned {version_response.status_code}, "
+                        f"and GET /health returned {health_response.status_code}"
+                    )
+                metadata = health_response.json()
+            else:
+                raise MemWalError(
+                    "Walrus Memory compatibility check failed: "
+                    f"GET /version returned {version_response.status_code}"
+                )
+
+            error = compatibility_error(metadata, self._server_url)
+            if error is not None:
+                raise MemWalCompatibilityError(error)
+
+            self._relayer_version_metadata = metadata
+            return metadata
+
+    async def _fetch_server_config(self) -> Dict[str, str]:
+        if self._server_config is not None:
+            return self._server_config
+
+        response = await self._http.get(f"{self._server_url}/config")
+        if response.status_code != 200:
+            raise MemWalError(f"GET /config returned {response.status_code}")
+
+        data = response.json()
+        package_id = data.get("packageId")
+        network = data.get("network")
+        sui_rpc_url = data.get("suiRpcUrl")
+        if not package_id or not network:
+            raise MemWalError("GET /config response missing packageId / network")
+
+        self._server_config = {
+            "packageId": package_id,
+            "network": network,
+            "suiRpcUrl": sui_rpc_url or "",
+        }
+        return self._server_config
+
+    async def _fetch_package_version_graphql(self, network: str, package_id: str):
+        """Read the package object version via Sui GraphQL RPC.
+
+        JSON-RPC on public fullnodes is sunset (see
+        https://docs.sui.io/develop/accessing-data/json-rpc-migration), and the
+        third-party JSON-RPC mirror the relayer used to advertise has gone
+        unresponsive, hanging every client init. GraphQL is the plain-HTTPS
+        read layer that survives the sunset without pulling gRPC deps into
+        this SDK.
+        """
+        graphql_url = f"https://graphql.{network}.sui.io/graphql"
+        response = await self._http.post(
+            graphql_url,
+            json={
+                "query": "query($a:SuiAddress!){object(address:$a){version}}",
+                "variables": {"a": package_id},
+            },
+            timeout=PACKAGE_VERSION_CHECK_TIMEOUT_S,
+        )
+        if response.status_code != 200:
+            raise MemWalError(f"Sui GraphQL returned {response.status_code}")
+        body = response.json()
+        obj = (body.get("data") or {}).get("object")
+        if not isinstance(obj, dict) or obj.get("version") is None:
+            raise MemWalError(f"Sui GraphQL could not resolve package {package_id}")
+        return obj["version"]
+
+    async def _fetch_package_version_jsonrpc(self, sui_rpc_url: str, package_id: str):
+        """Legacy JSON-RPC fallback for custom / local networks that have no
+        public GraphQL endpoint and still serve `sui_getObject`."""
+        response = await self._http.post(
+            sui_rpc_url,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "sui_getObject",
+                "params": [package_id, {"showBcs": False, "showContent": False, "showType": False}],
+            },
+            timeout=PACKAGE_VERSION_CHECK_TIMEOUT_S,
+        )
+        if response.status_code != 200:
+            raise MemWalError(f"sui_getObject returned {response.status_code}")
+
+        body = response.json()
+        result = body.get("result", {})
+        version = None
+        if isinstance(result, dict):
+            data = result.get("data")
+            if isinstance(data, dict):
+                version = data.get("version")
+            if version is None:
+                obj = result.get("object")
+                if isinstance(obj, dict):
+                    version = obj.get("version")
+        return version
+
+    async def _assert_first_package_version(
+        self, network: str, sui_rpc_url: str, package_id: str
+    ) -> None:
+        if network in PUBLIC_SUI_GRAPHQL_NETWORKS:
+            version = await self._fetch_package_version_graphql(network, package_id)
+        elif sui_rpc_url:
+            version = await self._fetch_package_version_jsonrpc(sui_rpc_url, package_id)
+        else:
+            raise MemWalError(
+                f"No Sui read endpoint available for network {network!r}: "
+                "no public GraphQL endpoint and GET /config carried no suiRpcUrl"
+            )
+        if str(version) != "1":
+            raise MemWalError(
+                f"SEAL package {package_id} must be at version 1 to build "
+                f"x-seal-session, got {version!r}"
+            )
+
+    async def _build_seal_session_inner(self) -> str:
+        cfg = await self._fetch_server_config()
+        await self._assert_first_package_version(
+            cfg["network"], cfg["suiRpcUrl"], cfg["packageId"]
+        )
+
+        session_signing_key = nacl.signing.SigningKey.generate()
+        session_public_key = bytes(session_signing_key.verify_key)
+        creation_time_ms = int(time.time() * 1000)
+        personal_message = build_seal_session_personal_message(
+            package_id=cfg["packageId"],
+            ttl_min=SEAL_SESSION_TTL_MIN,
+            creation_time_ms=creation_time_ms,
+            session_public_key_bytes=session_public_key,
+        )
+        personal_message_signature = sign_sui_personal_message(
+            personal_message,
+            self._signing_key,
+        )
+
+        json_str = json.dumps(
+            {
+                "address": delegate_key_to_sui_address(self._private_key_hex),
+                "packageId": cfg["packageId"],
+                "mvrName": None,
+                "creationTimeMs": creation_time_ms,
+                "ttlMin": SEAL_SESSION_TTL_MIN,
+                "personalMessageSignature": personal_message_signature,
+                "sessionKey": encode_sui_private_key(bytes(session_signing_key)),
+            },
+            separators=(",", ":"),
+        )
+        session_bytes = base64.b64encode(json_str.encode("utf-8")).decode("utf-8")
+        self._session_cache = (
+            session_bytes,
+            int(time.time() * 1000) + SEAL_SESSION_TTL_MIN * 60_000 - SEAL_SESSION_SAFETY_MARGIN_MS,
+        )
+        return session_bytes
+
+    async def _build_seal_session(self) -> str:
+        now_ms = int(time.time() * 1000)
+        if self._session_cache is not None:
+            cached_bytes, expires_at_ms = self._session_cache
+            if now_ms < expires_at_ms:
+                return cached_bytes
+
+        if self._session_build_task is not None:
+            return await self._session_build_task
+
+        self._session_build_task = asyncio.create_task(self._build_seal_session_inner())
+        try:
+            return await self._session_build_task
+        finally:
+            self._session_build_task = None
+
+    async def _signed_request(
+        self,
+        method: str,
+        path: str,
+        body: Dict[str, Any],
+        accepted_statuses: tuple = (200,),
+        include_seal_session: bool = True,
+    ) -> Dict[str, Any]:
+        """Make a signed request to the server.
+
+        Signature format:
+            ``{timestamp}.{method}.{path_and_query}.{body_sha256}.{nonce}.{account_id}``
+
+        For ``GET`` requests the canonical body string is the empty string,
+        and no HTTP request body is sent. This keeps the signed payload hash
+        byte-compatible with the TypeScript SDK and with intermediaries that
+        strip ``GET`` bodies on the wire.
+
+        Headers sent:
+            - ``x-public-key``: Ed25519 public key hex
+            - ``x-signature``: Ed25519 signature hex
+            - ``x-timestamp``: Unix seconds string
+            - ``x-nonce``: UUID v4 replay-protection nonce
+            - ``x-seal-session``: Base64-encoded exported session envelope
+            - ``x-account-id``: Walrus Memory account object ID
+            - ``Content-Type``: application/json
+        """
+        import uuid
+
+        await self._ensure_compatible_relayer()
+
+        method_upper = method.upper()
+        timestamp = str(int(time.time()))
+        body_str = "" if method_upper == "GET" else json.dumps(body, separators=(",", ":"))
+        body_hash = sha256_hex(body_str)
+        # MED-1 / LOW-23: nonce + account_id are part of the canonical signed
+        # message. Server rejects the request as "unsupported legacy SDK"
+        # (HTTP 426) if x-nonce is missing or not UUID-formatted.
+        nonce = str(uuid.uuid4())
+
+        message = build_signature_message(
+            timestamp,
+            method_upper,
+            path,
+            body_hash,
+            nonce=nonce,
+            account_id=self._account_id,
+        )
+        signature_hex, public_key_hex = sign_message(message, self._signing_key)
+
+        url = f"{self._server_url}{path}"
+        headers = {
+            "Content-Type": "application/json",
+            "x-public-key": public_key_hex,
+            "x-signature": signature_hex,
+            "x-timestamp": timestamp,
+            "x-nonce": nonce,
+            "x-account-id": self._account_id,
+        }
+        if include_seal_session:
+            headers["x-seal-session"] = await self._build_seal_session()
+
+        response = await self._http.request(
+            method=method_upper,
+            url=url,
+            headers=headers,
+            content=None if method_upper == "GET" else body_str,
+        )
+
+        if response.status_code not in accepted_statuses:
+            err_text = response.text
+            if response.status_code == 426:
+                raise MemWalCompatibilityError(
+                    "Walrus Memory relayer rejected this SDK as unsupported "
+                    f"(HTTP 426 Upgrade Required). Relayer response: "
+                    f"{err_text[:300] or 'upgrade required'}"
+                )
+            # A stale/future-dated signature is rejected with 401 + a machine-
+            # readable reason header. Surface it as an actionable clock-drift
+            # error rather than an opaque 401 so the caller can fix node time.
+            if response.headers.get("x-auth-error") == "ERR_TIMESTAMP_OUT_OF_BOUNDS":
+                raise MemWalClockDriftError(
+                    "Request rejected: signed timestamp is outside the relayer's "
+                    "accepted clock-drift window. Synchronize this client's clock "
+                    "(NTP); if the deployment needs a wider tolerance, raise "
+                    "AUTH_MAX_CLOCK_DRIFT_SECS on the relayer."
+                )
+            raise _HttpStatusError(
+                status=response.status_code,
+                body=err_text,
+                auth_error=response.headers.get("x-auth-error"),
+                retry_after=response.headers.get("retry-after"),
+            )
+
+        return response.json()
+
+
+class MemWalError(Exception):
+    """Exception raised for Walrus Memory API errors."""
+
+    pass
+
+
+class MemWalCompatibilityError(MemWalError):
+    """Raised when the SDK and relayer API contract are incompatible."""
+
+    pass
+
+
+class MemWalClockDriftError(MemWalError):
+    """Raised when the relayer rejects a request because the signed timestamp is
+    outside its accepted clock-drift window (401 + ``x-auth-error:
+    ERR_TIMESTAMP_OUT_OF_BOUNDS``). Indicates the client's clock is skewed
+    relative to the relayer; sync via NTP or widen the relayer's window."""
+
+    pass
+
+
+def _redact_internal_urls(text: str) -> str:
+    return re.sub(
+        r"https?://(?:localhost|127\.0\.0\.1)(?::\d+)?[^\s)\]>'\"]*",
+        "[internal]",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
+class _HttpStatusError(MemWalError):
+    """Internal: raised when an HTTP response status is not in ``accepted_statuses``.
+
+    Carries ``.status`` so polling loops can decide whether to retry
+    (transient: 0/429/5xx) or surface (terminal: 4xx other than 404 when
+    explicitly accepted).
+    """
+
+    def __init__(
+        self,
+        status: int,
+        body: str,
+        auth_error: str | None = None,
+        retry_after: str | None = None,
+    ) -> None:
+        if status == 401:
+            super().__init__(AUTH_REJECTED_MESSAGE)
+        elif status == 503 and auth_error == AUTH_UPSTREAM_UNAVAILABLE:
+            super().__init__(UPSTREAM_UNAVAILABLE_MESSAGE)
+        else:
+            super().__init__(
+                f"Walrus Memory API error ({status}): {_redact_internal_urls(body)}"
+            )
+        self.status = status
+        self.body = body
+        self.auth_error = auth_error
+        self.retry_after = retry_after
+
+
+class MemWalRememberJobNotFound(MemWalError):
+    """The polled job_id does not exist or is not owned by the caller."""
+
+    def __init__(self, job_id: str) -> None:
+        super().__init__(f"remember job not found: {job_id}")
+        self.status = 404
+        self.job_id = job_id
+
+
+class MemWalRememberJobFailed(MemWalError):
+    """The async remember job reached terminal status=failed."""
+
+    def __init__(self, job_id: str, error: str) -> None:
+        super().__init__(f"remember job failed: {_redact_internal_urls(error)}")
+        self.status = 500
+        self.job_id = job_id
+        self.error = error
+
+
+class MemWalRememberJobTimeout(MemWalError):
+    """Polling loop exceeded the configured timeout."""
+
+    def __init__(self, job_id: str, timeout_ms: int) -> None:
+        super().__init__(
+            f"remember job timed out after {timeout_ms}ms (job_id={job_id})"
+        )
+        self.status = 504
+        self.job_id = job_id
+        self.timeout_ms = timeout_ms
+
+
+async def _discard_http_client(memwal: MemWal) -> None:
+    """Close the cached httpx client, and drop it either way.
+
+    ``close()`` can fail when the client belongs to an event loop that has
+    already finished — the caller still needs ``_client`` cleared so the next
+    request builds one in a loop that is actually running.
+    """
+    try:
+        await memwal.close()
+    except Exception:
+        logger.debug("Closing the cached HTTP client failed", exc_info=True)
+    finally:
+        memwal._client = None
+
+
+async def _with_fresh_http_client(memwal: MemWal, coro: Any) -> Any:
+    """Run ``coro`` with an httpx client owned by the *current* event loop.
+
+    The sync entry points execute each coroutine in a throwaway ``asyncio.run()``
+    loop, and an ``httpx.AsyncClient`` is bound to the loop that created it, so
+    one can never be reused across calls. Both ends are closed rather than just
+    dropped (GH #606): on the way in for anything an earlier loop left behind —
+    e.g. a caller mixing ``await memwal.recall()`` with the sync wrapper — and in
+    ``finally`` for the client this call created, while its loop is still alive.
+    """
+    await _discard_http_client(memwal)
+    try:
+        return await coro
+    finally:
+        await _discard_http_client(memwal)
+
+
+class MemWalSync:
+    """Synchronous wrapper around the async :class:`MemWal` client.
+
+    Provides the same API surface but runs everything through ``asyncio.run()``.
+    Useful for scripts, notebooks, and non-async applications.
+
+    Example::
+
+        from memwal import MemWalSync, RecallParams
+
+        client = MemWalSync.create(key="...", account_id="0x...")
+        result = client.remember("I love coffee")
+        matches = client.recall(RecallParams(query="coffee preferences"))
+    """
+
+    def __init__(self, inner: MemWal) -> None:
+        self._inner = inner
+
+    @classmethod
+    def create(
+        cls,
+        key: str,
+        account_id: str,
+        server_url: str = "http://localhost:8000",
+        namespace: str = "default",
+        env: Optional[str] = None,
+    ) -> "MemWalSync":
+        """Create a synchronous Walrus Memory client.
+
+        Same parameters as :meth:`MemWal.create` (including the ``env``
+        relayer preset).
+        """
+        inner = MemWal.create(
+            key=key,
+            account_id=account_id,
+            server_url=server_url,
+            namespace=namespace,
+            env=env,
+        )
+        return cls(inner)
+
+    def _run(self, coro: Any) -> Any:
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        # The httpx client is created and closed inside the same short-lived
+        # loop that uses it. This matters in notebooks/Jupyter where the sync
+        # wrapper runs coroutines in worker threads with their own event loops.
+        wrapped = _with_fresh_http_client(self._inner, coro)
+
+        if loop is not None and loop.is_running():
+            # Already inside an event loop (e.g. Jupyter).
+            # Create a new loop in a thread.
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, wrapped).result()
+        else:
+            return asyncio.run(wrapped)
+
+    def remember(
+        self,
+        text: str,
+        namespace: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> RememberAcceptedResult:
+        """Synchronous version of :meth:`MemWal.remember` (async accept)."""
+        return self._run(self._inner.remember(text, namespace, idempotency_key))
+
+    # Alias for parity with TS SDK ``rememberAsync``.
+    def remember_async(
+        self,
+        text: str,
+        namespace: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> RememberAcceptedResult:
+        return self._run(self._inner.remember_async(text, namespace, idempotency_key))
+
+    def wait_for_remember_job(
+        self,
+        job_id: str,
+        poll_interval_ms: int = 1500,
+        timeout_ms: int = 60_000,
+    ) -> RememberResult:
+        """Synchronous version of :meth:`MemWal.wait_for_remember_job`."""
+        return self._run(
+            self._inner.wait_for_remember_job(
+                job_id,
+                poll_interval_ms=poll_interval_ms,
+                timeout_ms=timeout_ms,
+            )
+        )
+
+    def remember_and_wait(
+        self,
+        text: str,
+        namespace: Optional[str] = None,
+        poll_interval_ms: int = 1500,
+        timeout_ms: int = 60_000,
+        idempotency_key: Optional[str] = None,
+    ) -> RememberResult:
+        """Synchronous version of :meth:`MemWal.remember_and_wait`."""
+        return self._run(
+            self._inner.remember_and_wait(
+                text,
+                namespace,
+                poll_interval_ms=poll_interval_ms,
+                timeout_ms=timeout_ms,
+                idempotency_key=idempotency_key,
+            )
+        )
+
+    def remember_bulk(
+        self, items: Sequence[RememberBulkItem]
+    ) -> RememberBulkAcceptedResult:
+        """Synchronous version of :meth:`MemWal.remember_bulk`."""
+        return self._run(self._inner.remember_bulk(items))
+
+    def remember_bulk_async(
+        self, items: Sequence[RememberBulkItem]
+    ) -> RememberBulkAcceptedResult:
+        return self._run(self._inner.remember_bulk_async(items))
+
+    def get_remember_bulk_status(
+        self, job_ids: Sequence[str]
+    ) -> RememberBulkStatusResult:
+        """Synchronous version of :meth:`MemWal.get_remember_bulk_status`."""
+        return self._run(self._inner.get_remember_bulk_status(job_ids))
+
+    def wait_for_remember_jobs(
+        self,
+        job_ids: Sequence[str],
+        opts: Optional[RememberBulkOptions] = None,
+    ) -> RememberBulkResult:
+        """Synchronous version of :meth:`MemWal.wait_for_remember_jobs`."""
+        return self._run(self._inner.wait_for_remember_jobs(job_ids, opts))
+
+    def remember_bulk_and_wait(
+        self,
+        items: Sequence[RememberBulkItem],
+        opts: Optional[RememberBulkOptions] = None,
+    ) -> RememberBulkResult:
+        """Synchronous version of :meth:`MemWal.remember_bulk_and_wait`."""
+        return self._run(self._inner.remember_bulk_and_wait(items, opts))
+
+    def recall(
+        self,
+        query: "str | RecallParams",
+        limit: int = 10,
+        namespace: Optional[str] = None,
+        max_distance: Optional[float] = None,
+    ) -> RecallResult:
+        """Synchronous version of :meth:`MemWal.recall` (accepts
+        :class:`RecallParams` for the recommended object-style call)."""
+        return self._run(self._inner.recall(query, limit, namespace, max_distance))
+
+    def analyze(
+        self,
+        text: str,
+        namespace: Optional[str] = None,
+        occurred_at: Optional[Union[str, datetime]] = None,
+    ) -> AnalyzeResult:
+        """Synchronous version of :meth:`MemWal.analyze`."""
+        return self._run(self._inner.analyze(text, namespace, occurred_at=occurred_at))
+
+    def analyze_and_wait(
+        self,
+        text: str,
+        namespace: Optional[str] = None,
+        opts: Optional[RememberBulkOptions] = None,
+        occurred_at: Optional[Union[str, datetime]] = None,
+    ) -> AnalyzeWaitResult:
+        """Synchronous version of :meth:`MemWal.analyze_and_wait`."""
+        return self._run(
+            self._inner.analyze_and_wait(text, namespace, opts, occurred_at=occurred_at)
+        )
+
+    def embed(self, text: str) -> EmbedResult:
+        """Synchronous version of :meth:`MemWal.embed`."""
+        return self._run(self._inner.embed(text))
+
+    def ask(self, question: str, limit: int = 5, namespace: Optional[str] = None) -> AskResult:
+        """Synchronous version of :meth:`MemWal.ask`."""
+        return self._run(self._inner.ask(question, limit, namespace))
+
+    def restore(self, namespace: str, limit: int = 10) -> RestoreResult:
+        """Synchronous version of :meth:`MemWal.restore`. Default limit is 10
+        (matches server + TypeScript SDK)."""
+        return self._run(self._inner.restore(namespace, limit))
+
+    def health(self) -> HealthResult:
+        """Synchronous version of :meth:`MemWal.health`."""
+        return self._run(self._inner.health())
+
+    def compatibility(self) -> Dict[str, Any]:
+        """Synchronous version of :meth:`MemWal.compatibility`."""
+        return self._run(self._inner.compatibility())
+
+    def remember_manual(self, opts: RememberManualOptions) -> RememberManualResult:
+        """Synchronous version of :meth:`MemWal.remember_manual`."""
+        return self._run(self._inner.remember_manual(opts))
+
+    def recall_manual(self, opts: RecallManualOptions) -> RecallManualResult:
+        """Synchronous version of :meth:`MemWal.recall_manual`."""
+        return self._run(self._inner.recall_manual(opts))
+
+    def get_public_key_hex(self) -> str:
+        """Synchronous version of :meth:`MemWal.get_public_key_hex`."""
+        return self._run(self._inner.get_public_key_hex())
+
+    def close(self) -> None:
+        """Close the underlying HTTP client."""
+        self._run(self._inner.close())
+
+    def __enter__(self) -> "MemWalSync":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()

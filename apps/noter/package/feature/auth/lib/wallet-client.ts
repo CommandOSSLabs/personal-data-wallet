@@ -179,4 +179,3 @@ export async function disconnectWallet(type: WalletType): Promise<void> {
     console.error(`[Wallet Disconnect] Error:`, error);
   }
 }
-

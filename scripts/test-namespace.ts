@@ -15,7 +15,7 @@ if (!DELEGATE_KEY) {
 }
 
 async function main() {
-    console.log("=== MemWal Namespace + Restore Test ===\n");
+    console.log("=== Walrus Memory Namespace + Restore Test ===\n");
 
     // Step 0: Health check
     console.log("0. Health check...");
@@ -37,7 +37,7 @@ async function main() {
     // Step 1: Remember with namespace
     console.log("1. Remember (with namespace)...");
     try {
-        const rememberResult = await memwal.remember("I love Sui blockchain and Move language");
+        const rememberResult = await memwal.rememberAndWait("I love Sui blockchain and Move language");
         console.log(`   ✅ Remember OK`);
         console.log(`   id: ${rememberResult.id}`);
         console.log(`   blob_id: ${rememberResult.blob_id}`);

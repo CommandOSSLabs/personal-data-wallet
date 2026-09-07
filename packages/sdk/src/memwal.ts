@@ -1,7 +1,7 @@
 /**
- * memwal — SDK Client
+ * Walrus Memory — SDK Client
  *
- * Ed25519 delegate key based client that communicates with the MemWal
+ * Ed25519 delegate key based client that communicates with the Walrus Memory
  * Rust server (TEE). All data processing (encryption, embedding, Walrus)
  * happens server-side — the SDK just signs requests and sends text.
  *
@@ -15,14 +15,15 @@
  *
  * const memwal = MemWal.create({
  *     key: process.env.MEMWAL_PRIVATE_KEY,  // Ed25519 private key (hex)
- *     accountId: process.env.MEMWAL_ACCOUNT_ID, // MemWalAccount object ID
+ *     accountId: process.env.MEMWAL_ACCOUNT_ID, // Walrus Memory account object ID
  * })
  *
- * // Remember — server: verify → embed → encrypt → Walrus → store
- * await memwal.remember("I'm allergic to peanuts")
+ * // Remember — returns an accepted background job immediately
+ * const accepted = await memwal.remember("I'm allergic to peanuts")
+ * await memwal.waitForRememberJob(accepted.job_id)
  *
  * // Recall — server: verify → embed query → search → download → decrypt
- * const result = await memwal.recall("food allergies")
+ * const result = await memwal.recall({ query: "food allergies" })
  * console.log(result.results[0].text) // "I'm allergic to peanuts"
  * ```
  */
@@ -32,16 +33,47 @@ import type {
     RememberResult,
     RecallResult,
     RecallMemory,
+    RecallOptions,
+    RecallParams,
     EmbedResult,
+    AnalyzeOptions,
     AnalyzeResult,
+    AnalyzeWaitResult,
     HealthResult,
     RememberManualOptions,
     RememberManualResult,
     RecallManualOptions,
     RecallManualResult,
     RestoreResult,
+    NamespacesResult,
+    ListNamespacesOptions,
+    RememberBulkItem,
+    RememberBulkOptions,
+    RememberBulkResult,
+    RememberAcceptedResult,
+    RememberJobStatus,
+    RememberBulkAcceptedResult,
+    RememberBulkStatusResult,
+    RememberBulkStatusItem,
+    RememberBulkItemResult,
+    RelayerVersionMetadata,
 } from "./types.js";
-import { sha256hex, hexToBytes, bytesToHex } from "./utils.js";
+import {
+    sha256hex,
+    hexToBytes,
+    bytesToHex,
+    normalizePrivateKey,
+    normalizeServerUrl,
+    sanitizeServerError,
+    redactInternalUrls,
+    clockDriftErrorFromResponse,
+    scoringWeightsToWire,
+} from "./utils.js";
+import {
+    assertCompatibleRelayer,
+    compatibilityErrorFromStatus,
+} from "./compatibility.js";
+import { applyTokenBudget, estimateTokens } from "./tokens.js";
 
 // ============================================================
 // Ed25519 Signing (lazy-loaded)
@@ -59,6 +91,94 @@ async function getEd() {
 // MemWal Client
 // ============================================================
 
+// ENG-1697: SEAL SessionKey cache layout. `bytes` holds the
+// base64(JSON(ExportedSessionKey)) envelope transmitted in the
+// `x-seal-session` header. `expiresAt` is an absolute epoch-millis
+// deadline with a safety margin applied so we refresh before the SEAL
+// key servers observe the session as expired.
+interface SessionCacheEntry {
+    bytes: string;
+    expiresAt: number;
+}
+
+interface ServerConfig {
+    packageId: string;
+    network: string;
+    suiRpcUrl?: string;
+    suiGrpcUrl?: string;
+    suiTransport: "grpc" | "jsonrpc";
+}
+
+const SEAL_SESSION_TTL_MIN = 5;
+// Refresh 30 seconds before SEAL's 5-minute TTL to avoid the window where
+// the client thinks the session is valid but a just-received request hits
+// a key server that sees it as expired.
+const SEAL_SESSION_SAFETY_MARGIN_MS = 30_000;
+
+type RememberStatusResponse = RememberJobStatus | { error?: string };
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function pollingDelayMs(baseMs: number, attempt: number): number {
+    const base = Math.max(100, baseMs);
+    const capped = Math.min(10_000, base * 1.5 ** Math.min(attempt, 6));
+    const jitter = 0.75 + Math.random() * 0.5;
+    return Math.floor(capped * jitter);
+}
+
+function isTransientPollingStatus(status: number): boolean {
+    return status === 0 || status === 429 || status >= 500;
+}
+
+/**
+ * Normalise the legacy `(text, namespace)` and new `(text, options)`
+ * overloads of `analyze()` / `analyzeAndWait()` into a single
+ * `AnalyzeOptions` object. Preserves backwards compatibility — a plain
+ * string is treated as the namespace.
+ */
+function normalizeAnalyzeOptions(
+    namespaceOrOptions?: string | AnalyzeOptions,
+): AnalyzeOptions {
+    if (namespaceOrOptions == null) return {};
+    if (typeof namespaceOrOptions === "string") return { namespace: namespaceOrOptions };
+    return namespaceOrOptions;
+}
+
+/**
+ * Render an `occurredAt` argument to the wire format the server
+ * expects: RFC-3339 UTC with trailing `Z` and millisecond precision
+ * (e.g. `"2023-05-25T17:50:00.000Z"`). `Date` objects are normalised
+ * via `toISOString()` (which always emits this exact shape); strings
+ * are passed through verbatim — the caller is trusted to have given
+ * us a valid RFC-3339 timestamp. Invalid `Date` instances (constructed
+ * from garbage input — `Date` silently produces "Invalid Date" rather
+ * than throwing) are rejected at the SDK boundary with a diagnostic
+ * `TypeError`, so a bad timestamp doesn't surface as an opaque
+ * `RangeError: Invalid time value` from `.toISOString()` later.
+ * Returns `undefined` when no anchor is supplied so the field is
+ * omitted from the request body.
+ */
+function occurredAtToWire(occurredAt?: string | Date): string | undefined {
+    if (occurredAt == null) return undefined;
+    if (occurredAt instanceof Date) {
+        if (Number.isNaN(occurredAt.getTime())) {
+            throw new TypeError(
+                "occurredAt is an Invalid Date — likely constructed from a " +
+                "malformed string. `Date` accepts garbage silently; check " +
+                "the source value before passing it as occurredAt.",
+            );
+        }
+        return occurredAt.toISOString();
+    }
+    return occurredAt;
+}
+
+function normalizeSuiNetworkForGrpc(network: string): string {
+    return network === "local" ? "localnet" : network;
+}
+
 export class MemWal {
     private privateKey: Uint8Array;
     private publicKey: Uint8Array | null = null;
@@ -66,21 +186,69 @@ export class MemWal {
     private namespace: string;
     private accountId: string;
 
+    // ENG-1697 state — all internal, never surfaced to user code.
+    // The public API (`MemWal.create({ key, accountId })`) is unchanged.
+    private sessionCache: SessionCacheEntry | null = null;
+    private serverConfig: ServerConfig | null = null;
+    private relayerVersionMetadata: RelayerVersionMetadata | null = null;
+    /** Single-flight guard so concurrent requests share one SessionKey build. */
+    private sessionBuildPromise: Promise<string> | null = null;
+    /** Single-flight guard so concurrent requests share one compatibility probe. */
+    private compatibilityPromise: Promise<RelayerVersionMetadata> | null = null;
+    /** Resolved owner address for this account. See `resolveOwner()`. */
+    private ownerAddress: string | null = null;
+    /** Single-flight guard so concurrent reads share one owner resolution. */
+    private ownerPromise: Promise<string> | null = null;
+
+    /**
+     * Keep a generated idempotency key while a remember request has no
+     * acknowledged response. If the transport times out after the server
+     * accepted the write, the caller's next identical attempt reuses the key
+     * and collapses onto the original paid job.
+     */
+    private pendingRememberKeys = new Map<string, string>();
+
     private constructor(config: MemWalConfig) {
-        this.privateKey = hexToBytes(config.key);
+        this.privateKey =
+            typeof config.key === "string"
+                ? hexToBytes(normalizePrivateKey(config.key))
+                : config.key;
         this.accountId = config.accountId;
-        this.serverUrl = (config.serverUrl ?? "http://localhost:8000").replace(/\/$/, "");
+        // LOW-22: default to HTTPS for production usage; normalizeServerUrl
+        // warns (does not throw) if a user passes plain http:// for a
+        // non-localhost host.
+        this.serverUrl = normalizeServerUrl(config.serverUrl ?? "https://relayer.memory.walrus.xyz");
         this.namespace = config.namespace ?? "default";
     }
 
     /**
-     * Create a new MemWal client instance.
+     * Create a new Walrus Memory client instance.
      *
-     * @param config.key - Ed25519 private key (hex string) — the delegate key
-     * @param config.serverUrl - Server URL (default: http://localhost:8000)
+     * @param config.key - Ed25519 private key (hex or `suiprivkey1...`) — the delegate key
+     * @param config.serverUrl - Server URL (default: https://relayer.memory.walrus.xyz)
      */
     static create(config: MemWalConfig): MemWal {
         return new MemWal(config);
+    }
+
+    /**
+     * Securely wipe the private and public keys from memory.
+     * Prevents key extraction from V8 heap dumps.
+     */
+    destroy(): void {
+        if (this.privateKey) {
+            this.privateKey.fill(0);
+        }
+        if (this.publicKey) {
+            this.publicKey.fill(0);
+        }
+        // ENG-1697: drop cached session material too — once destroyed the
+        // instance must not leak authorization tokens either.
+        this.sessionCache = null;
+        this.serverConfig = null;
+        this.relayerVersionMetadata = null;
+        this.compatibilityPromise = null;
+        this.pendingRememberKeys.clear();
     }
 
     // ============================================================
@@ -88,46 +256,469 @@ export class MemWal {
     // ============================================================
 
     /**
-     * Remember something — server handles: verify → embed → encrypt → Walrus upload → store
+     * Submit a remember request and return as soon as the server accepts the job.
+     */
+    async rememberAsync(
+        text: string,
+        namespace?: string,
+        options: { idempotencyKey?: string } = {},
+    ): Promise<RememberAcceptedResult> {
+        const resolvedNamespace = namespace ?? this.namespace;
+        const requestIdentity = `${resolvedNamespace}\0${text}`;
+        const generatedKey = options.idempotencyKey === undefined;
+        const idempotencyKey = options.idempotencyKey
+            ?? this.pendingRememberKeys.get(requestIdentity)
+            ?? crypto.randomUUID();
+        if (generatedKey) this.pendingRememberKeys.set(requestIdentity, idempotencyKey);
+
+        const accepted = await this.signedRequest<RememberAcceptedResult>(
+            "POST",
+            "/api/remember",
+            { text, namespace: resolvedNamespace, idempotency_key: idempotencyKey },
+            [200, 202],
+        );
+        if (generatedKey) this.pendingRememberKeys.delete(requestIdentity);
+        return accepted;
+    }
+
+    /**
+     * One-shot lookup of a remember job's current state. Returns the
+     * full state machine value (`pending` | `running` | `uploaded` |
+     * `done` | `failed` | `not_found`) without polling.
+     *
+     * Useful when the caller wants to drive its own polling loop and
+     * surface intermediate states to a UI — `waitForRememberJob` only
+     * resolves at the terminal state and hides progress.
+     */
+    async getRememberStatus(jobId: string): Promise<RememberJobStatus> {
+        const status = await this.signedRequest<RememberStatusResponse>(
+            "GET",
+            `/api/remember/${jobId}`,
+            {},
+            [200, 404],
+        );
+
+        if (!("status" in status)) {
+            return {
+                job_id: jobId,
+                status: "not_found",
+                error: status.error ?? `remember job not found: ${jobId}`,
+            };
+        }
+
+        return status;
+    }
+
+    /**
+     * Poll an accepted remember job until it reaches a terminal state.
+     */
+    async waitForRememberJob(
+        jobId: string,
+        opts: { pollIntervalMs?: number; timeoutMs?: number } = {},
+    ): Promise<RememberResult> {
+        const { pollIntervalMs = 1500, timeoutMs = 60_000 } = opts;
+        const deadline = Date.now() + timeoutMs;
+        let attempt = 0;
+
+        while (Date.now() < deadline) {
+            await sleep(pollingDelayMs(pollIntervalMs, attempt++));
+
+            let status: RememberStatusResponse;
+
+            try {
+                status = await this.signedRequest<RememberStatusResponse>(
+                    "GET",
+                    `/api/remember/${jobId}`,
+                    {},
+                    [200, 404],
+                );
+            } catch (err) {
+                const httpStatus = (err as { status?: number }).status ?? 0;
+                if (isTransientPollingStatus(httpStatus)) {
+                    continue;
+                }
+                throw err;
+            }
+
+            if (!("status" in status) || status.status === "not_found") {
+                throw Object.assign(new Error(`remember job not found: ${jobId}`), {
+                    status: 404,
+                    jobId,
+                });
+            }
+
+            if (status.status === "done") {
+                return {
+                    id: status.job_id,
+                    job_id: status.job_id,
+                    blob_id: status.blob_id ?? "",
+                    owner: status.owner ?? "",
+                    namespace: status.namespace ?? this.namespace,
+                };
+            }
+            if (status.status === "failed") {
+                throw Object.assign(
+                    new Error(
+                        `remember job failed: ${redactInternalUrls(status.error ?? "unknown error")}`,
+                    ),
+                    { status: 500, jobId },
+                );
+            }
+        }
+
+        throw Object.assign(
+            new Error(`remember job timed out after ${timeoutMs}ms (job_id=${jobId})`),
+            { status: 504, jobId },
+        );
+    }
+
+    /**
+     * Remember something and wait for the background job to complete.
+     */
+    async rememberAndWait(
+        text: string,
+        namespace?: string,
+        opts: { pollIntervalMs?: number; timeoutMs?: number; idempotencyKey?: string } = {},
+    ): Promise<RememberResult> {
+        const resolvedNamespace = namespace ?? this.namespace;
+        const requestIdentity = `${resolvedNamespace}\0${text}`;
+        const generatedKey = opts.idempotencyKey === undefined;
+        const idempotencyKey = opts.idempotencyKey
+            ?? this.pendingRememberKeys.get(requestIdentity)
+            ?? crypto.randomUUID();
+        if (generatedKey) this.pendingRememberKeys.set(requestIdentity, idempotencyKey);
+
+        const accepted = await this.rememberAsync(text, resolvedNamespace, { idempotencyKey });
+        const completed = await this.waitForRememberJob(accepted.job_id, opts);
+        // Clear only after terminal success. A polling timeout/transport failure
+        // keeps the key so retrying the high-level operation reuses the same job.
+        if (generatedKey) this.pendingRememberKeys.delete(requestIdentity);
+        return completed;
+    }
+
+    /**
+     * Remember something and return as soon as the server accepts the job.
+     *
+     * The relayer continues embedding, encrypting, uploading, and indexing in the background.
+     * Use rememberAndWait() when the caller needs the final blob_id before continuing.
      *
      * @param text - The text to remember
-     * @returns RememberResult with id, blob_id, owner
+     * @param namespace - Optional namespace override
+     */
+    async remember(
+        text: string,
+        namespace?: string,
+        options: { idempotencyKey?: string } = {},
+    ): Promise<RememberAcceptedResult> {
+        return this.rememberAsync(text, namespace, options);
+    }
+
+    /**
+     * Remember multiple memories in one batched request (ENG-1408).
+     *
+     * Server handles: verify → embed + SEAL-encrypt all items concurrently →
+     * upload N blobs to Walrus in parallel → 1 PTB per wallet slot for
+     * set-metadata + transfer. This collapses `N × (2 + 1)` Sui transactions
+     * into roughly `2N + K` where K ≤ wallet pool size.
+     *
+     * Returns `202 Accepted` immediately with `job_ids[]`.
+     *
+     * @param items - Array of `{ text, namespace? }` items (max 20 per call)
      *
      * @example
      * ```typescript
-     * const result = await memwal.remember("I'm allergic to peanuts")
-     * console.log(result.blob_id) // "TY8mW0yr..."
+     * const accepted = await memwal.rememberBulk([
+     *     { text: "I love coffee" },
+     *     { text: "I live in Tokyo", namespace: "profile" },
+     * ])
+     * console.log(accepted.job_ids)
      * ```
      */
-    async remember(text: string, namespace?: string): Promise<RememberResult> {
-        return this.signedRequest<RememberResult>("POST", "/api/remember", {
-            text,
-            namespace: namespace ?? this.namespace,
-        });
+    async rememberBulkAsync(items: RememberBulkItem[]): Promise<RememberBulkAcceptedResult> {
+        if (!Array.isArray(items) || items.length === 0) {
+            throw new Error("rememberBulkAsync: items must be a non-empty array");
+        }
+
+        const normalised = items.map((item) => ({
+            text: item.text,
+            namespace: item.namespace ?? this.namespace,
+        }));
+
+        const accepted = await this.signedRequest<RememberBulkAcceptedResult>(
+            "POST",
+            "/api/remember/bulk",
+            { items: normalised },
+            [200, 202],
+        );
+
+        if (!accepted.job_ids || accepted.job_ids.length !== normalised.length) {
+            throw new Error(
+                `rememberBulkAsync: server returned ${accepted.job_ids?.length ?? 0} job_ids for ${normalised.length} items`,
+            );
+        }
+
+        return accepted;
+    }
+
+    async getRememberBulkStatus(jobIds: string[]): Promise<RememberBulkStatusResult> {
+        return this.signedRequest<RememberBulkStatusResult>(
+            "POST",
+            "/api/remember/bulk/status",
+            { job_ids: jobIds },
+        );
+    }
+
+    async waitForRememberJobs(
+        jobIds: string[],
+        namespaces: string[] = [],
+        opts: RememberBulkOptions = {},
+    ): Promise<RememberBulkResult> {
+        const { pollIntervalMs = 1500, timeoutMs = 120_000 } = opts;
+        const deadline = Date.now() + timeoutMs;
+        const results: RememberBulkItemResult[] = jobIds.map((jobId, idx) => ({
+            id: jobId,
+            blob_id: "",
+            status: "timeout",
+            namespace: namespaces[idx] ?? this.namespace,
+            error: `polling timed out after ${timeoutMs}ms`,
+        }));
+        const pending = new Set(jobIds);
+        let attempt = 0;
+
+        while (pending.size > 0 && Date.now() < deadline) {
+            await sleep(pollingDelayMs(pollIntervalMs, attempt++));
+
+            const pendingIds = jobIds.filter((jobId) => pending.has(jobId));
+            if (pendingIds.length === 0) {
+                break;
+            }
+
+            let batchStatus: RememberBulkStatusResult;
+
+            try {
+                batchStatus = await this.getRememberBulkStatus(pendingIds);
+            } catch (err) {
+                const httpStatus = (err as { status?: number }).status ?? 0;
+                if (isTransientPollingStatus(httpStatus)) {
+                    continue;
+                }
+                throw err;
+            }
+
+            const statusById = new Map<string, RememberBulkStatusItem[]>();
+            for (const item of batchStatus.results) {
+                const bucket = statusById.get(item.job_id);
+                if (bucket) {
+                    bucket.push(item);
+                } else {
+                    statusById.set(item.job_id, [item]);
+                }
+            }
+
+            for (const jobId of pendingIds) {
+                const status = statusById.get(jobId)?.shift();
+                if (!status) {
+                    continue;
+                }
+
+                const idx = jobIds.indexOf(jobId);
+                if (status.status === "done") {
+                    results[idx] = {
+                        id: jobId,
+                        blob_id: status.blob_id ?? "",
+                        status: "done",
+                        namespace: namespaces[idx] ?? this.namespace,
+                    };
+                    pending.delete(jobId);
+                } else if (status.status === "failed" || status.status === "not_found") {
+                    results[idx] = {
+                        id: jobId,
+                        blob_id: "",
+                        status: "failed",
+                        namespace: namespaces[idx] ?? this.namespace,
+                        error:
+                            status.status === "not_found"
+                                ? "job not found"
+                                : redactInternalUrls(status.error ?? "unknown error"),
+                    };
+                    pending.delete(jobId);
+                }
+            }
+        }
+
+        const succeeded = results.filter((r) => r.status === "done").length;
+
+        return {
+            results,
+            total: results.length,
+            succeeded,
+            failed: results.length - succeeded,
+        };
+    }
+
+    /**
+     * Remember multiple memories and return as soon as the server accepts the jobs.
+     */
+    async rememberBulk(items: RememberBulkItem[]): Promise<RememberBulkAcceptedResult> {
+        return this.rememberBulkAsync(items);
+    }
+
+    /**
+     * Remember multiple memories and wait until every job reaches a terminal state.
+     */
+    async rememberBulkAndWait(
+        items: RememberBulkItem[],
+        opts: RememberBulkOptions = {},
+    ): Promise<RememberBulkResult> {
+        const namespaces = items.map((item) => item.namespace ?? this.namespace);
+        const accepted = await this.rememberBulkAsync(items);
+        return this.waitForRememberJobs(accepted.job_ids, namespaces, opts);
     }
 
     /**
      * Recall memories similar to a query — server handles:
-     * verify → embed query → search → Walrus download → decrypt → return plaintext
+     * verify → embed query → search → Walrus download → decrypt → return plaintext.
      *
-     * @param query - Search query
-     * @param limit - Max number of results (default: 10)
+     * **Preferred call style**: pass a single `RecallParams` object
+     * so call sites read self-describingly:
+     * ```ts
+     * memwal.recall({ query: "food allergies", limit: 5, namespace: "profile" })
+     * ```
+     *
+     * The legacy positional forms remain supported for backwards compatibility:
+     * - `recall(query)`
+     * - `recall(query, limit)`
+     * - `recall(query, limit, namespace)`
+     * - `recall(query, { limit, namespace, maxDistance, topK })`
+     *
+     * `topK` and `limit` are aliases; if both are set, `topK` wins.
+     *
      * @returns RecallResult with decrypted text results
      *
      * @example
      * ```typescript
-     * const result = await memwal.recall("food allergies")
+     * // Object style — recommended
+     * const result = await memwal.recall({
+     *     query: "food allergies",
+     *     limit: 5,
+     *     namespace: "profile",
+     * });
      * for (const memory of result.results) {
-     *     console.log(memory.text, memory.distance)
+     *     console.log(memory.text, memory.distance);
      * }
+     *
+     * // Positional style — still works
+     * const result2 = await memwal.recall("food allergies", 5, "profile");
      * ```
      */
-    async recall(query: string, limit: number = 10, namespace?: string): Promise<RecallResult> {
-        return this.signedRequest<RecallResult>("POST", "/api/recall", {
-            query,
-            limit,
-            namespace: namespace ?? this.namespace,
-        });
+    /**
+     * Estimate the token cost of a string using the SDK's default
+     * character-based approximation (~chars/4, code-point aware). Useful to weigh
+     * a recall payload before injecting it into a model context:
+     *
+     * ```ts
+     * const hits = await memwal.recall({ query, limit: 8 });
+     * const joined = hits.results.map((h) => h.text).join("\n---\n");
+     * if (memwal.countTokens(joined) > 2048) { /* re-query with maxTokens *\/ }
+     * ```
+     *
+     * This is an estimate, not an exact tokenizer count — see `estimateTokens`
+     * for accuracy caveats. For exact counts, pass your own counter to
+     * `recall({ maxTokens, countTokens })`.
+     */
+    countTokens(text: string): number {
+        return estimateTokens(text);
+    }
+
+    async recall(params: RecallParams): Promise<RecallResult>;
+    /**
+     * @deprecated Positional `recall(query, limit, namespace)` is easy to
+     * misread as `recall(query, namespace)`. Prefer the object form
+     * `recall({ query, limit, namespace })`. Positional will be removed in a
+     * future major version of the SDK.
+     */
+    async recall(
+        query: string,
+        limitOrOptions?: number | RecallOptions,
+        namespace?: string,
+    ): Promise<RecallResult>;
+    async recall(
+        queryOrParams: string | RecallParams,
+        limitOrOptions: number | RecallOptions | undefined = 10,
+        namespace?: string,
+    ): Promise<RecallResult> {
+        let query: string;
+        let options: RecallOptions;
+        if (typeof queryOrParams === "object") {
+            const { query: q, ...rest } = queryOrParams;
+            query = q;
+            options = rest;
+        } else {
+            query = queryOrParams;
+            if (limitOrOptions == null) {
+                options = { limit: 10, namespace };
+            } else if (typeof limitOrOptions === "number") {
+                options = { limit: limitOrOptions, namespace };
+            } else {
+                options = limitOrOptions;
+            }
+        }
+        const limit = options.topK ?? options.limit ?? 10;
+        const resolvedNamespace = options.namespace ?? this.namespace;
+
+        const ac = new AbortController();
+        const tid = setTimeout(() => ac.abort(), 15000);
+        try {
+            const result = await this.signedRequest<RecallResult>("POST", "/api/recall", {
+                query,
+                limit,
+                namespace: resolvedNamespace,
+                // `undefined` when no weights were supplied, which
+                // JSON.stringify drops — so a default-weighted recall stays
+                // byte-identical on the wire and the relayer keeps
+                // short-circuiting to the plain pgvector cosine order.
+                scoring_weights: scoringWeightsToWire(options.scoringWeights),
+                // Same `undefined`-is-dropped trick: an unset sort leaves the
+                // request byte-identical and the relayer applies its own
+                // "relevance" default.
+                sort: options.sort,
+            }, { signal: ac.signal });
+
+            let processed = result;
+            if (typeof options.maxDistance === "number") {
+                const filtered = result.results.filter(
+                    (memory) => memory.distance < options.maxDistance!,
+                );
+                processed = {
+                    ...processed,
+                    results: filtered,
+                    total: filtered.length,
+                };
+            }
+
+            // Client-side token budgeting: trim the (already distance-sorted)
+            // payload to fit maxTokens per the chosen strategy, and attach the
+            // token estimate + truncated flag. Omitting maxTokens leaves the
+            // result byte-identical to the pre-budget behavior (no meta).
+            if (typeof options.maxTokens === "number") {
+                const { results: budgeted, meta } = applyTokenBudget(
+                    processed.results,
+                    options.maxTokens,
+                    options.truncationStrategy,
+                    options.countTokens,
+                );
+                processed = {
+                    ...processed,
+                    results: budgeted,
+                    total: budgeted.length,
+                    meta,
+                };
+            }
+
+            return processed;
+        } finally {
+            clearTimeout(tid);
+        }
     }
 
     // ============================================================
@@ -135,29 +726,36 @@ export class MemWal {
     // ============================================================
 
     /**
-     * Remember (manual mode) — user handles SEAL encrypt, embedding,
-     * and Walrus upload externally. Server only stores the vector ↔ blobId mapping.
+     * Remember (manual mode) — user handles SEAL encrypt and embedding.
+     * The relayer uploads the encrypted bytes to Walrus and stores the
+     * vector ↔ blobId mapping.
      *
-     * @param opts.blobId - Walrus blob ID (user already uploaded encrypted data)
+     * Trust boundary (ENG-1696): the delegate private key is NOT transmitted on
+     * this request. Manual-mode handlers on the server never invoke SEAL
+     * decrypt, so the key stays client-side as the name implies.
+     *
+     * @param opts.encryptedData - Base64-encoded SEAL-encrypted bytes
      * @param opts.vector - Embedding vector (user already generated, e.g. 1536-dim)
      * @returns RememberManualResult with id, blob_id, owner
      *
      * @example
      * ```typescript
-     * // 1. User encrypts + uploads + embeds on their own
-     * const blobId = await myWalrusUpload(sealEncryptedData)
+     * const encryptedData = Buffer.from(sealEncryptedBytes).toString("base64")
      * const vector = await myEmbeddingModel.embed(text)
-     *
-     * // 2. Register vector mapping with server
-     * const result = await memwal.rememberManual({ blobId, vector })
+     * const result = await memwal.rememberManual({ encryptedData, vector })
      * ```
      */
     async rememberManual(opts: RememberManualOptions): Promise<RememberManualResult> {
-        return this.signedRequest<RememberManualResult>("POST", "/api/remember/manual", {
-            blob_id: opts.blobId,
-            vector: opts.vector,
-            namespace: opts.namespace ?? this.namespace,
-        });
+        return this.signedRequest<RememberManualResult>(
+            "POST",
+            "/api/remember/manual",
+            {
+                encrypted_data: opts.encryptedData,
+                vector: opts.vector,
+                namespace: opts.namespace ?? this.namespace,
+            },
+            { includeDelegateKey: false },
+        );
     }
 
     /**
@@ -165,8 +763,13 @@ export class MemWal {
      * Server returns matching blobIds + distances.
      * User then downloads from Walrus + SEAL decrypts on their own.
      *
+     * Trust boundary (ENG-1696): the delegate private key is NOT transmitted on
+     * this request. Server returns blob IDs only; decryption happens entirely
+     * on the client.
+     *
      * @param opts.vector - Pre-computed query embedding vector
      * @param opts.limit - Max results (default: 10)
+     * @param opts.scoringWeights - Optional composite-scoring weights
      * @returns RecallManualResult with blob_id + distance pairs (no decrypted text)
      *
      * @example
@@ -186,11 +789,17 @@ export class MemWal {
      * ```
      */
     async recallManual(opts: RecallManualOptions): Promise<RecallManualResult> {
-        return this.signedRequest<RecallManualResult>("POST", "/api/recall/manual", {
-            vector: opts.vector,
-            limit: opts.limit ?? 10,
-            namespace: opts.namespace ?? this.namespace,
-        });
+        return this.signedRequest<RecallManualResult>(
+            "POST",
+            "/api/recall/manual",
+            {
+                vector: opts.vector,
+                limit: opts.limit ?? 10,
+                namespace: opts.namespace ?? this.namespace,
+                scoring_weights: scoringWeightsToWire(opts.scoringWeights),
+            },
+            { includeDelegateKey: false },
+        );
     }
 
     /**
@@ -200,58 +809,215 @@ export class MemWal {
      * @returns EmbedResult with vector
      */
     async embed(text: string): Promise<EmbedResult> {
-        return this.signedRequest<EmbedResult>("POST", "/api/embed", { text });
+        return this.signedRequest<EmbedResult>(
+            "POST",
+            "/api/embed",
+            { text },
+            { includeDelegateKey: false },
+        );
     }
 
     /**
-     * Analyze conversation text — server uses LLM to extract facts, then
-     * stores each one (embed → encrypt → Walrus → store).
+     * Analyze conversation text and return as soon as extracted facts are accepted.
+     *
+     * The relayer extracts facts synchronously, returns one job_id per fact, then
+     * embeds, encrypts, uploads, and indexes each fact in the background.
      *
      * @param text - Conversation text to analyze
-     * @returns AnalyzeResult with extracted and stored facts
+     * @returns AnalyzeResult with extracted facts and accepted job_ids
      *
      * @example
      * ```typescript
      * const result = await memwal.analyze("I love coffee and live in Tokyo")
-     * console.log(result.facts) // ["User loves coffee", "User lives in Tokyo"]
+     * console.log(result.job_ids)
      * ```
      */
-    async analyze(text: string, namespace?: string): Promise<AnalyzeResult> {
-        return this.signedRequest<AnalyzeResult>("POST", "/api/analyze", {
+    async analyze(
+        text: string,
+        namespaceOrOptions?: string | AnalyzeOptions,
+    ): Promise<AnalyzeResult> {
+        const options = normalizeAnalyzeOptions(namespaceOrOptions);
+        const body: Record<string, unknown> = {
             text,
-            namespace: namespace ?? this.namespace,
-        });
+            namespace: options.namespace ?? this.namespace,
+        };
+        const wireOccurredAt = occurredAtToWire(options.occurredAt);
+        if (wireOccurredAt !== undefined) body.occurred_at = wireOccurredAt;
+        return this.signedRequest<AnalyzeResult>("POST", "/api/analyze", body, [200, 202]);
     }
 
     /**
-     * Restore a namespace — server downloads all blobs from Walrus,
-     * decrypts with delegate key, re-embeds, and re-indexes.
+     * Analyze conversation text and wait until every extracted fact is stored.
+     */
+    async analyzeAndWait(
+        text: string,
+        namespaceOrOptions?: string | AnalyzeOptions,
+        opts: RememberBulkOptions = {},
+    ): Promise<AnalyzeWaitResult> {
+        const options = normalizeAnalyzeOptions(namespaceOrOptions);
+        const namespace = options.namespace ?? this.namespace;
+        const accepted = await this.analyze(text, options);
+        const namespaces = accepted.job_ids.map(() => namespace);
+        const completed = await this.waitForRememberJobs(accepted.job_ids, namespaces, opts);
+        return {
+            ...completed,
+            facts: accepted.facts,
+            owner: accepted.owner,
+        };
+    }
+
+    /**
+     * Rebuild missing local index entries for `namespace` from Walrus.
      *
-     * @param namespace - Namespace to restore
-     * @returns RestoreResult with count of restored entries
+     * The relayer queries Walrus for blobs the caller owns in `namespace`,
+     * ignores blobs already indexed locally, downloads the missing ones,
+     * SEAL-decrypts them with the delegate key, re-embeds the plaintext,
+     * and inserts a fresh vector row per blob.
+     *
+     * **Response semantics**:
+     * - `restored` — blobs that completed the full
+     *   download → decrypt → embed → DB insert pipeline this call.
+     * - `skipped` — on-chain blobs already in the local index (no work needed).
+     *   Decrypt / embed failures are dropped silently and count as neither.
+     * - `total` — on-chain blobs the relayer saw for `(owner, namespace)`
+     *   before the limit was applied.
+     *
+     * **`limit`** caps the *number of missing blobs the relayer selects* from
+     * the candidates it sees, in unspecified order. It is not a cap on
+     * `restored` directly. The server default is `10` (matches the SDK
+     * default).
+     *
+     * **No pagination cursor** — restore is single-shot. A larger `limit` may
+     * help when `truncated` is caused by the request limit, but candidate
+     * discovery also has a per-owner source cap shared across namespaces.
+     * Hitting that cap requires cursor/pagination support for guaranteed full
+     * recovery; increasing `limit` or retrying cannot guarantee it.
+     *
+     * **Performance** scales linearly in `limit`: up to 10 Walrus downloads
+     * in parallel, then 3 SEAL decrypts in parallel, then embeddings.
+     * Expect seconds-per-blob on cold caches.
+     *
+     * @param namespace - Namespace to restore (exact match; no prefix/hierarchy)
+     * @param limit - Max blobs to inspect this call (default: 10)
+     * @returns RestoreResult with restored / skipped / total counts
      *
      * @example
      * ```typescript
-     * const result = await memwal.restore("my-app")
-     * console.log(`Restored ${result.restored} memories`)
+     * const result = await memwal.restore("my-app");
+     * console.log(`restored=${result.restored} skipped=${result.skipped} total=${result.total}`);
      * ```
      */
-    async restore(namespace: string, limit: number = 50): Promise<RestoreResult> {
-        return this.signedRequest<RestoreResult>("POST", "/api/restore", {
+    async restore(namespace: string, limit: number = 10): Promise<RestoreResult> {
+        const result = await this.signedRequest<RestoreResult>("POST", "/api/restore", {
             namespace,
             limit,
+        });
+        // Relayers older than WALM-319 omit `truncated` entirely — treat
+        // "not present" as "not known to be truncated" rather than drop
+        // the field or require every relayer version to send it.
+        return { ...result, truncated: result.truncated ?? false };
+    }
+
+    /**
+     * List the namespaces this account holds memories in.
+     *
+     * Recall is similarity-ranked and needs a namespace to search; without
+     * this, an agent connecting to an unfamiliar account has to guess names
+     * or fall back to `"default"`. Returns metadata only — no blob fetch, no
+     * decryption.
+     *
+     * Paginate with `has_more`, NOT page length: the server clamps `limit`,
+     * so asking for more than the cap returns exactly the cap.
+     *
+     * ```ts
+     * let cursor: string | undefined;
+     * let more = true;
+     * while (more) {
+     *     const page = await memwal.listNamespaces({ cursor });
+     *     for (const ns of page.namespaces) console.log(ns.name, ns.memory_count);
+     *     cursor = page.next_cursor ?? undefined;
+     *     more = page.has_more;
+     * }
+     * ```
+     */
+    async listNamespaces(options: ListNamespacesOptions = {}): Promise<NamespacesResult> {
+        const owner = await this.resolveOwner();
+
+        const params = new URLSearchParams();
+        if (options.cursor !== undefined) params.set("updated_after", options.cursor);
+        if (options.limit !== undefined) params.set("limit", String(options.limit));
+        const query = params.toString();
+
+        // Query string must be part of the signed path: the server verifies
+        // against `path_and_query`, not `path` (see `auth.rs`).
+        const path = `/v1/owners/${owner}/namespaces${query ? `?${query}` : ""}`;
+
+        // Metadata-only read — no ciphertext comes back, so no SEAL session
+        // is built or transmitted.
+        return this.signedRequest<NamespacesResult>("GET", path, {}, [200], {
+            includeDelegateKey: false,
         });
     }
 
     /**
-     * Check server health.
+     * Resolve this account's owner address, memoised for the client's life.
+     *
+     * The owner-scoped read routes take the address in the path and reject a
+     * mismatch against the caller's credentials — but `MemWalConfig` carries
+     * only the delegate key and account id, so the SDK has to learn its own
+     * address from the server.
+     *
+     * `POST /api/stats` is used because it authenticates with the same
+     * delegate scheme, needs nothing but a namespace, is rate-limit weight 1,
+     * and returns the owner the server resolved. Using a stats endpoint as a
+     * whoami is admittedly indirect; it avoids a server change and keeps this
+     * working against relayers older than any such change. If a dedicated
+     * self-reference lands (e.g. accepting `me` as the path owner), this
+     * method is the only place that needs to change.
+     */
+    private async resolveOwner(): Promise<string> {
+        if (this.ownerAddress) return this.ownerAddress;
+        if (this.ownerPromise) return this.ownerPromise;
+
+        this.ownerPromise = (async () => {
+            const stats = await this.signedRequest<{ owner?: string }>(
+                "POST",
+                "/api/stats",
+                { namespace: this.namespace },
+                [200],
+                { includeDelegateKey: false },
+            );
+            if (!stats.owner) {
+                throw new Error(
+                    "Walrus Memory could not resolve this account's owner address " +
+                        "(POST /api/stats returned no owner).",
+                );
+            }
+            this.ownerAddress = stats.owner;
+            return stats.owner;
+        })().finally(() => {
+            this.ownerPromise = null;
+        });
+
+        return this.ownerPromise;
+    }
+
+    /**
+     * Check server health. The endpoint is public and does not require request signing.
      */
     async health(): Promise<HealthResult> {
         const res = await fetch(`${this.serverUrl}/health`);
         if (!res.ok) {
             throw new Error(`Health check failed: ${res.status}`);
         }
-        return res.json();
+        return res.json() as Promise<HealthResult>;
+    }
+
+    /**
+     * Fetch and validate the relayer compatibility contract.
+     */
+    async compatibility(): Promise<RelayerVersionMetadata> {
+        return this.ensureCompatibleRelayer();
     }
 
     /**
@@ -274,28 +1040,308 @@ export class MemWal {
         return this.publicKey;
     }
 
+    private async ensureCompatibleRelayer(): Promise<RelayerVersionMetadata> {
+        if (this.relayerVersionMetadata) return this.relayerVersionMetadata;
+        if (this.compatibilityPromise) return this.compatibilityPromise;
+
+        this.compatibilityPromise = this.fetchCompatibilityMetadata().finally(() => {
+            this.compatibilityPromise = null;
+        });
+        return this.compatibilityPromise;
+    }
+
+    private async fetchCompatibilityMetadata(): Promise<RelayerVersionMetadata> {
+        const versionRes = await fetch(`${this.serverUrl}/version`, { method: "GET" });
+        let body: Partial<RelayerVersionMetadata>;
+
+        if (versionRes.ok) {
+            body = (await versionRes.json()) as Partial<RelayerVersionMetadata>;
+        } else if (versionRes.status === 404 || versionRes.status === 405) {
+            const healthRes = await fetch(`${this.serverUrl}/health`, { method: "GET" });
+            if (!healthRes.ok) {
+                throw new Error(
+                    `Walrus Memory compatibility check failed: GET /version returned ` +
+                        `${versionRes.status}, and GET /health returned ${healthRes.status}`,
+                );
+            }
+            body = (await healthRes.json()) as Partial<RelayerVersionMetadata>;
+        } else {
+            throw new Error(
+                `Walrus Memory compatibility check failed: GET /version returned ${versionRes.status}`,
+            );
+        }
+
+        assertCompatibleRelayer(body, this.serverUrl);
+        this.relayerVersionMetadata = body;
+        return body;
+    }
+
+    // ============================================================
+    // ENG-1697: SEAL SessionKey discovery & build
+    //
+    // The SDK used to transmit the raw delegate private key in
+    // `x-delegate-key` on every request. That credential, once captured,
+    // lets an attacker retroactively decrypt every ciphertext the account
+    // ever produced (until the user rotates on-chain) and sign arbitrary
+    // Sui transactions from the delegate address.
+    //
+    // We now build a SEAL `SessionKey` on the client (ephemeral, scoped to
+    // a single `packageId`, 5-minute TTL, signed by the delegate key) and
+    // ship only the exported session bytes via `x-seal-session`. The raw
+    // private key never leaves the client.
+    //
+    // `packageId` is fetched from the server's public `/config` endpoint
+    // the first time it's needed so the user API (`new MemWal({ key,
+    // accountId })`) stays unchanged — past users upgrading to v0.4 do not
+    // have to touch their config.
+    //
+    // Requires `@mysten/seal` and `@mysten/sui` peer dependencies.
+    // ============================================================
+
+    private async fetchServerConfig(): Promise<ServerConfig> {
+        if (this.serverConfig) return this.serverConfig;
+        const res = await fetch(`${this.serverUrl}/config`, { method: "GET" });
+        if (!res.ok) {
+            throw new Error(`GET /config returned ${res.status}`);
+        }
+        const body = (await res.json()) as Record<string, unknown>;
+        if (typeof body.packageId !== "string" || !body.packageId ||
+            typeof body.network !== "string" || !body.network) {
+            throw new Error("GET /config response missing packageId / network");
+        }
+        if (body.suiTransport !== undefined &&
+            body.suiTransport !== "grpc" && body.suiTransport !== "jsonrpc") {
+            throw new Error("GET /config response has invalid suiTransport");
+        }
+        for (const field of ["suiGrpcUrl", "suiRpcUrl"] as const) {
+            if (body[field] !== undefined && (typeof body[field] !== "string" || !body[field])) {
+                throw new Error(`GET /config response has invalid ${field}`);
+            }
+        }
+        const transport = body.network === "testnet"
+            ? "grpc"
+            : (body.suiTransport as "grpc" | "jsonrpc" | undefined) ?? (body.suiGrpcUrl ? "grpc" : "jsonrpc");
+        if (transport === "grpc" && !body.suiGrpcUrl && !body.suiRpcUrl) {
+            throw new Error(
+                `GET /config requires suiGrpcUrl or suiRpcUrl for ${body.network} ${transport} transport`,
+            );
+        }
+        if (transport === "jsonrpc" && !body.suiRpcUrl) {
+            throw new Error("GET /config requires suiRpcUrl for explicit non-testnet JSON-RPC transport");
+        }
+        this.serverConfig = {
+            packageId: body.packageId,
+            network: body.network,
+            suiRpcUrl: body.suiRpcUrl as string | undefined,
+            suiGrpcUrl: body.suiGrpcUrl as string | undefined,
+            suiTransport: transport,
+        };
+        return this.serverConfig;
+    }
+
+    private async buildSealSessionInner(): Promise<string> {
+        const cfg = await this.fetchServerConfig();
+        const sealMod = (await import("@mysten/seal")) as any;
+        const ed25519Mod = (await import("@mysten/sui/keypairs/ed25519")) as any;
+        const SessionKey = sealMod.SessionKey;
+        const Ed25519Keypair = ed25519Mod.Ed25519Keypair;
+
+        const clientCandidates: Array<{ name: string; client: any }> = [];
+
+        if (cfg.suiTransport === "grpc" && cfg.suiGrpcUrl) {
+            try {
+                const mod = (await import("@mysten/sui/grpc")) as any;
+                if (typeof mod.SuiGrpcClient === "function") {
+                    clientCandidates.push({
+                        name: "SuiGrpcClient",
+                        client: new mod.SuiGrpcClient({
+                            network: normalizeSuiNetworkForGrpc(cfg.network),
+                            baseUrl: cfg.suiGrpcUrl,
+                        }),
+                    });
+                }
+            } catch {
+                /* Try the legacy JSON-RPC client below. */
+            }
+        }
+
+        // Keep JSON-RPC as a runtime fallback when gRPC is preferred. This is
+        // required for rolling SDK/server deployments and prevents a transient
+        // gRPC outage from breaking every relayer-mode request while the
+        // advertised JSON-RPC endpoint remains healthy.
+        if (cfg.suiRpcUrl) {
+            let SuiClient: any = undefined;
+            try {
+                const mod = (await import("@mysten/sui/client")) as any;
+                SuiClient = mod.SuiClient;
+            } catch {
+                /* not present on this version */
+            }
+            if (typeof SuiClient !== "function") {
+                try {
+                    const mod = (await import("@mysten/sui/jsonRpc")) as any;
+                    SuiClient = mod.SuiJsonRpcClient ?? mod.SuiClient;
+                } catch {
+                    /* not present on this version either */
+                }
+            }
+            if (typeof SuiClient === "function") {
+                clientCandidates.push({
+                    name: "SuiClient",
+                    client: new SuiClient({ url: cfg.suiRpcUrl }),
+                });
+            }
+        }
+
+        if (clientCandidates.length === 0 || typeof Ed25519Keypair !== "function") {
+            throw new Error(
+                `Required ${cfg.suiTransport} Sui client or Ed25519Keypair not found in @mysten/sui. ` +
+                "Ensure @mysten/sui >=2.5.0 and @mysten/seal >=1.1.0 are installed."
+            );
+        }
+
+        const keypair = Ed25519Keypair.fromSecretKey(this.privateKey);
+
+        // SessionKey accepts either transport through the shared core client
+        // interface. Candidates are ordered by the server's preferred
+        // transport, with JSON-RPC retained as a compatibility fallback.
+        let session: any = undefined;
+        let lastClientError: unknown;
+        for (const candidate of clientCandidates) {
+            try {
+                session = await SessionKey.create({
+                    address: keypair.getPublicKey().toSuiAddress(),
+                    packageId: cfg.packageId,
+                    ttlMin: SEAL_SESSION_TTL_MIN,
+                    signer: keypair,
+                    suiClient: candidate.client as any,
+                });
+                break;
+            } catch (err) {
+                lastClientError = err;
+            }
+        }
+        if (!session) {
+            throw lastClientError;
+        }
+
+        // Eagerly sign the personal message so the exported envelope is
+        // fully self-contained. `SessionKey.create()` defers this signing
+        // until first use, which would break the migration: the sidecar
+        // imports without a signer and must be able to get a certificate
+        // from the exported state alone. Calling
+        // setPersonalMessageSignature() here populates the
+        // `personalMessageSignature` field in the subsequent export().
+        const personalMessage = session.getPersonalMessage();
+        const signResult = await keypair.signPersonalMessage(personalMessage);
+        await session.setPersonalMessageSignature(signResult.signature);
+
+        const exported = session.export();
+        // SEAL intentionally installs a throwing `toJSON` on the
+        // exported object to catch accidental serialization. The
+        // migration to `x-seal-session` IS the intended on-wire
+        // format, so we project the primitive fields into a fresh
+        // object before stringifying. The sidecar's
+        // `SessionKey.import()` expects this exact shape.
+        const jsonStr = JSON.stringify({
+            address: exported.address,
+            packageId: exported.packageId,
+            mvrName: exported.mvrName,
+            creationTimeMs: exported.creationTimeMs,
+            ttlMin: exported.ttlMin,
+            personalMessageSignature: exported.personalMessageSignature,
+            sessionKey: exported.sessionKey,
+        });
+        const bytes =
+            typeof btoa === "function"
+                ? btoa(jsonStr)
+                : Buffer.from(jsonStr, "utf8").toString("base64");
+
+        this.sessionCache = {
+            bytes,
+            expiresAt:
+                Date.now() +
+                SEAL_SESSION_TTL_MIN * 60_000 -
+                SEAL_SESSION_SAFETY_MARGIN_MS,
+        };
+        return bytes;
+    }
+
+    private async buildSealSession(): Promise<string> {
+        // Fast path: cached session still fresh.
+        if (this.sessionCache && Date.now() < this.sessionCache.expiresAt) {
+            return this.sessionCache.bytes;
+        }
+        // Single-flight: concurrent requests share one build.
+        if (this.sessionBuildPromise) return this.sessionBuildPromise;
+
+        this.sessionBuildPromise = this.buildSealSessionInner().finally(() => {
+            this.sessionBuildPromise = null;
+        });
+        return this.sessionBuildPromise;
+    }
+
     /**
      * Make a signed request to the server.
      *
-     * Signature format: "{timestamp}.{method}.{path}.{body_sha256}"
-     * Headers: x-public-key, x-signature, x-timestamp
+     * Signature format (LOW-23 updated):
+     *   "{timestamp}.{method}.{path_and_query}.{body_sha256}.{nonce}.{account_id}"
      *
-     * The server uses x-public-key to look up the owner via onchain
-     * MemWalAccount.delegate_keys — no need to send owner in the body.
+     * Headers: x-public-key, x-signature, x-timestamp, x-nonce, x-account-id
+     *
+     * The nonce is a UUID v4 generated per-request and tracked server-side
+     * in Redis (TTL=600s) to prevent replay attacks.
+     *
+     * LOW-23: x-account-id is now included in the signed canonical message so
+     * an intermediary cannot swap the account hint without invalidating the
+     * signature. Server-side verification in services/server/src/auth.rs must
+     * use the matching message format.
+     *
+     * ENG-1696: Callers set `includeDelegateKey: false` on Manual-mode routes
+     * so the delegate private key is not transmitted. Manual-mode docstrings
+     * promise the key stays client-side; the server does not need it on those
+     * routes because Manual-mode handlers never invoke SEAL decrypt.
+     *
+     * ENG-1697: On Relayer-mode routes the SDK builds a SEAL SessionKey
+     * client-side (emitted via `x-seal-session`). The SessionKey is ephemeral
+     * (5-min TTL, scoped to the server's `packageId`) so a wire capture has
+     * a bounded blast radius. Requires `@mysten/seal` and `@mysten/sui`.
+     */
+    /**
+     * Make a signed request to the server.
+     *
+     * @param acceptedStatuses - HTTP status codes to treat as success (default [200]).
+     *   Pass [200, 202] for endpoints that return 202 Accepted.
      */
     private async signedRequest<T>(
         method: string,
         path: string,
         body: object,
+        acceptedStatusesOrOptions: number[] | { includeDelegateKey?: boolean; signal?: AbortSignal } = [200],
+        requestOptions: { includeDelegateKey?: boolean; signal?: AbortSignal } = {},
     ): Promise<T> {
+        const acceptedStatuses = Array.isArray(acceptedStatusesOrOptions)
+            ? acceptedStatusesOrOptions
+            : [200];
+        const options = Array.isArray(acceptedStatusesOrOptions)
+            ? requestOptions
+            : acceptedStatusesOrOptions;
+        await this.ensureCompatibleRelayer();
         const ed = await getEd();
 
         const timestamp = Math.floor(Date.now() / 1000).toString();
-        const bodyStr = JSON.stringify(body);
+        // Canonical body used for both: (a) the HTTP wire body and
+        // (b) the SHA-256 digest inside the signed message. GET requests
+        // carry no body, so the server will hash an EMPTY byte string —
+        // we must sign the same empty string for the signature to verify.
+        const bodyStr = method === "GET" ? "" : JSON.stringify(body);
         const bodySha256 = await sha256hex(bodyStr);
 
-        // Build message to sign
-        const message = `${timestamp}.${method}.${path}.${bodySha256}`;
+        // MED-1 fix: Generate per-request nonce (UUID v4) for replay protection
+        const nonce = crypto.randomUUID();
+
+        // LOW-23: Build message to sign — now includes nonce AND account id
+        const message = `${timestamp}.${method}.${path}.${bodySha256}.${nonce}.${this.accountId}`;
         const msgBytes = new TextEncoder().encode(message);
 
         // Sign with Ed25519
@@ -304,22 +1350,60 @@ export class MemWal {
 
         // Make HTTP request
         const url = `${this.serverUrl}${path}`;
+        const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+            "x-public-key": bytesToHex(publicKey),
+            "x-signature": bytesToHex(signature),
+            "x-timestamp": timestamp,
+            "x-nonce": nonce,           // MED-1: replay protection
+            "x-account-id": this.accountId,
+        };
+        // ENG-1696 / ENG-1697: attach a SEAL credential only on Relayer-
+        // mode routes where the server needs it for server-side SEAL
+        // decrypt. Manual-mode methods (rememberManual, recallManual) opt
+        // out and transmit no decrypt credential at all.
+        if (options.includeDelegateKey !== false) {
+            headers["x-seal-session"] = await this.buildSealSession();
+        }
         const res = await fetch(url, {
             method,
-            headers: {
-                "Content-Type": "application/json",
-                "x-public-key": bytesToHex(publicKey),
-                "x-signature": bytesToHex(signature),
-                "x-timestamp": timestamp,
-                "x-delegate-key": bytesToHex(this.privateKey),
-                "x-account-id": this.accountId,
-            },
-            body: bodyStr,
+            headers,
+            body: method === "GET" ? undefined : bodyStr,
+            signal: options.signal,
         });
 
-        if (!res.ok) {
-            const errText = await res.text();
-            throw new Error(`MemWal API error (${res.status}): ${errText}`);
+        if (!acceptedStatuses.includes(res.status)) {
+            // LOW-26: sanitize server error bodies before surfacing to callers.
+            const raw = await res.text();
+            const compatibilityError = compatibilityErrorFromStatus(res.status, raw);
+            if (compatibilityError) throw compatibilityError;
+
+            // A stale/future-dated signature is rejected with 401 + a machine-
+            // readable reason header. Surface it as an actionable clock-drift
+            // error rather than an opaque 401 so the caller can fix node time.
+            const clockDriftError = clockDriftErrorFromResponse(res);
+            if (clockDriftError) throw clockDriftError;
+
+            const { message, serverCode } = sanitizeServerError(
+                res.status,
+                raw,
+                res.headers.get("x-auth-error"),
+            );
+            const err = new Error(message) as Error & {
+                status?: number;
+                serverCode?: string;
+                retryAfterSeconds?: number;
+                cause?: string;
+            };
+            err.status = res.status;
+            if (serverCode) err.serverCode = serverCode;
+            const retryAfter = Number(res.headers.get("retry-after"));
+            if (Number.isFinite(retryAfter) && retryAfter > 0) {
+                err.retryAfterSeconds = retryAfter;
+            }
+            // Preserve raw body on `cause` for in-process debugging only.
+            err.cause = raw;
+            throw err;
         }
 
         return res.json() as Promise<T>;

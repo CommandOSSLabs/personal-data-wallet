@@ -1,19 +1,29 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
-
-const secret = new TextEncoder().encode(process.env.AUTH_SECRET);
+import { getAuthSecretKey } from "@/lib/auth/auth-secret";
+import { isTestEnvironment } from "@/lib/constants";
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (pathname.startsWith("/ping")) {
-    return new Response("pong", { status: 200 });
+    // Advertises whether this process runs the mock seams. Playwright reuses an
+    // already-running dev server locally, so its global setup reads this header
+    // to refuse one that would reach OpenRouter, Sui or the Walrus relayer.
+    return new Response("pong", {
+      status: 200,
+      headers: { "x-researcher-test-mode": isTestEnvironment ? "1" : "0" },
+    });
   }
 
   if (pathname.startsWith("/api/auth")) {
     return NextResponse.next();
   }
 
+  // Read the secret whether or not a cookie came with the request. Deferring it
+  // until a token shows up would let a deployment with no AUTH_SECRET serve the
+  // login page as if nothing were wrong.
+  const secret = getAuthSecretKey();
   const token = request.cookies.get("session")?.value;
   let isAuthenticated = false;
 

@@ -1,7 +1,7 @@
 {
     "name": "@mysten-incubation/memwal",
-    "version": "0.0.1",
-    "description": "MemWal — Privacy-first AI memory SDK with Ed25519 delegate key auth",
+    "version": "0.1.6",
+    "description": "Walrus Memory — Privacy-first AI memory SDK with Ed25519 delegate key auth",
     "type": "module",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
@@ -26,7 +26,9 @@
     "scripts": {
         "build": "tsc",
         "dev": "tsc --watch",
-        "typecheck": "tsc --noEmit"
+        "typecheck": "tsc --noEmit",
+        "test": "tsc && node --test \"test/**/*.test.mjs\"",
+        "test:e2e": "tsc && node --test --test-concurrency=1 \"test/e2e/*.e2e.mjs\""
     },
     "dependencies": {
         "@noble/ed25519": "^2.3.0",
@@ -39,7 +41,7 @@
     },
     "peerDependencies": {
         "ai": ">=4.0.0",
-        "zod": "^3.23.0",
+        "zod": "^3.23.0 || ^4.0.0",
         "@mysten/sui": ">=2.5.0",
         "@mysten/seal": ">=1.1.0",
         "@mysten/walrus": ">=1.0.3"
@@ -49,12 +51,6 @@
             "optional": true
         },
         "zod": {
-            "optional": true
-        },
-        "@mysten/sui": {
-            "optional": true
-        },
-        "@mysten/seal": {
             "optional": true
         },
         "@mysten/walrus": {
@@ -69,6 +65,7 @@
         "ai",
         "memory",
         "privacy",
+        "walrus-memory",
         "walrus",
         "sui",
         "encryption",
@@ -78,10 +75,11 @@
     "license": "Apache-2.0",
     "repository": {
         "type": "git",
-        "url": "https://github.com/MystenLabs/MemWal.git",
+        "url": "git+https://github.com/MystenLabs/MemWal.git",
         "directory": "packages/sdk"
     },
     "publishConfig": {
         "access": "public",
         "registry": "https://registry.npmjs.org/"
-    }}
+    }
+}

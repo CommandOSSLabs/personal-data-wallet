@@ -3,9 +3,11 @@ import { z } from "zod";
 import { MemWal } from "@mysten-incubation/memwal";
 
 export const saveMemory = ({
+  namespace,
   memwalKey,
   memwalAccountId,
 }: {
+  namespace: string;
   memwalKey?: string;
   memwalAccountId?: string;
 }) =>
@@ -20,7 +22,7 @@ export const saveMemory = ({
         ),
     }),
     execute: async ({ text }) => {
-      const key = memwalKey || process.env.MEMWAL_KEY;
+      const key = memwalKey || process.env.MEMWAL_PRIVATE_KEY;
       const accountId = memwalAccountId || process.env.MEMWAL_ACCOUNT_ID;
       const serverUrl = process.env.MEMWAL_SERVER_URL || "http://localhost:8000";
 
@@ -28,13 +30,20 @@ export const saveMemory = ({
         return {
           saved: false,
           text,
-          error: "MemWal not configured — MEMWAL_KEY or MEMWAL_ACCOUNT_ID missing",
+          error: "Walrus Memory not configured — MEMWAL_PRIVATE_KEY or MEMWAL_ACCOUNT_ID missing",
+        };
+      }
+      if (!namespace.trim()) {
+        return {
+          saved: false,
+          text,
+          error: "Walrus Memory authenticated user namespace missing",
         };
       }
 
       try {
-        const memwal = MemWal.create({ key, accountId, serverUrl });
-        await memwal.remember(text);
+        const memwal = MemWal.create({ key, accountId, serverUrl, namespace });
+        await memwal.rememberAndWait(text);
         return { saved: true, text };
       } catch (error) {
         console.error("[Tool] saveMemory error:", error);

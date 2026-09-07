@@ -14,15 +14,21 @@ import {
   useWallets,
   useConnectWallet,
   useCurrentAccount,
+  useSignPersonalMessage,
   useSignTransaction,
-  useSuiClient,
 } from "@mysten/dapp-kit";
 import { isEnokiWallet } from "@mysten/enoki";
+import { bcs } from "@mysten/sui/bcs";
+import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Transaction } from "@mysten/sui/transactions";
+import { createSponsorAuthorization } from "@mysten-incubation/memwal";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { enokiConfig } from "@/lib/enoki/config";
 import { useAuth } from "@/feature/auth";
+import { trpc } from "@/shared/lib/trpc/client";
+import { getSuiGrpcClient } from "@/lib/sui/grpc-client";
+import { AccountCreatedBcs, AccountRegistryBcs } from "@/lib/sui/account-bcs";
 
 type Step =
   | "idle"
@@ -55,19 +61,25 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/** Execute a transaction via Enoki gas sponsorship through the MemWal relayer. */
+/** Execute a transaction via Enoki gas sponsorship through the Walrus Memory relayer. */
 async function sponsoredSignAndExecute(
   transaction: Transaction,
   sender: string,
-  suiClient: ReturnType<typeof useSuiClient>,
+  suiClient: SuiGrpcClient,
   signTransaction: (args: {
-    transaction: Transaction;
+    transaction: Transaction | string;
   }) => Promise<{ signature: string }>,
+  signPersonalMessage: (message: Uint8Array) => Promise<{ signature: string }>,
 ): Promise<{ digest: string }> {
   const kindBytes = await transaction.build({
-    client: suiClient as any,
+    client: suiClient,
     onlyTransactionKind: true,
   });
+  const authorization = await createSponsorAuthorization(
+    sender,
+    kindBytes,
+    signPersonalMessage,
+  );
 
   const sponsorRes = await fetch(`${enokiConfig.memwalServerUrl}/sponsor`, {
     method: "POST",
@@ -75,6 +87,7 @@ async function sponsoredSignAndExecute(
     body: JSON.stringify({
       transactionBlockKindBytes: uint8ArrayToBase64(kindBytes),
       sender,
+      ...authorization,
     }),
   });
 
@@ -85,14 +98,20 @@ async function sponsoredSignAndExecute(
 
   const sponsored = await sponsorRes.json();
   const sponsoredTx = Transaction.from(sponsored.bytes);
-  const { signature } = await signTransaction({ transaction: sponsoredTx });
+  // dapp-kit's useSignTransaction resolves move-call ABIs via the ambient
+  // client from SuiClientProvider, which is JSON-RPC (deprecated, no longer
+  // CORS-enabled for browser origins). Pre-serializing with our gRPC client
+  // and handing off the resulting string short-circuits that internal
+  // resolution — dapp-kit passes a string through as-is.
+  const sponsoredTxJson = await sponsoredTx.toJSON({ client: suiClient });
+  const { signature } = await signTransaction({ transaction: sponsoredTxJson });
 
   const execRes = await fetch(
     `${enokiConfig.memwalServerUrl}/sponsor/execute`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ digest: sponsored.digest, signature }),
+      body: JSON.stringify({ digest: sponsored.digest, sender, signature }),
     },
   );
 
@@ -108,13 +127,36 @@ export function EnokiLoginCard() {
   const wallets = useWallets();
   const { mutateAsync: connect } = useConnectWallet();
   const currentAccount = useCurrentAccount();
-  const suiClient = useSuiClient();
+  const suiClient = getSuiGrpcClient();
   const { mutateAsync: signTransaction } = useSignTransaction();
+  const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
   const { connectEnoki } = useAuth();
+  const { mutateAsync: issueChallenge } =
+    trpc.auth.issueEnokiChallenge.useMutation();
 
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState("");
   const setupRunningRef = useRef(false);
+
+  /**
+   * Prove control of `address` by signing a fresh server-issued challenge with
+   * the zkLogin key. Returns the challengeId + signature to hand back to the
+   * server-side ownership gate.
+   */
+  const proveWalletOwnership = useCallback(
+    async (
+      address: string,
+    ): Promise<{ challengeId: string; signature: string }> => {
+      const { challengeId, message } = await issueChallenge({
+        suiAddress: address,
+      });
+      const { signature } = await signPersonalMessage({
+        message: new TextEncoder().encode(message),
+      });
+      return { challengeId, signature };
+    },
+    [issueChallenge, signPersonalMessage],
+  );
 
   const enokiWallets = wallets.filter(isEnokiWallet);
   const googleWallet = enokiWallets.find((w) => w.provider === "google");
@@ -133,9 +175,14 @@ export function EnokiLoginCard() {
       setupRunningRef.current = true;
 
       try {
-        // Phase 1: Check returning user via tRPC
+        // Phase 1: Check returning user via tRPC (ownership-gated)
         setStep("creating-session");
-        const checkResult = await connectEnoki({ suiAddress: address });
+        const checkProof = await proveWalletOwnership(address);
+        const checkResult = await connectEnoki({
+          suiAddress: address,
+          challengeId: checkProof.challengeId,
+          signature: checkProof.signature,
+        });
 
         if ("needsSetup" in checkResult && !checkResult.needsSetup) {
           setStep("done");
@@ -146,57 +193,37 @@ export function EnokiLoginCard() {
         // Phase 2: First-time user — generate key + register on-chain
         setStep("generating-key");
         const ed = await import("@noble/ed25519");
-        const { blake2b } = await import("@noble/hashes/blake2b");
 
         const privateKeyRaw = new Uint8Array(32);
         crypto.getRandomValues(privateKeyRaw);
         const publicKeyRaw = await ed.getPublicKeyAsync(privateKeyRaw);
 
         const privateKeyHex = bytesToHex(privateKeyRaw);
-
-        // Derive Sui address for delegate key
-        const addrInput = new Uint8Array(33);
-        addrInput[0] = 0x00;
-        addrInput.set(publicKeyRaw, 1);
-        const addressBytes = blake2b(addrInput, { dkLen: 32 });
-        const delegateSuiAddress =
-          "0x" + bytesToHex(new Uint8Array(addressBytes));
+        // Contract derives the delegate's Sui address on-chain from the public key.
 
         // On-chain registration
         setStep("registering-onchain");
         let knownAccountId: string | null = null;
 
         try {
-          const registryObj = await suiClient.getObject({
-            id: enokiConfig.memwalRegistryId,
-            options: { showContent: true },
+          const registryRes = await suiClient.getObject({
+            objectId: enokiConfig.memwalRegistryId,
+            include: { content: true },
           });
-          if (
-            registryObj?.data?.content &&
-            "fields" in registryObj.data.content
-          ) {
-            const fields = registryObj.data.content.fields as any;
-            const tableId = fields?.accounts?.fields?.id?.id;
-            if (tableId) {
-              const dynField = await suiClient.getDynamicFieldObject({
-                parentId: tableId,
-                name: { type: "address", value: address },
-              });
-              if (
-                dynField?.data?.content &&
-                "fields" in dynField.data.content
-              ) {
-                knownAccountId = (dynField.data.content.fields as any)
-                  .value as string;
-              }
-            }
+          if (registryRes.object.content) {
+            const registry = AccountRegistryBcs.parse(registryRes.object.content);
+            const dynField = await suiClient.getDynamicField({
+              parentId: registry.accounts.id,
+              name: { type: "address", bcs: bcs.Address.serialize(address).toBytes() },
+            });
+            knownAccountId = bcs.Address.parse(dynField.dynamicField.value.bcs);
           }
         } catch {
           // Dynamic field not found → no account yet
         }
 
         const pubKeyBytes = Array.from(publicKeyRaw);
-        const sign = (args: { transaction: Transaction }) =>
+        const sign = (args: { transaction: Transaction | string }) =>
           signTransaction(args);
 
         if (knownAccountId) {
@@ -205,13 +232,19 @@ export function EnokiLoginCard() {
             target: `${enokiConfig.memwalPackageId}::account::add_delegate_key`,
             arguments: [
               tx.object(knownAccountId),
+              tx.object(enokiConfig.memwalRegistryId),
               tx.pure("vector<u8>", pubKeyBytes),
-              tx.pure("address", delegateSuiAddress),
               tx.pure("string", "Noter"),
               tx.object("0x6"),
             ],
           });
-          const result = await sponsoredSignAndExecute(tx, address, suiClient, sign);
+          const result = await sponsoredSignAndExecute(
+            tx,
+            address,
+            suiClient,
+            sign,
+            (message) => signPersonalMessage({ message }),
+          );
           await suiClient.waitForTransaction({ digest: result.digest });
         } else {
           const tx = new Transaction();
@@ -222,21 +255,26 @@ export function EnokiLoginCard() {
               tx.object("0x6"),
             ],
           });
-          const createResult = await sponsoredSignAndExecute(tx, address, suiClient, sign);
+          const createResult = await sponsoredSignAndExecute(
+            tx,
+            address,
+            suiClient,
+            sign,
+            (message) => signPersonalMessage({ message }),
+          );
           await suiClient.waitForTransaction({ digest: createResult.digest });
 
-          const txDetails = await suiClient.getTransactionBlock({
+          const txResult = await suiClient.getTransaction({
             digest: createResult.digest,
-            options: { showObjectChanges: true },
+            include: { events: true },
           });
-          const createdObj = txDetails.objectChanges?.find(
-            (c) =>
-              c.type === "created" &&
-              "objectType" in c &&
-              c.objectType.includes("MemWalAccount"),
+          const txDetails =
+            txResult.$kind === "Transaction" ? txResult.Transaction : txResult.FailedTransaction;
+          const createdEvent = txDetails.events?.find((e) =>
+            e.eventType.endsWith("::account::AccountCreated"),
           );
-          if (createdObj && "objectId" in createdObj) {
-            knownAccountId = createdObj.objectId;
+          if (createdEvent) {
+            knownAccountId = AccountCreatedBcs.parse(createdEvent.bcs).account_id;
           }
 
           if (!knownAccountId) {
@@ -248,20 +286,29 @@ export function EnokiLoginCard() {
             target: `${enokiConfig.memwalPackageId}::account::add_delegate_key`,
             arguments: [
               tx2.object(knownAccountId),
+              tx2.object(enokiConfig.memwalRegistryId),
               tx2.pure("vector<u8>", pubKeyBytes),
-              tx2.pure("address", delegateSuiAddress),
               tx2.pure("string", "Noter"),
               tx2.object("0x6"),
             ],
           });
-          const addResult = await sponsoredSignAndExecute(tx2, address, suiClient, sign);
+          const addResult = await sponsoredSignAndExecute(
+            tx2,
+            address,
+            suiClient,
+            sign,
+            (message) => signPersonalMessage({ message }),
+          );
           await suiClient.waitForTransaction({ digest: addResult.digest });
         }
 
-        // Create session via tRPC
+        // Create session via tRPC (ownership-gated)
         setStep("creating-session");
+        const registerProof = await proveWalletOwnership(address);
         await connectEnoki({
           suiAddress: address,
+          challengeId: registerProof.challengeId,
+          signature: registerProof.signature,
           privateKey: privateKeyHex,
           accountId: knownAccountId!,
         });
@@ -278,7 +325,7 @@ export function EnokiLoginCard() {
         setupRunningRef.current = false;
       }
     },
-    [suiClient, signTransaction, connectEnoki],
+    [suiClient, signTransaction, signPersonalMessage, connectEnoki, proveWalletOwnership],
   );
 
   useEffect(() => {

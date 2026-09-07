@@ -1,218 +1,82 @@
 /**
  * AUTH API ROUTES
- * tRPC routes for zkLogin authentication
+ * tRPC routes for Enoki zkLogin + wallet / delegate-key authentication.
  */
 
-import { router, procedure } from "@/shared/lib/trpc/init";
+import { router, procedure, protectedProcedure } from "@/shared/lib/trpc/init";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { verifyPersonalMessageSignature } from "@mysten/sui/verify";
-import { randomBytes } from "crypto";
+import { normalizeSuiAddress } from "@mysten/sui/utils";
 import { uuidv7 } from "uuidv7";
-import {
-  initiateLoginInput,
-  completeLoginInput,
-  validateSessionInput,
-  connectWalletInput,
-} from "./input";
-import {
-  generateEphemeralKeyPair,
-  generateRandomnessValue,
-  computeNonce,
-  calculateMaxEpoch,
-  calculateSessionExpiration,
-  decodeAndValidateJwt,
-  verifyNonce,
-  extractUserProfile,
-  isSessionExpired,
-} from "../domain/zklogin";
-import {
-  getCurrentEpoch,
-  deriveAddress,
-  fetchUserSalt,
-  generateZkProof,
-} from "../lib/zklogin-client";
-import { OAUTH_PROVIDERS, OAUTH_SCOPES, AUTH_ERRORS } from "../constant";
-import { buildOAuthUrl } from "../domain/zklogin";
-import { zkLoginSessions, walletSessions, walletChallenges } from "@/shared/db/schema";
-import { eq, lt } from "drizzle-orm";
+import { connectWalletInput, suiAddressSchema } from "./input";
+import { AUTH_ERRORS } from "../constant";
+import { walletSessions } from "@/shared/db/schema";
 import * as authService from "../domain/service";
+import { toSafeUser, DelegateCredentialConflictError } from "../domain/service";
+import {
+  issueEnokiChallenge as issueEnokiChallengeToken,
+  verifyAndConsumeEnokiChallenge,
+} from "../lib/enoki-challenge";
+import { SharedRedisUnavailableError } from "@/shared/lib/shared-redis";
+import {
+  assertDelegateAccountBinding,
+  DelegateAccountBindingError,
+  deriveDelegatePublicKeyHex,
+} from "../lib/delegate-account";
+import {
+  AuthRateLimitError,
+  checkPublicAuthRateLimit,
+} from "../lib/auth-rate-limit";
 
 export const authRouter = router({
   /**
-   * Step 1: Initiate OAuth login flow
-   * Generates ephemeral keypair, nonce, and returns OAuth URL
+   * Get the caller's own session (for resuming auth state).
+   * Resolves wallet / enoki sessions only; the legacy zkLogin table is not trusted.
+   *
+   * The session id is read from the x-session-id header via ctx, never from the
+   * input, so a caller cannot read a session it does not already hold. Returns
+   * null for a missing, unknown, or expired session, which is how the client
+   * detects a stale stored session and clears it.
    */
-  initiateLogin: procedure
-    .input(initiateLoginInput)
-    .mutation(async ({ ctx, input }) => {
-      const { provider, redirectUri } = input;
-
-      // Validate provider
-      const providerConfig = OAUTH_PROVIDERS[provider];
-      if (!providerConfig) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: AUTH_ERRORS.INVALID_PROVIDER,
-        });
-      }
-
-      try {
-        // Generate ephemeral keypair
-        const ephemeralKeyPair = generateEphemeralKeyPair();
-
-        // Get current epoch from Sui network
-        const currentEpoch = await getCurrentEpoch();
-        const maxEpoch = calculateMaxEpoch(currentEpoch);
-
-        // Generate randomness and compute nonce
-        const randomness = generateRandomnessValue();
-        const nonce = computeNonce(ephemeralKeyPair.publicKey, maxEpoch, randomness);
-
-        // Create session record (without userId yet)
-        const sessionId = uuidv7();
-        const expiresAt = calculateSessionExpiration();
-
-        await ctx.db.insert(zkLoginSessions).values({
-          id: sessionId,
-          ephemeralPrivateKey: ephemeralKeyPair.privateKey,
-          ephemeralPublicKey: ephemeralKeyPair.publicKey,
-          maxEpoch,
-          randomness,
-          nonce,
-          expiresAt,
-        });
-
-        // Build OAuth URL
-        const defaultRedirectUri = `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`;
-        const authUrl = buildOAuthUrl({
-          authUrl: providerConfig.authUrl,
-          clientId: providerConfig.clientId,
-          redirectUri: redirectUri || defaultRedirectUri,
-          nonce,
-          scopes: [...OAUTH_SCOPES[provider]], // Convert readonly to mutable array
-          state: sessionId, // Pass session ID in state for callback
-        });
-
-        return {
-          authUrl,
-          sessionId,
-          nonce,
-        };
-      } catch (error) {
-        console.error("Failed to initiate login:", error);
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: AUTH_ERRORS.NETWORK_ERROR,
-        });
-      }
-    }),
+  getSession: procedure.query(({ ctx }) =>
+    ctx.sessionId ? authService.getActiveSession(ctx.db, ctx.sessionId) : null
+  ),
 
   /**
-   * Step 2: Complete OAuth login after callback
-   * Validates JWT, generates ZK proof, creates/updates user
+   * Logout - end only the session presented in x-session-id (zkLogin and wallet).
+   * A body/input id is ignored. The header value is still a bearer credential:
+   * presenting a session id there is enough to delete that session.
    */
-  completeLogin: procedure
-    .input(completeLoginInput)
-    .mutation(async ({ ctx, input }) => {
-      const { jwt, sessionId } = input;
+  logout: procedure.mutation(async ({ ctx }) => {
+    if (ctx.sessionId) {
+      await authService.deleteSession(ctx.db, ctx.sessionId);
+    }
+    return { success: true };
+  }),
 
+  /**
+   * Issue a single-use SIGN-IN challenge for the Sui-wallet flow. The client
+   * signs the returned `message` with its wallet and returns
+   * `{ challengeId, signature }` to connectWallet. Shares the challenge store
+   * with the Enoki flow and is likewise scoped to sign-in only — it cannot be
+   * used to authorize a delegate-key export.
+   */
+  issueWalletChallenge: procedure
+    .input(z.object({ address: suiAddressSchema }))
+    .mutation(async ({ input }) => {
       try {
-        // Fetch session
-        const [session] = await ctx.db
-          .select()
-          .from(zkLoginSessions)
-          .where(eq(zkLoginSessions.id, sessionId))
-          .limit(1);
-
-        if (!session) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Session not found",
-          });
-        }
-
-        // Check session expiration
-        if (isSessionExpired(session)) {
-          throw new TRPCError({
-            code: "UNAUTHORIZED",
-            message: AUTH_ERRORS.SESSION_EXPIRED,
-          });
-        }
-
-        // Decode and validate JWT
-        const jwtClaims = decodeAndValidateJwt(jwt);
-
-        // Verify nonce matches
-        if (!verifyNonce(jwtClaims, session.nonce)) {
-          throw new TRPCError({
-            code: "UNAUTHORIZED",
-            message: AUTH_ERRORS.INVALID_JWT,
-          });
-        }
-
-        // Fetch user salt
-        const salt = await fetchUserSalt(jwt);
-
-        // Derive Sui address
-        const suiAddress = await deriveAddress(jwt, salt);
-
-        // Generate ZK proof (or reuse cached proof)
-        let zkProof;
-        if (session.zkProof) {          zkProof = session.zkProof;
-        } else {          zkProof = await generateZkProof({
-            jwt,
-            ephemeralPublicKey: session.ephemeralPublicKey,
-            maxEpoch: session.maxEpoch,
-            randomness: session.randomness,
-            salt,
-          });
-        }
-
-        // Extract user profile from JWT
-        const profile = extractUserProfile(jwtClaims);
-
-        // Upsert user (create or update via service)
-        const user = await authService.upsertZkLoginUser(ctx.db, {
-          suiAddress,
-          provider: profile.provider,
-          providerSub: profile.providerSub,
-          name: profile.name,
-          email: profile.email,
-          avatar: profile.avatar,
-        });
-
-        // Update session with userId and proof
-        await authService.updateZkLoginSession(ctx.db, {
-          sessionId,
-          userId: user.id,
-          zkProof,
-        });
-
-        return {
-          user,
-          suiAddress,
-          sessionId,
-          sessionData: {
-            sessionId,
-            ephemeralKeyPair: {
-              privateKey: session.ephemeralPrivateKey,
-              publicKey: session.ephemeralPublicKey,
-            },
-            maxEpoch: session.maxEpoch,
-            randomness: session.randomness,
-            nonce: session.nonce,
-            zkProof,
-            expiresAt: session.expiresAt,
-          },
-        };
+        const { challengeId, message } = await issueEnokiChallengeToken(
+          input.address,
+          "signin"
+        );
+        return { challengeId, message };
       } catch (error) {
-        console.error("Failed to complete login:", error);
-
-        if (error instanceof TRPCError) {
-          throw error;
+        if (error instanceof SharedRedisUnavailableError) {
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: "Authentication service temporarily unavailable",
+          });
         }
-
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: error instanceof Error ? error.message : AUTH_ERRORS.NETWORK_ERROR,
@@ -221,101 +85,85 @@ export const authRouter = router({
     }),
 
   /**
-   * Get current session (for resuming auth state)
-   * Works for both zkLogin and wallet sessions
-   */
-  getSession: procedure
-    .input(validateSessionInput)
-    .query(({ ctx, input }) =>
-      authService.getActiveSession(ctx.db, input.sessionId)
-    ),
-
-  /**
-   * Logout - clear session (works for both zkLogin and wallet)
-   */
-  logout: procedure
-    .input(validateSessionInput)
-    .mutation(async ({ ctx, input }) => {
-      await authService.deleteSession(ctx.db, input.sessionId);
-      return { success: true };
-    }),
-
-  /**
-   * Get a one-time challenge nonce for wallet authentication
-   * The nonce must be signed by the wallet and returned via connectWallet
+   * Alias for issueWalletChallenge (for backwards compatibility with getChallenge).
    */
   getChallenge: procedure
-    .mutation(async ({ ctx }) => {
-      // Clean up expired challenges to prevent table bloat
-      await ctx.db
-        .delete(walletChallenges)
-        .where(lt(walletChallenges.expiresAt, new Date()));
-
-      const challengeId = uuidv7();
-      const nonce = randomBytes(32).toString("hex");
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-
-      await ctx.db.insert(walletChallenges).values({
-        id: challengeId,
-        nonce,
-        expiresAt,
-      });
-
-      return { challengeId, nonce, expiresAt };
+    .input(z.object({ address: suiAddressSchema }))
+    .mutation(async ({ input }) => {
+      try {
+        const { challengeId, message } = await issueEnokiChallengeToken(
+          input.address,
+          "signin"
+        );
+        return {
+          challengeId,
+          nonce: message,
+          message,
+          expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        };
+      } catch (error) {
+        if (error instanceof SharedRedisUnavailableError) {
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: "Authentication service temporarily unavailable",
+          });
+        }
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: error instanceof Error ? error.message : AUTH_ERRORS.NETWORK_ERROR,
+        });
+      }
     }),
 
   /**
    * Connect wallet - authenticate with Sui wallet (Slush, Sui Wallet)
-   * Verifies signature against a server-issued challenge nonce
+   * Every call must prove address ownership with a server-issued single-use
+   * challenge (issueWalletChallenge). The caller never chooses the signed
+   * message, and the challenge is consumed atomically, so a captured
+   * {challengeId, signature} pair cannot be replayed into a second session.
    */
   connectWallet: procedure
     .input(connectWalletInput)
     .mutation(async ({ ctx, input }) => {
-      const { challengeId, walletType, address, signature } = input;
+      const { walletType, challengeId, signature } = input;
+      // Normalize once so the challenge check and every DB op key on the same
+      // canonical address (a non-canonical variant would otherwise verify but
+      // miss the stored row).
+      const address = normalizeSuiAddress(input.address);
 
       try {
-        // 1. Atomically consume challenge
-        const [challenge] = await ctx.db
-          .delete(walletChallenges)
-          .where(eq(walletChallenges.id, challengeId))
-          .returning();
-
-        if (!challenge) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Challenge not found or already used",
+        // Ownership gate — must pass BEFORE the user upsert or session insert.
+        let ownershipVerified: boolean;
+        try {
+          ownershipVerified = await verifyAndConsumeEnokiChallenge({
+            rawAddress: address,
+            challengeId,
+            signature,
+            purpose: "signin",
           });
+        } catch (error) {
+          if (error instanceof SharedRedisUnavailableError) {
+            throw new TRPCError({
+              code: "SERVICE_UNAVAILABLE",
+              message: "Authentication service temporarily unavailable",
+            });
+          }
+          throw error;
         }
-
-        if (challenge.expiresAt < new Date()) {
-          throw new TRPCError({
-            code: "UNAUTHORIZED",
-            message: "Challenge expired",
-          });
-        }
-
-        // 2. Verify signature against server-issued nonce
-        const signerAddress = await verifyPersonalMessageSignature(
-          new TextEncoder().encode(challenge.nonce),
-          signature,
-        ).catch(() => {
-          throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid signature" });
-        });
-
-        if (signerAddress.toSuiAddress() !== address) {
+        if (!ownershipVerified) {
           throw new TRPCError({
             code: "UNAUTHORIZED",
-            message: "Signature does not match address",
+            message: "Wallet ownership verification failed",
           });
         }
 
-        // 4. Create or update user
+        // Create or update user via service
         const user = await authService.upsertWalletUser(ctx.db, {
           address,
           walletType,
         });
 
-        // 5. Create wallet session
+        // Create wallet session
         const sessionId = uuidv7();
         const expiresAt = new Date();
         expiresAt.setHours(expiresAt.getHours() + 24); // 24 hour session
@@ -325,14 +173,18 @@ export const authRouter = router({
           userId: user.id,
           walletAddress: address,
           walletType,
-          signedMessage: challenge.nonce,
+          // The consumed challenge is the credential of record. Record its id
+          // for audit rather than a message a caller could choose and replay.
+          signedMessage: `wallet-challenge:${challengeId}`,
           signature,
           signedAt: new Date(),
           expiresAt,
         });
 
+        // Return wallet session data (no ephemeral keys for wallet auth).
+        // Sanitized: never expose the delegate signing key or PII to the client.
         return {
-          user,
+          user: toSafeUser(user),
           sessionId,
           sessionData: {
             sessionId,
@@ -353,17 +205,81 @@ export const authRouter = router({
       }
     }),
 
-  /** Connect with Enoki zkLogin. Two-phase: suiAddress only = returning user check, full = register. */
+  /**
+   * Issue a single-use SIGN-IN challenge for the Enoki flow. The client signs the
+   * returned `message` with its zkLogin key and returns `{ challengeId, signature }`
+   * to connectEnoki. This challenge is scoped to sign-in only — it cannot be used
+   * to authorize a delegate-key export.
+   */
+  issueEnokiChallenge: procedure
+    .input(z.object({ suiAddress: suiAddressSchema }))
+    .mutation(async ({ input }) => {
+      try {
+        const { challengeId, message } = await issueEnokiChallengeToken(
+          input.suiAddress,
+          "signin"
+        );
+        return { challengeId, message };
+      } catch (error) {
+        if (error instanceof SharedRedisUnavailableError) {
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: "Authentication service temporarily unavailable",
+          });
+        }
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: error instanceof Error ? error.message : AUTH_ERRORS.NETWORK_ERROR,
+        });
+      }
+    }),
+
+  /**
+   * Connect with Enoki zkLogin. Every call must prove address ownership with a
+   * signed challenge (challengeId + signature). Two-phase: without privateKey/
+   * accountId = returning-user check; with them = register.
+   */
   connectEnoki: procedure
     .input(z.object({
-      suiAddress: z.string().min(1),
-      privateKey: z.string().optional(),
-      accountId: z.string().optional(),
+      suiAddress: suiAddressSchema,
+      challengeId: z.string().min(1),
+      signature: z.string().min(1),
+      privateKey: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
+      accountId: suiAddressSchema.optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { suiAddress, privateKey, accountId } = input;
+      const { challengeId, signature, privateKey, accountId } = input;
+      // Normalize once so the challenge check and every DB op key on the same
+      // canonical address (a non-canonical variant would otherwise verify but
+      // miss the stored row).
+      const suiAddress = normalizeSuiAddress(input.suiAddress);
 
       try {
+        // Ownership gate — must pass BEFORE any DB lookup, for both phases.
+        let ownershipVerified: boolean;
+        try {
+          ownershipVerified = await verifyAndConsumeEnokiChallenge({
+            rawAddress: suiAddress,
+            challengeId,
+            signature,
+            purpose: "signin",
+          });
+        } catch (error) {
+          if (error instanceof SharedRedisUnavailableError) {
+            throw new TRPCError({
+              code: "SERVICE_UNAVAILABLE",
+              message: "Authentication service temporarily unavailable",
+            });
+          }
+          throw error;
+        }
+        if (!ownershipVerified) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Wallet ownership verification failed",
+          });
+        }
+
         // Phase 1: returning user check
         if (!privateKey && !accountId) {
           const existing = await authService.getEnokiUserBySuiAddress(ctx.db, suiAddress);
@@ -374,7 +290,7 @@ export const authRouter = router({
             });
             return {
               needsSetup: false,
-              user: existing,
+              user: toSafeUser(existing),
               sessionId: session.sessionId,
               sessionData: { sessionId: session.sessionId, expiresAt: session.expiresAt },
             };
@@ -387,6 +303,13 @@ export const authRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: "privateKey and accountId required" });
         }
 
+        const delegatePublicKey = await deriveDelegatePublicKeyHex(privateKey);
+        await assertDelegateAccountBinding({
+          accountId,
+          owner: suiAddress,
+          publicKeyHex: delegatePublicKey,
+        });
+
         const user = await authService.upsertEnokiUser(ctx.db, {
           suiAddress, delegatePrivateKey: privateKey, delegateAccountId: accountId,
         });
@@ -398,9 +321,123 @@ export const authRouter = router({
 
         return {
           needsSetup: false,
-          user,
+          user: toSafeUser(user),
           sessionId: session.sessionId,
           sessionData: { sessionId: session.sessionId, expiresAt: session.expiresAt },
+        };
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        if (error instanceof DelegateCredentialConflictError) {
+          throw new TRPCError({ code: "CONFLICT", message: error.message });
+        }
+        if (error instanceof DelegateAccountBindingError) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: error.message });
+        }
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: error instanceof Error ? error.message : AUTH_ERRORS.NETWORK_ERROR,
+        });
+      }
+    }),
+
+  /**
+   * Issue a single-use EXPORT challenge, scoped to the delegate-key export action
+   * and to the caller's own session address. Protected: requires a valid session,
+   * and the challenge is issued only for that session's address — so a caller can
+   * never obtain an export challenge for someone else's address, and a sign-in
+   * signature can never satisfy it (different purpose).
+   */
+  issueExportChallenge: protectedProcedure.mutation(async ({ ctx }) => {
+    try {
+      const address = await authService.getUserAddressById(ctx.db, ctx.userId);
+      if (!address) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+      }
+      const { challengeId, message } = await issueEnokiChallengeToken(
+        address,
+        "export"
+      );
+      return { challengeId, message };
+    } catch (error) {
+      if (error instanceof TRPCError) throw error;
+      if (error instanceof SharedRedisUnavailableError) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "Authentication service temporarily unavailable",
+        });
+      }
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: error instanceof Error ? error.message : AUTH_ERRORS.NETWORK_ERROR,
+      });
+    }
+  }),
+
+  /**
+   * Export the delegate private key for the authenticated caller. This is the
+   * ONLY path that returns the private key. It requires: a valid session
+   * (protectedProcedure); an EXPORT-purpose ownership challenge signature (a
+   * sign-in signature cannot be replayed here); and that the caller's session
+   * address matches the requested address (a caller can only export their own key).
+   */
+  exportDelegateKey: protectedProcedure
+    .input(z.object({
+      suiAddress: suiAddressSchema,
+      challengeId: z.string().min(1),
+      signature: z.string().min(1),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { challengeId, signature } = input;
+      const suiAddress = normalizeSuiAddress(input.suiAddress);
+
+      try {
+        // Bind the export to the session: the caller may only export the key for
+        // the address their own session authenticates as.
+        const sessionAddress = await authService.getUserAddressById(
+          ctx.db,
+          ctx.userId
+        );
+        if (!sessionAddress || normalizeSuiAddress(sessionAddress) !== suiAddress) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "You can only export the key for your own session",
+          });
+        }
+
+        let ownershipVerified: boolean;
+        try {
+          ownershipVerified = await verifyAndConsumeEnokiChallenge({
+            rawAddress: suiAddress,
+            challengeId,
+            signature,
+            purpose: "export",
+          });
+        } catch (error) {
+          if (error instanceof SharedRedisUnavailableError) {
+            throw new TRPCError({
+              code: "SERVICE_UNAVAILABLE",
+              message: "Authentication service temporarily unavailable",
+            });
+          }
+          throw error;
+        }
+        if (!ownershipVerified) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Wallet ownership verification failed",
+          });
+        }
+
+        const key = await authService.getDelegateKeyForOwner(ctx.db, suiAddress);
+        if (!key) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "No delegate key found for this address",
+          });
+        }
+        return {
+          delegatePrivateKey: key.delegatePrivateKey,
+          delegateAccountId: key.delegateAccountId,
         };
       } catch (error) {
         if (error instanceof TRPCError) throw error;
@@ -415,29 +452,21 @@ export const authRouter = router({
   connectDelegateKey: procedure
     .input(z.object({
       privateKey: z.string().regex(/^[0-9a-f]{64}$/i, "Must be 64 hex characters"),
-      accountId: z.string().min(1),
+      accountId: suiAddressSchema,
     }))
     .mutation(async ({ ctx, input }) => {
       const { privateKey, accountId } = input;
 
       try {
-        // Derive Sui address from private key
-        const ed = await import("@noble/ed25519");
-        const { sha512 } = await import("@noble/hashes/sha512");
-        if (!(ed.etc as any).sha512Sync) {
-          (ed.etc as any).sha512Sync = (...m: Uint8Array[]) => {
-            const h = sha512.create();
-            for (const msg of m) h.update(msg);
-            return h.digest();
-          };
-        }
-
-        const privKeyBytes = Uint8Array.from(
-          privateKey.match(/.{2}/g)!.map((b) => parseInt(b, 16))
+        await checkPublicAuthRateLimit(ctx.request);
+        // Derive Sui address and binding key from the same private key.
+        const publicKeyHex = await deriveDelegatePublicKeyHex(privateKey);
+        const pubKeyBytes = Uint8Array.from(
+          publicKeyHex.match(/.{2}/g)!.map((byte) => Number.parseInt(byte, 16))
         );
-        const pubKeyBytes = ed.getPublicKey(privKeyBytes);
+        await assertDelegateAccountBinding({ accountId, publicKeyHex });
 
-        const { blake2b } = await import("@noble/hashes/blake2b");
+        const { blake2b } = await import("@noble/hashes/blake2.js");
         const addrInput = new Uint8Array(33);
         addrInput[0] = 0x00;
         addrInput.set(pubKeyBytes, 1);
@@ -455,12 +484,21 @@ export const authRouter = router({
         });
 
         return {
-          user,
+          user: toSafeUser(user),
           sessionId: session.sessionId,
           sessionData: { sessionId: session.sessionId, expiresAt: session.expiresAt },
         };
       } catch (error) {
         if (error instanceof TRPCError) throw error;
+        if (error instanceof AuthRateLimitError) {
+          throw new TRPCError({ code: error.code, message: error.message });
+        }
+        if (error instanceof DelegateCredentialConflictError) {
+          throw new TRPCError({ code: "CONFLICT", message: error.message });
+        }
+        if (error instanceof DelegateAccountBindingError) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: error.message });
+        }
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: error instanceof Error ? error.message : AUTH_ERRORS.NETWORK_ERROR,

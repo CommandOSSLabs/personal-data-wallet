@@ -1,11 +1,11 @@
 /**
- * memwal — Manual Client (Full Client-Side)
+ * Walrus Memory — Manual Client (Full Client-Side)
  *
  * User-side flow where the SDK handles everything locally:
  * - SEAL encrypt/decrypt via @mysten/seal (user's own Sui wallet)
  * - Walrus upload/download via @mysten/walrus
  * - Embedding via OpenAI-compatible API (user's own key)
- * - Vector registration via MemWal server (Ed25519 signed)
+ * - Vector registration via Walrus Memory server (Ed25519 signed)
  *
  * @example
  * ```typescript
@@ -17,6 +17,7 @@
  *     embeddingApiKey: process.env.OPENAI_API_KEY!,
  *     packageId: "0x...",
  *     accountId: "0x...",
+ *     registryId: "0x...",
  * })
  *
  * // Remember — all client-side: embed → SEAL encrypt → Walrus upload → register
@@ -33,25 +34,114 @@ import type {
     RememberManualResult,
     RecallManualResult,
     RecallManualMemory,
+    MemWalManualRecallOptions,
     RestoreResult,
+    SealServerConfig,
+    RelayerVersionMetadata,
 } from "./types.js";
-import { sha256hex, hexToBytes, bytesToHex } from "./utils.js";
+import {
+    sha256hex,
+    hexToBytes,
+    bytesToHex,
+    normalizePrivateKey,
+    u64ToLeHex,
+    normalizeServerUrl,
+    sanitizeServerError,
+    clockDriftErrorFromResponse,
+    scoringWeightsToWire,
+} from "./utils.js";
+import { assertCompatibleRelayer, compatibilityErrorFromStatus } from "./compatibility.js";
 
 // ============================================================
 // Constants
 // ============================================================
 
-// Default SEAL key server object IDs per network
-// Users can override via SEAL_KEY_SERVERS in their environment
-const DEFAULT_KEY_SERVERS: Record<string, string[]> = {
+type ResolvedSealServerConfig = Omit<SealServerConfig, "weight"> & {
+    weight: number;
+};
+
+// Default SEAL server configs per network.
+// Keep testnet on the legacy independent servers so Manual mode can decrypt
+// data written by the hosted testnet relayer. Committee aggregators remain
+// supported through explicit sealServerConfigs.
+const DEFAULT_SEAL_SERVER_CONFIGS: Record<string, ResolvedSealServerConfig[]> = {
     mainnet: [
-        "0x145540d931f182fef76467dd8074c9839aea126852d90d18e1556fcbbd1208b6", // Overclock (Open) 
+        {
+            objectId: "0x145540d931f182fef76467dd8074c9839aea126852d90d18e1556fcbbd1208b6", // Overclock (Open)
+            weight: 1,
+        },
+        {
+            objectId: "0xe0eb52eba9261b96e895bbb4deca10dcd64fbc626a1133017adcd5131353fd10", // Studio Mirai (Open)
+            weight: 1,
+        },
     ],
     testnet: [
-        "0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75",
-        "0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8",
+        {
+            objectId: "0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75",
+            weight: 1,
+        },
+        {
+            objectId: "0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8",
+            weight: 1,
+        },
     ],
 };
+
+function normalizeSealServerConfigs(configs: SealServerConfig[]): ResolvedSealServerConfig[] {
+    return configs.map((config, index) => {
+        const objectId = config.objectId?.trim();
+        if (!objectId) {
+            throw new Error(`MemWalManual: sealServerConfigs[${index}].objectId is required`);
+        }
+
+        const weight = config.weight ?? 1;
+        if (!Number.isInteger(weight) || weight < 1) {
+            throw new Error(`MemWalManual: sealServerConfigs[${index}].weight must be a positive integer`);
+        }
+
+        const aggregatorUrl = config.aggregatorUrl?.trim();
+        const apiKeyName = config.apiKeyName?.trim();
+        const apiKey = config.apiKey?.trim();
+        if ((apiKeyName && !apiKey) || (!apiKeyName && apiKey)) {
+            throw new Error(
+                `MemWalManual: sealServerConfigs[${index}] must provide both apiKeyName and apiKey, or neither`
+            );
+        }
+
+        return {
+            objectId,
+            weight,
+            ...(aggregatorUrl ? { aggregatorUrl } : {}),
+            ...(apiKeyName && apiKey ? { apiKeyName, apiKey } : {}),
+        };
+    });
+}
+
+function resolveSealServerConfigs(config: MemWalManualConfig, network: string): ResolvedSealServerConfig[] {
+    if (config.sealServerConfigs !== undefined) {
+        return normalizeSealServerConfigs(config.sealServerConfigs);
+    }
+
+    if (config.sealKeyServers !== undefined) {
+        return normalizeSealServerConfigs(config.sealKeyServers.map((objectId) => ({ objectId })));
+    }
+
+    return normalizeSealServerConfigs(DEFAULT_SEAL_SERVER_CONFIGS[network] ?? []);
+}
+
+function sealServerConfigTotalWeight(configs: ResolvedSealServerConfig[]): number {
+    return configs.reduce((sum, config) => sum + config.weight, 0);
+}
+
+/** Encode arbitrary-size bytes without passing the whole payload as function arguments. */
+function bytesToBase64(bytes: Uint8Array): string {
+    const chunkSize = 0x8000;
+    const chunks: string[] = [];
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+        chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + chunkSize)));
+    }
+    return btoa(chunks.join(""));
+}
 
 // ============================================================
 // MemWalManual Client
@@ -64,6 +154,8 @@ export class MemWalManual {
     private config: MemWalManualConfig;
     private walletSigner: WalletSigner | null;
     private namespace: string;
+    private relayerVersionMetadata: RelayerVersionMetadata | null = null;
+    private compatibilityPromise: Promise<RelayerVersionMetadata> | null = null;
 
     // Lazily initialized heavy clients (typed as any to avoid peer dep compile errors)
     private _suiClient: any = null;
@@ -78,8 +170,13 @@ export class MemWalManual {
         if (config.suiPrivateKey && config.walletSigner) {
             throw new Error("MemWalManual: provide suiPrivateKey OR walletSigner, not both");
         }
-        this.delegatePrivateKey = hexToBytes(config.key);
-        this.serverUrl = (config.serverUrl ?? "http://localhost:8000").replace(/\/$/, "");
+        this.delegatePrivateKey =
+            typeof config.key === "string"
+                ? hexToBytes(normalizePrivateKey(config.key))
+                : config.key;
+        // LOW-22: default to HTTPS; warn (do not throw) on plaintext HTTP
+        // against non-localhost hosts.
+        this.serverUrl = normalizeServerUrl(config.serverUrl ?? "https://relayer.memory.walrus.xyz");
         this.walletSigner = config.walletSigner ?? null;
         this.config = config;
         this.namespace = config.namespace ?? "default";
@@ -94,11 +191,35 @@ export class MemWalManual {
      * @param config.suiPrivateKey - Sui private key (bech32) for SEAL + Walrus (OR walletSigner)
      * @param config.walletSigner - Connected wallet signer from dapp-kit (OR suiPrivateKey)
      * @param config.embeddingApiKey - OpenAI/OpenRouter API key for embeddings
-     * @param config.packageId - MemWal contract package ID
-     * @param config.accountId - MemWalAccount object ID (for SEAL seal_approve)
+     * @param config.packageId - Immutable first-published package ID used by SEAL
+     * @param config.sealPolicyPackageId - Current seal_approve package after an upgrade
+     * @param config.registryId - AccountRegistry shared object ID (for SEAL seal_approve)
+     * @param config.accountId - Walrus Memory account object ID (for SEAL seal_approve)
      */
     static create(config: MemWalManualConfig): MemWalManual {
         return new MemWalManual(config);
+    }
+
+    /**
+     * Securely wipe the delegate private and public keys from memory.
+     * Prevents key extraction from V8 heap dumps.
+     */
+    destroy(): void {
+        if (this.delegatePrivateKey) {
+            this.delegatePrivateKey.fill(0);
+        }
+        if (this.delegatePublicKey) {
+            this.delegatePublicKey.fill(0);
+        }
+        this.relayerVersionMetadata = null;
+        this.compatibilityPromise = null;
+    }
+
+    /**
+     * Fetch and validate the relayer compatibility contract.
+     */
+    async compatibility(): Promise<RelayerVersionMetadata> {
+        return this.ensureCompatibleRelayer();
     }
 
     /** Whether this client uses a connected wallet signer (vs raw keypair) */
@@ -126,8 +247,8 @@ export class MemWalManual {
                 if (typeof SuiClient !== "function") {
                     throw new Error(
                         "SuiClient not found in @mysten/sui/client. " +
-                        "For @mysten/sui v2.6.0+, pass suiClient in config " +
-                        "(e.g. from dapp-kit's useSuiClient())"
+                            "For @mysten/sui v2.6.0+, pass suiClient in config " +
+                            "(e.g. from dapp-kit's useSuiClient())"
                     );
                 }
                 const network = this.config.suiNetwork ?? "mainnet";
@@ -156,26 +277,13 @@ export class MemWalManual {
         return this._keypair;
     }
 
-    /** Get the owner address — from wallet signer or derived from keypair */
-    private async getOwnerAddress(): Promise<string> {
+    /** Get the transaction signer address from the wallet or configured keypair. */
+    private async getSignerAddress(): Promise<string> {
         if (this.walletSigner) {
             return this.walletSigner.address;
         }
         const keypair = await this.getKeypair();
         return keypair.getPublicKey().toSuiAddress();
-    }
-
-    /** Sign and execute a transaction — via wallet popup or programmatic keypair */
-    private async signAndExecuteTransaction(transaction: any): Promise<{ digest: string }> {
-        if (this.walletSigner) {
-            return this.walletSigner.signAndExecuteTransaction({ transaction });
-        }
-        const keypair = await this.getKeypair();
-        const suiClient = await this.getSuiClient();
-        return suiClient.signAndExecuteTransaction({
-            signer: keypair,
-            transaction,
-        });
     }
 
     private async getSealClient() {
@@ -184,23 +292,30 @@ export class MemWalManual {
             const { SealClient } = await import("@mysten/seal");
             const suiClient = await this.getSuiClient();
             const network = this.config.suiNetwork ?? "mainnet";
-            const keyServers = this.config.sealKeyServers ?? DEFAULT_KEY_SERVERS[network] ?? [];
-            if (keyServers.length === 0) {
+            const serverConfigs = resolveSealServerConfigs(this.config, network);
+            if (serverConfigs.length === 0) {
                 throw new Error(
                     `MemWalManual: no SEAL key servers configured for network "${network}". ` +
-                    "Please provide sealKeyServers in config or set SEAL_KEY_SERVERS env var."
+                        "Please provide sealServerConfigs or sealKeyServers in config."
                 );
             }
             this._sealClient = new SealClient({
                 suiClient,
-                serverConfigs: keyServers.map((id) => ({
-                    objectId: id,
-                    weight: 1,
-                })),
-                verifyKeyServers: false,
+                serverConfigs,
+                verifyKeyServers: true,
             });
         }
         return this._sealClient;
+    }
+
+    /** MED-10: SEAL threshold — defaults to 2, capped to configured server weight. */
+    private get sealThreshold(): number {
+        if (this.config.sealThreshold !== undefined) {
+            return this.config.sealThreshold;
+        }
+        const network = this.config.suiNetwork ?? "mainnet";
+        const totalWeight = sealServerConfigTotalWeight(resolveSealServerConfigs(this.config, network));
+        return totalWeight > 0 ? Math.min(2, totalWeight) : 2;
     }
 
     private async getWalrusClient() {
@@ -209,9 +324,10 @@ export class MemWalManual {
             const { WalrusClient } = await import("@mysten/walrus");
             const suiClient = await this.getSuiClient();
             const network = this.config.suiNetwork ?? "mainnet";
-            const uploadRelayHost = network === "testnet"
-                ? "https://upload-relay.testnet.walrus.space"
-                : "https://upload-relay.mainnet.walrus.space";
+            const uploadRelayHost =
+                network === "testnet"
+                    ? "https://upload-relay.testnet.walrus.space"
+                    : "https://upload-relay.mainnet.walrus.space";
             this._walrusClient = new WalrusClient({
                 network: network as any,
                 suiClient,
@@ -239,15 +355,16 @@ export class MemWalManual {
 
         const ns = namespace ?? this.namespace;
 
-        // Step 1 & 2: Embed + SEAL encrypt concurrently
+        // Step 1 & 2: Embed + SEAL encrypt concurrently. Namespace produces a
+        // distinct SEAL identity, but delegates remain authorized account-wide.
         const [vector, encrypted] = await Promise.all([
             this.embed(text),
-            this.sealEncrypt(new TextEncoder().encode(text)),
+            this.sealEncrypt(new TextEncoder().encode(text), ns),
         ]);
 
         // Step 3: Send encrypted bytes (base64) + vector to server.
         // Server will upload to Walrus via upload-relay and return the blob_id.
-        const encryptedBase64 = btoa(String.fromCharCode(...encrypted));
+        const encryptedBase64 = bytesToBase64(encrypted);
         return this.signedRequest<RememberManualResult>("POST", "/api/remember/manual", {
             encrypted_data: encryptedBase64,
             vector,
@@ -262,20 +379,32 @@ export class MemWalManual {
      * 3. Download blobs from Walrus
      * 4. SEAL decrypt each blob
      */
-    async recallManual(query: string, limit: number = 10, namespace?: string): Promise<RecallManualResult> {
-        if (!query) throw new Error("Query cannot be empty");
+    async recallManual(query: string, limit?: number, namespace?: string): Promise<RecallManualResult>;
+    async recallManual(query: string, options?: MemWalManualRecallOptions): Promise<RecallManualResult>;
+    async recallManual(
+        query: string,
+        limitOrOptions: number | MemWalManualRecallOptions = 10,
+        namespace?: string
+    ): Promise<RecallManualResult> {
+        if (!query.trim()) throw new Error("Query cannot be empty");
 
-        const ns = namespace ?? this.namespace;
+        const options = typeof limitOrOptions === "number" ? { limit: limitOrOptions, namespace } : limitOrOptions;
+        const limit = options.limit ?? 10;
+        const ns = options.namespace ?? this.namespace;
 
         // Step 1: Embed query
         const vector = await this.embed(query);
 
         // Step 2: Search server
-        const searchResult = await this.signedRequest<{ results: { blob_id: string; distance: number }[]; total: number }>(
-            "POST",
-            "/api/recall/manual",
-            { vector, limit, namespace: ns },
-        );
+        const searchResult = await this.signedRequest<{
+            results: { blob_id: string; distance: number }[];
+            total: number;
+        }>("POST", "/api/recall/manual", {
+            vector,
+            limit,
+            namespace: ns,
+            scoring_weights: scoringWeightsToWire(options.scoringWeights),
+        });
 
         if (searchResult.results.length === 0) {
             return { results: [], total: 0 };
@@ -292,7 +421,7 @@ export class MemWalManual {
             }
         });
         const downloadedBlobs = (await Promise.all(downloadTasks)).filter(
-            (d): d is { blob_id: string; data: Uint8Array; distance: number } => d !== null,
+            (d): d is { blob_id: string; data: Uint8Array; distance: number } => d !== null
         );
 
         if (downloadedBlobs.length === 0) {
@@ -305,6 +434,7 @@ export class MemWalManual {
         let SessionKey: any;
         let EncryptedObject: any;
         let Transaction: any;
+        let normalizeSuiAddress: (address: string) => string;
         let sessionKey: any;
         try {
             sealClient = await this.getSealClient();
@@ -312,57 +442,85 @@ export class MemWalManual {
             // @ts-ignore — optional peer dependency
             ({ SessionKey, EncryptedObject } = await import("@mysten/seal"));
             ({ Transaction } = await import("@mysten/sui/transactions"));
+            ({ normalizeSuiAddress } = await import("@mysten/sui/utils"));
         } catch (err) {
-            console.error('[MemWalManual] Failed to initialize SEAL/SUI clients:', err);
+            console.error("[MemWalManual] Failed to initialize SEAL/SUI clients:", err);
             return { results: [], total: 0 };
         }
 
-        const callerAddress = await this.getOwnerAddress();
+        const immutablePackageId = normalizeSuiAddress(this.config.packageId);
+        const parsedBlobs: ({ parsed: any } & (typeof downloadedBlobs)[number])[] = [];
+        for (const blob of downloadedBlobs) {
+            let parsed: any;
+            try {
+                parsed = EncryptedObject.parse(blob.data);
+            } catch (err) {
+                console.error(`[MemWalManual] SEAL decrypt failed for ${blob.blob_id}:`, err);
+                continue;
+            }
+            if (normalizeSuiAddress(parsed.packageId) !== immutablePackageId) {
+                console.error(
+                    `[MemWalManual] Skipping ciphertext ${blob.blob_id}: packageId does not match ` +
+                        "the configured immutable packageId"
+                );
+                continue;
+            }
+            parsedBlobs.push({ ...blob, parsed });
+        }
+        if (parsedBlobs.length === 0) {
+            return { results: [], total: 0 };
+        }
+
+        const callerAddress = await this.getSignerAddress();
 
         // Create signer (wallet adapter or keypair)
         const signer = await this.createSigner(callerAddress);
 
         // Create session key ONCE (triggers one wallet popup)
+        // HIGH-7 / LOW-13: Reduced from 30 to 5 minutes to limit the exposure
+        // window if a session token is compromised.
         try {
             sessionKey = await SessionKey.create({
                 address: callerAddress,
                 packageId: this.config.packageId,
-                ttlMin: 30,
+                ttlMin: 5,
                 signer,
                 suiClient,
             });
         } catch (err) {
-            console.error('[MemWalManual] SessionKey.create failed:', err);
+            console.error("[MemWalManual] SessionKey.create failed:", err);
             return { results: [], total: 0 };
         }
 
         // Decrypt each blob sequentially using the shared session key
         const results: RecallManualMemory[] = [];
-        for (const blob of downloadedBlobs) {
+        for (const blob of parsedBlobs) {
             try {
-                const parsed = EncryptedObject.parse(blob.data);
-                const fullId = parsed.id;
+                const fullId = blob.parsed.id;
 
-                // Build seal_approve PTB
-                const idBytes = Array.from(
-                    Uint8Array.from(fullId.match(/.{1,2}/g)!.map((b: string) => parseInt(b, 16))),
-                );
+                // Build seal_approve PTB. hexToBytes rejects empty, odd-length,
+                // and non-hex ids instead of coercing NaN to 0.
+                const idBytes = Array.from(hexToBytes(fullId));
                 const tx = new Transaction();
                 tx.moveCall({
-                    target: `${this.config.packageId}::account::seal_approve`,
+                    target: `${this.config.sealPolicyPackageId ?? this.config.packageId}::account::seal_approve`,
                     arguments: [
                         tx.pure("vector<u8>", idBytes),
+                        tx.object(this.config.registryId),
                         tx.object(this.config.accountId),
                     ],
                 });
-                const txBytes = await tx.build({ client: suiClient, onlyTransactionKind: true });
+                const txBytes = await tx.build({
+                    client: suiClient,
+                    onlyTransactionKind: true,
+                });
 
                 // Fetch decryption keys using shared session key
                 await sealClient.fetchKeys({
                     ids: [fullId],
                     txBytes,
                     sessionKey,
-                    threshold: 1,
+                    threshold: this.sealThreshold,
                 });
 
                 // Decrypt locally
@@ -412,8 +570,7 @@ export class MemWalManual {
     private async embed(text: string): Promise<number[]> {
         if (!this.config.embeddingApiKey) {
             throw new Error(
-                "MemWalManual: embeddingApiKey is required. " +
-                "Provide your OpenAI or OpenRouter API key in config."
+                "MemWalManual: embeddingApiKey is required. " + "Provide your OpenAI or OpenRouter API key in config."
             );
         }
 
@@ -426,7 +583,7 @@ export class MemWalManual {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "Authorization": `Bearer ${this.config.embeddingApiKey}`,
+                Authorization: `Bearer ${this.config.embeddingApiKey}`,
             },
             body: JSON.stringify({ model, input: text }),
         });
@@ -436,7 +593,7 @@ export class MemWalManual {
             throw new Error(`Embedding API error (${resp.status}): ${errText}`);
         }
 
-        const data = await resp.json() as { data: { embedding: number[] }[] };
+        const data = (await resp.json()) as { data: { embedding: number[] }[] };
         if (!data.data?.[0]?.embedding) {
             throw new Error("Embedding API returned no data");
         }
@@ -447,18 +604,133 @@ export class MemWalManual {
     // Internal: SEAL Encrypt
     // ============================================================
 
-    private async sealEncrypt(plaintext: Uint8Array): Promise<Uint8Array> {
+    /**
+     * SEAL-encrypt a payload.
+     *
+     * Namespace scoping: the `id` passed to SEAL includes the namespace, so
+     * namespaces receive distinct keys. `seal_approve` authorizes delegates at
+     * account scope, however, so this does not isolate delegates from each
+     * other's namespaces.
+     *
+     * ENG-1725 fix: The on-chain `seal_approve` matches the tail of the id
+     * against `bcs::to_bytes(account.owner)` for every caller — owner and
+     * delegate alike. The id MUST therefore carry the owner's 32 raw address
+     * bytes at that position (in hex form on the SEAL side, raw on the Move
+     * side). The previous LOW-24 layout — `hex(accountId) || hex(namespace)`
+     * — used the MemWalAccount object id (not the owner address) and put the
+     * namespace last, so the match always failed and owners could no longer
+     * recall their own manually-remembered data.
+     *
+     * Rotation: SEAL hands out one reusable secret key per identity, so an id
+     * fixed at `owner` would let any delegate that ever fetched the key keep
+     * decrypting new memories forever — removal on chain would not touch the
+     * copy in their hands. Tailing the id with the account's
+     * `access_counter_version` means a revocation bumps the counter, which
+     * changes the identity, which yields a key they cannot fetch.
+     *
+     * Layout:
+     *   id = hex(utf8(namespace)) || hex(ownerAddress[2:]) || hex(u64le(counter))
+     *
+     * - namespace is the prefix, so different namespaces use different SEAL
+     *   keys. It is an organization boundary, not an authorization boundary:
+     *   every account delegate may request every namespace key.
+     * - owner address (32 bytes) then counter (8 bytes) are the tail →
+     *   `seal_approve` parses the counter off the end and rebuilds the
+     *   expected `owner ‖ counter` suffix to compare.
+     *
+     * NOTE: Ciphertext written between the original LOW-24 fix and the
+     * ENG-1725 fix (id = accountHex + nsHex) is unrecoverable by the owner
+     * caller. There is no production data in that window per the team.
+     */
+    private async sealEncrypt(plaintext: Uint8Array, namespace: string): Promise<Uint8Array> {
         const sealClient = await this.getSealClient();
-        const ownerAddress = await this.getOwnerAddress();
+
+        // Build a namespace-scoped SEAL id tailing with the owner's address
+        // bytes then the rotation counter, so the on-chain `seal_approve`
+        // suffix check passes. Hex-encoded throughout so the id is a stable
+        // ASCII hex string.
+        const { ownerHex, counter } = await this.fetchSealIdentity();
+        const nsHex = bytesToHex(new TextEncoder().encode(namespace));
+        const scopedId = `${nsHex}${ownerHex}${u64ToLeHex(counter)}`;
 
         const result = await sealClient.encrypt({
-            threshold: 1,
+            threshold: this.sealThreshold,
             packageId: this.config.packageId,
-            id: ownerAddress,
+            id: scopedId,
             data: plaintext,
         });
 
         return new Uint8Array(result.encryptedObject);
+    }
+
+    /**
+     * Read the account owner and SEAL rotation counter fresh from chain.
+     *
+     * Deliberately not cached, and it must stay that way: the counter's only
+     * job is to stop a just-removed delegate from reading what comes next, and
+     * a cached value would encrypt the next memory under the identity that
+     * delegate already holds a key for. One read per encrypt is the price of
+     * the property. Recall does not need this — `EncryptedObject.parse` gives
+     * back the id the blob was written under.
+     */
+    private async fetchSealIdentity(): Promise<{
+        ownerHex: string;
+        counter: bigint;
+    }> {
+        const suiClient = await this.getSuiClient();
+        // getSuiClient() can hand back either client generation, and they
+        // disagree on both the request and the response: the v2 gRPC/JSON-RPC
+        // clients take { objectId, include } and answer { object: { json } },
+        // while the legacy client takes { id, options } and answers
+        // { data: { content: { fields } } }. Send both key sets — each client
+        // ignores the one it does not know — and read whichever came back.
+        const res: any = await suiClient.getObject({
+            objectId: this.config.accountId,
+            id: this.config.accountId,
+            include: { json: true },
+            options: { showContent: true },
+        });
+        const fields = res?.object?.json ?? res?.data?.content?.fields;
+        const objectType = res?.object?.type ?? res?.data?.type ?? res?.data?.content?.type;
+        const typeParts = typeof objectType === "string" ? objectType.split("::") : [];
+        const typePackageHex = typeParts[0]?.replace(/^0x/i, "") ?? "";
+        const configuredPackageHex = this.config.packageId.replace(/^0x/i, "");
+        const packageMatches =
+            /^[0-9a-fA-F]{1,64}$/.test(typePackageHex) &&
+            /^[0-9a-fA-F]{1,64}$/.test(configuredPackageHex) &&
+            typePackageHex.padStart(64, "0").toLowerCase() === configuredPackageHex.padStart(64, "0").toLowerCase();
+        if (!packageMatches || typeParts[1] !== "account" || typeParts[2] !== "MemWalAccount") {
+            throw new Error(
+                `MemWalManual: object ${this.config.accountId} is not a ` +
+                    `${this.config.packageId}::account::MemWalAccount.`
+            );
+        }
+        if (fields?.active !== true) {
+            throw new Error(`MemWalManual: account ${this.config.accountId} is not active; refusing to encrypt.`);
+        }
+        const owner = fields?.owner;
+        if (typeof owner !== "string") {
+            throw new Error(
+                `MemWalManual: account ${this.config.accountId} has no owner field. ` +
+                    "packageId/accountId may point at different contracts."
+            );
+        }
+        const ownerHex = owner.replace(/^0x/i, "");
+        if (!/^[0-9a-fA-F]{1,64}$/.test(ownerHex)) {
+            throw new Error(`MemWalManual: account ${this.config.accountId} has an invalid owner field.`);
+        }
+
+        const rawCounter = fields?.access_counter_version;
+        if (rawCounter === undefined || rawCounter === null) {
+            throw new Error(
+                `MemWalManual: account ${this.config.accountId} has no access_counter_version field. ` +
+                    "This account predates SEAL identity rotation, or packageId/accountId point at different contracts."
+            );
+        }
+        return {
+            ownerHex: ownerHex.padStart(64, "0").toLowerCase(),
+            counter: BigInt(rawCounter),
+        };
     }
 
     // ============================================================
@@ -469,9 +741,10 @@ export class MemWalManual {
         // Direct HTTP PUT to Walrus publisher (works in both browser and Node.js,
         // unlike @mysten/walrus SDK which uses WASM and requires Node.js)
         const network = this.config.suiNetwork ?? "mainnet";
-        const defaultPublisher = network === "testnet"
-            ? "https://publisher.walrus-testnet.walrus.space"
-            : "https://publisher.walrus-mainnet.walrus.space";
+        const defaultPublisher =
+            network === "testnet"
+                ? "https://publisher.walrus-testnet.walrus.space"
+                : "https://publisher.walrus-mainnet.walrus.space";
         const publisherUrl = this.config.walrusPublisherUrl ?? defaultPublisher;
         const epochs = this.config.walrusEpochs ?? 50;
 
@@ -486,11 +759,10 @@ export class MemWalManual {
             throw new Error(`Walrus upload failed (${resp.status}): ${errText}`);
         }
 
-        const result = await resp.json() as any;
+        const result = (await resp.json()) as any;
         // Response can be { newlyCreated: { blobObject: { blobId } } }
         // or { alreadyCertified: { blobId } }
-        const blobId = result.newlyCreated?.blobObject?.blobId
-            ?? result.alreadyCertified?.blobId;
+        const blobId = result.newlyCreated?.blobObject?.blobId ?? result.alreadyCertified?.blobId;
 
         if (!blobId) {
             throw new Error(`Walrus upload: unexpected response: ${JSON.stringify(result)}`);
@@ -502,9 +774,10 @@ export class MemWalManual {
         // Direct HTTP fetch to Walrus aggregator (works in both browser and Node.js,
         // unlike @mysten/walrus SDK which requires Node.js APIs)
         const network = this.config.suiNetwork ?? "mainnet";
-        const defaultAggregator = network === "testnet"
-            ? "https://aggregator.walrus-testnet.walrus.space"
-            : "https://aggregator.walrus-mainnet.walrus.space";
+        const defaultAggregator =
+            network === "testnet"
+                ? "https://aggregator.walrus-testnet.walrus.space"
+                : "https://aggregator.walrus-mainnet.walrus.space";
         const aggregatorUrl = this.config.walrusAggregatorUrl ?? defaultAggregator;
         const resp = await fetch(`${aggregatorUrl}/v1/blobs/${blobId}`);
         if (!resp.ok) {
@@ -526,18 +799,66 @@ export class MemWalManual {
         return this.delegatePublicKey;
     }
 
-    private async signedRequest<T>(
-        method: string,
-        path: string,
-        body: object,
-    ): Promise<T> {
+    private async ensureCompatibleRelayer(): Promise<RelayerVersionMetadata> {
+        if (this.relayerVersionMetadata) return this.relayerVersionMetadata;
+        if (this.compatibilityPromise) return this.compatibilityPromise;
+
+        this.compatibilityPromise = this.fetchCompatibilityMetadata().finally(() => {
+            this.compatibilityPromise = null;
+        });
+        return this.compatibilityPromise;
+    }
+
+    private async fetchCompatibilityMetadata(): Promise<RelayerVersionMetadata> {
+        const versionRes = await fetch(`${this.serverUrl}/version`, {
+            method: "GET",
+        });
+        let body: Partial<RelayerVersionMetadata>;
+
+        if (versionRes.ok) {
+            body = (await versionRes.json()) as Partial<RelayerVersionMetadata>;
+        } else if (versionRes.status === 404 || versionRes.status === 405) {
+            const healthRes = await fetch(`${this.serverUrl}/health`, {
+                method: "GET",
+            });
+            if (!healthRes.ok) {
+                throw new Error(
+                    `Walrus Memory compatibility check failed: GET /version returned ` +
+                        `${versionRes.status}, and GET /health returned ${healthRes.status}`
+                );
+            }
+            body = (await healthRes.json()) as Partial<RelayerVersionMetadata>;
+        } else {
+            throw new Error(`Walrus Memory compatibility check failed: GET /version returned ${versionRes.status}`);
+        }
+
+        assertCompatibleRelayer(body, this.serverUrl);
+        this.relayerVersionMetadata = body;
+        return body;
+    }
+
+    /**
+     * Make a signed request to the server.
+     *
+     * Signature format (LOW-1 + MED-1 + LOW-23):
+     *   "{timestamp}.{method}.{path_and_query}.{body_sha256}.{nonce}.{account_id}"
+     *
+     * Headers sent: x-public-key, x-signature, x-timestamp, x-nonce, x-account-id.
+     */
+    private async signedRequest<T>(method: string, path: string, body: object): Promise<T> {
+        await this.ensureCompatibleRelayer();
         const ed = await import("@noble/ed25519");
 
         const timestamp = Math.floor(Date.now() / 1000).toString();
         const bodyStr = JSON.stringify(body);
         const bodySha256 = await sha256hex(bodyStr);
 
-        const message = `${timestamp}.${method}.${path}.${bodySha256}`;
+        // MED-1: per-request nonce for replay protection.
+        const nonce = crypto.randomUUID();
+
+        // LOW-23: include x-account-id in the canonical signed message so an
+        // intermediary cannot rebind a signed request to a different account.
+        const message = `${timestamp}.${method}.${path}.${bodySha256}.${nonce}.${this.config.accountId}`;
         const msgBytes = new TextEncoder().encode(message);
 
         const signature = await ed.signAsync(msgBytes, this.delegatePrivateKey);
@@ -551,13 +872,42 @@ export class MemWalManual {
                 "x-public-key": bytesToHex(publicKey),
                 "x-signature": bytesToHex(signature),
                 "x-timestamp": timestamp,
+                "x-nonce": nonce,
+                "x-account-id": this.config.accountId,
             },
             body: bodyStr,
         });
 
         if (!res.ok) {
-            const errText = await res.text();
-            throw new Error(`MemWal API error (${res.status}): ${errText}`);
+            // LOW-26: sanitize server error bodies before re-throwing.
+            const raw = await res.text();
+            const compatibilityError = compatibilityErrorFromStatus(res.status, raw);
+            if (compatibilityError) throw compatibilityError;
+
+            // Surface a stale-timestamp rejection (401 + x-auth-error) as an
+            // actionable clock-drift error rather than an opaque server error.
+            const clockDriftError = clockDriftErrorFromResponse(res);
+            if (clockDriftError) throw clockDriftError;
+
+            const { message: sanitized, serverCode } = sanitizeServerError(
+                res.status,
+                raw,
+                res.headers.get("x-auth-error"),
+            );
+            const err = new Error(sanitized) as Error & {
+                status?: number;
+                serverCode?: string;
+                retryAfterSeconds?: number;
+                cause?: string;
+            };
+            err.status = res.status;
+            if (serverCode) err.serverCode = serverCode;
+            const retryAfter = Number(res.headers.get("retry-after"));
+            if (Number.isFinite(retryAfter) && retryAfter > 0) {
+                err.retryAfterSeconds = retryAfter;
+            }
+            err.cause = raw;
+            throw err;
         }
 
         return res.json() as Promise<T>;
@@ -574,10 +924,14 @@ export class MemWalManual {
      * @param namespace - Namespace to restore
      * @returns RestoreResult with count of restored entries
      */
-    async restore(namespace: string, limit: number = 50): Promise<RestoreResult> {
-        return this.signedRequest<RestoreResult>("POST", "/api/restore", {
+    async restore(namespace: string, limit: number = 10): Promise<RestoreResult> {
+        const result = await this.signedRequest<RestoreResult>("POST", "/api/restore", {
             namespace,
             limit,
         });
+        // Relayers older than WALM-319 omit `truncated` entirely — treat
+        // "not present" as "not known to be truncated" rather than drop
+        // the field or require every relayer version to send it.
+        return { ...result, truncated: result.truncated ?? false };
     }
 }
