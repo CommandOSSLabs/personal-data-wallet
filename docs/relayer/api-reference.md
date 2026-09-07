@@ -535,6 +535,8 @@ The relayer resolves the owner from the signed headers, so a caller can only ret
 
 `deleted` is the number of index rows removed. `0` is a success, not a miss: the memory may already have been un-indexed (expiry, a Walrus-404 cleanup, an earlier namespace-wide forget) while its blob is still on chain and therefore still restorable — the retraction is recorded either way.
 
+`0` is also what you get while an asynchronous `POST /api/remember` for that blob is still finishing: the job records its `blob_id` — and `GET /api/remember/{job_id}` returns it — before the memory is indexed. Retracting inside that window is honoured. The job's own index write is re-checked against the retraction at the moment it runs and is suppressed, so the memory never becomes searchable; the job still reports `done`, because the blob was uploaded successfully and there is nothing left for it to retry. Where the two disagree, the retraction is authoritative.
+
 `forgotten` is `true` when this call created the retraction record and `false` when the blob had already been retracted. The endpoint is idempotent; `false` means "already done", not "failed".
 
 ### `POST /api/stats`

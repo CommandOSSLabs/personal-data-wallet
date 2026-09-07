@@ -284,8 +284,19 @@ impl MemoryEngine for WalrusSealEngine {
         // Index the row. Quota accounting uses the ciphertext byte length.
         let id = uuid::Uuid::new_v4().to_string();
         let blob_size = bytes.len() as i64;
-        self.db
-            .insert_vector(
+        // Guarded insert (WALM-392): no production path writes a blob_id the
+        // owner has retracted. Reaching the suppressed branch here needs the
+        // Walrus content hash of this ciphertext to equal one already
+        // retracted in this (owner, namespace) — SEAL randomises every
+        // encryption, so it should be unreachable. It is guarded anyway
+        // because the invariant is about `forgotten_blobs`, not about which
+        // caller we have decided to trust; that judgement has been wrong
+        // twice. Failing the request is the safe direction: returning a
+        // `MemoryRef` for a row that was deliberately not written would hand
+        // the caller an id that no read path can resolve.
+        let indexed = self
+            .db
+            .insert_vector_unless_forgotten(
                 &id,
                 owner,
                 namespace,
@@ -298,6 +309,17 @@ impl MemoryEngine for WalrusSealEngine {
                 upload.end_epoch,
             )
             .await?;
+        if !indexed {
+            tracing::warn!(
+                "engine.store_blob: blob_id={} is retracted in ns={} — not indexing (WALM-392)",
+                blob_id,
+                namespace
+            );
+            return Err(AppError::Conflict(format!(
+                "blob {} was retracted in this namespace and will not be re-indexed",
+                blob_id
+            )));
+        }
 
         Ok(MemoryRef { id, blob_id })
     }

@@ -774,53 +774,26 @@ mod tests {
     use super::*;
     use crate::storage::db::VectorDb;
     use sqlx::postgres::PgPoolOptions;
-    use std::sync::OnceLock;
-
-    // Guards concurrent test threads in THIS module from racing on
-    // `CREATE EXTENSION IF NOT EXISTS vector` (001_init.sql) — Postgres
-    // does not make that statement safe under concurrent execution
-    // despite IF NOT EXISTS (two sessions can both pass the existence
-    // check before either commits, then collide on the unique index on
-    // pg_extension). Mirrors the same pattern already used in
-    // `services/server/src/jobs.rs` (`DB_SETUP_LOCK`) and
-    // `services/server/src/storage/db.rs` (`VECTOR_SCHEMA_SETUP_LOCK`).
-    static DB_SETUP_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
     fn test_database_url() -> String {
         std::env::var("DATABASE_URL")
             .unwrap_or_else(|_| "postgresql://memwal:memwal_secret@localhost:5432/memwal".into())
     }
 
+    /// One shared pool builder for the read-API tests. The vector schema is
+    /// applied by `storage::db::tests::ensure_vector_schema` rather than by a
+    /// second migration list here: two lists over the same tables is what
+    /// used to deadlock the suite (migration 020 locks `memory_tombstones`
+    /// then `vector_entries`; the index writes lock them the other way
+    /// round), and a second list also silently drifts from the first — the
+    /// one here already lagged the canonical list by a migration once.
     async fn test_pool() -> PgPool {
         let pool = PgPoolOptions::new()
             .max_connections(1)
             .connect(&test_database_url())
             .await
             .unwrap();
-        let _guard = DB_SETUP_LOCK
-            .get_or_init(|| tokio::sync::Mutex::new(()))
-            .lock()
-            .await;
-        for migration in [
-            include_str!("../../migrations/001_init.sql"),
-            include_str!("../../migrations/002_add_namespace.sql"),
-            include_str!("../../migrations/003_rate_limiter.sql"),
-            include_str!("../../migrations/008_benchmark_plaintext.sql"),
-            include_str!("../../migrations/009_importance_signal.sql"),
-            include_str!("../../migrations/014_memory_read_api_columns.sql"),
-            include_str!("../../migrations/015_memory_read_api_updated_at_not_null.sql"),
-            include_str!("../../migrations/016_memory_read_api_index.sql"),
-            include_str!("../../migrations/017_memory_expiry_columns.sql"),
-            include_str!("../../migrations/018_memory_expiry_synced_at_index.sql"),
-            include_str!("../../migrations/019_memory_read_api_updated_at_set_not_null.sql"),
-            include_str!("../../migrations/020_read_api_followups.sql"),
-            // Not read by any memory_read query, but `forgotten_blobs` is now
-            // referenced by `insert_vector_unless_forgotten`, so a pool built
-            // here without it would fail the moment a test reached that path.
-            include_str!("../../migrations/021_forgotten_blobs.sql"),
-        ] {
-            sqlx::raw_sql(migration).execute(&pool).await.unwrap();
-        }
+        crate::storage::db::tests::ensure_vector_schema(&pool).await;
         pool
     }
 

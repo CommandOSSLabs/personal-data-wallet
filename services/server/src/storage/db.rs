@@ -20,21 +20,42 @@ impl VectorDb {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::OnceLock;
     use std::time::Duration;
 
     use sqlx::postgres::PgPoolOptions;
 
+    use sqlx::PgPool;
+
     use super::{oauth_rows, VectorDb};
 
-    static VECTOR_SCHEMA_SETUP_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    /// Guards the ONE application of the vector-entry schema in this test
+    /// process. `bool` = "already applied".
+    ///
+    /// This is not an optimisation, it is what stops the suite deadlocking,
+    /// and it is why `ensure_vector_schema` is shared rather than copied
+    /// per module. Migration 020 takes `AccessExclusiveLock` on
+    /// `memory_tombstones` and then on `vector_entries` inside one implicit
+    /// transaction. `insert_vector_unless_forgotten` (and `insert_vector`,
+    /// and `forget_blob`) take row locks on those same two tables in the
+    /// OPPOSITE order inside one transaction. Run the DDL while any of those
+    /// is in flight and Postgres reports `deadlock detected` against
+    /// whichever it picks as the victim — intermittently, and from a test
+    /// that has nothing to do with the one running the DDL.
+    ///
+    /// Per-module locks cannot fix that: three different mutexes over the
+    /// same two tables serialise nothing. What fixes it is that the DDL runs
+    /// at most once per process, under a lock every DML test must pass
+    /// through to obtain its pool — so no vector write can be in flight
+    /// while it runs.
+    static VECTOR_SCHEMA_SETUP_LOCK: OnceLock<tokio::sync::Mutex<bool>> = OnceLock::new();
 
     fn test_database_url() -> Option<String> {
         std::env::var("DATABASE_URL").ok()
     }
 
-    async fn test_db() -> Option<VectorDb> {
+    pub(crate) async fn test_db() -> Option<VectorDb> {
         let database_url = test_database_url()?;
         let pool = PgPoolOptions::new()
             .max_connections(2)
@@ -42,14 +63,24 @@ mod tests {
             .connect(&database_url)
             .await
             .expect("test database should be available");
+        ensure_vector_schema(&pool).await;
+        Some(VectorDb { pool })
+    }
 
-        // This test needs only the vector-entry schema. Avoid migrations for
-        // unrelated job tables, whose test setup runs concurrently in this
-        // binary and has a separate lock.
-        let _guard = VECTOR_SCHEMA_SETUP_LOCK
-            .get_or_init(|| tokio::sync::Mutex::new(()))
+    /// Apply the vector-entry schema once per test process. Every module
+    /// whose tests write to `vector_entries` or `memory_tombstones` MUST come
+    /// through here rather than keeping its own migration list — see
+    /// `VECTOR_SCHEMA_SETUP_LOCK` for the deadlock that a second list causes.
+    /// Job tables are deliberately not applied here; they have their own
+    /// setup and do not participate in the cycle.
+    pub(crate) async fn ensure_vector_schema(pool: &PgPool) {
+        let mut applied = VECTOR_SCHEMA_SETUP_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(false))
             .lock()
             .await;
+        if *applied {
+            return;
+        }
         for migration in [
             include_str!("../../migrations/001_init.sql"),
             include_str!("../../migrations/002_add_namespace.sql"),
@@ -59,25 +90,23 @@ mod tests {
             include_str!("../../migrations/010_restore_failed_blobs.sql"),
             include_str!("../../migrations/014_memory_read_api_columns.sql"),
         ] {
-            sqlx::raw_sql(migration).execute(&pool).await.unwrap();
+            sqlx::raw_sql(migration).execute(pool).await.unwrap();
         }
 
         // Mirrors the ordering in VectorDb::new(): batched Rust backfill
         // must complete before 015 validates NOT NULL, and the invalid-
         // index recovery check must run before 016's CREATE INDEX
         // CONCURRENTLY IF NOT EXISTS.
-        super::backfill_updated_at(&pool).await.unwrap();
+        super::backfill_updated_at(pool).await.unwrap();
 
         sqlx::raw_sql(include_str!(
             "../../migrations/015_memory_read_api_updated_at_not_null.sql"
         ))
-        .execute(&pool)
+        .execute(pool)
         .await
         .unwrap();
 
-        super::recover_invalid_pagination_index(&pool)
-            .await
-            .unwrap();
+        super::recover_invalid_pagination_index(pool).await.unwrap();
 
         for migration in [
             include_str!("../../migrations/016_memory_read_api_index.sql"),
@@ -87,10 +116,9 @@ mod tests {
             include_str!("../../migrations/020_read_api_followups.sql"),
             include_str!("../../migrations/021_forgotten_blobs.sql"),
         ] {
-            sqlx::raw_sql(migration).execute(&pool).await.unwrap();
+            sqlx::raw_sql(migration).execute(pool).await.unwrap();
         }
-
-        Some(VectorDb { pool })
+        *applied = true;
     }
 
     /// Regression test for the migration-order fixes: batched Rust
@@ -1103,7 +1131,7 @@ mod tests {
     // acceptable place to be.
 
     /// Cleanup helper: retraction tests write to three tables.
-    async fn purge_owner(db: &VectorDb, owner: &str) {
+    pub(crate) async fn purge_owner(db: &VectorDb, owner: &str) {
         for stmt in [
             "DELETE FROM vector_entries WHERE owner = $1",
             "DELETE FROM memory_tombstones WHERE owner = $1",
@@ -2117,11 +2145,21 @@ impl VectorDb {
     }
 
     /// Insert a vector entry with its plaintext (benchmark mode only —
-    /// PlaintextEngine). Production rows never use this; they go through
-    /// `insert_vector` and leave the `plaintext` column NULL.
+    /// `PlaintextEngine`, selected only when `BENCHMARK_MODE=true`).
+    /// Production rows never use this; they go through
+    /// `insert_vector_unless_forgotten` and leave the `plaintext` column
+    /// NULL.
     ///
     /// BENCHMARK MODE IS NOT FOR PRODUCTION USE — storing plaintext
     /// memories defeats SEAL's confidentiality guarantee.
+    ///
+    /// This is therefore the ONE `INSERT INTO vector_entries` that does not
+    /// carry the WALM-392 retraction guard, and it is deliberate: the mode
+    /// has already given up the confidentiality property the guard protects,
+    /// and a half-guard (the SQL `NOT EXISTS` without the shared advisory
+    /// lock) measurably does not work — see
+    /// `insert_vector_unless_forgotten`. DO NOT copy this statement into a
+    /// production path; copy that one.
     #[allow(clippy::too_many_arguments)]
     pub async fn insert_vector_plaintext(
         &self,
@@ -2684,11 +2722,36 @@ impl VectorDb {
     /// measurably is not one.
     ///
     /// The lock is per blob and held only for this one insert, so it does not
-    /// serialize a restore pass or block unrelated writes. `insert_vector`,
-    /// the hot `/api/remember` path, deliberately does NOT take it and is
-    /// deliberately NOT guarded: a fresh deliberate write is not a
-    /// resurrection, it gets its own blob, and `restore` is the only path
-    /// that re-imports an already-retracted blob_id.
+    /// serialize a restore pass or block unrelated writes.
+    ///
+    /// EVERY production write into `vector_entries` goes through here — the
+    /// `/api/remember` job path and the synchronous engine as well as
+    /// `restore`. An earlier revision exempted the remember path on the
+    /// theory that "a fresh deliberate write is not a resurrection, it gets
+    /// its own blob, and `restore` is the only path that re-imports an
+    /// already-retracted blob_id". That was FALSE, and the counterexample is
+    /// cheap: an async remember job persists `status='uploaded'` together
+    /// with its `blob_id` (`jobs::persist_uploaded_state`) BEFORE any vector
+    /// row exists; `GET /api/remember/{job_id}` returns that `blob_id` for
+    /// ANY status, so the client can read it there; `POST /api/forget/blob`
+    /// on it then commits, deletes zero rows and answers `forgotten: true`.
+    /// The job later resumes — `UploadResume::ResumeIndex`, an Apalis retry,
+    /// the `FinalizeUploadedBlob` index-only retry, or the client-triggered
+    /// paid-recovery re-drive — and writes the row the caller was told had
+    /// been retracted. That is a re-import of a durable blob_id after an
+    /// arbitrary delay, structurally identical to `restore`.
+    ///
+    /// So the invariant is NOT "restore is the special caller". It is: no
+    /// production path may write a blob_id that appears in
+    /// `forgotten_blobs`. Keep it a rule about the table rather than about
+    /// which caller is trusted — the caller-by-caller argument has been
+    /// wrong twice now, and each time the failure was silent and permanent.
+    ///
+    /// Correctness depends on READ COMMITTED, the PostgreSQL default
+    /// (nothing in `src/` or `migrations/` overrides it). Under REPEATABLE
+    /// READ the waiter's snapshot is fixed when it requests the lock, so it
+    /// would not see the peer's commit after the wait and both orderings
+    /// would break.
     #[allow(clippy::too_many_arguments)]
     pub async fn insert_vector_unless_forgotten(
         &self,
