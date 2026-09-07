@@ -27,7 +27,7 @@ pub const EMBEDDING_MODEL: &str = "openai/text-embedding-3-small";
 pub const EMBEDDING_DIMS: usize = 1536;
 
 /// 16384 = 8192 tokens × 2 chars/token under cl100k; do not use admin 64KiB.
-const MAX_EMBED_INPUT_BYTES: usize = 16384;
+pub(crate) const MAX_EMBED_INPUT_BYTES: usize = 16384;
 
 fn reject_oversized_embed_input(text: &str) -> Result<(), AppError> {
     if text.len() > MAX_EMBED_INPUT_BYTES {
