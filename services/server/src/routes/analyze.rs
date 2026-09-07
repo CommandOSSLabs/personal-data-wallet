@@ -121,6 +121,7 @@ pub async fn analyze(
     Extension(auth): Extension<AuthInfo>,
     Json(body): Json<AnalyzeRequest>,
 ) -> Result<(StatusCode, Json<AnalyzeAcceptedResponse>), AppError> {
+    reject_if_writes_paused(state.config.writes_paused)?;
     if body.text.is_empty() {
         return Err(AppError::BadRequest("Text cannot be empty".into()));
     }

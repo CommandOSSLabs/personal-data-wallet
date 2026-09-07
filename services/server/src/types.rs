@@ -398,9 +398,9 @@ pub struct Config {
     /// bypassing SEAL + Walrus. **Not for production.** Off by default;
     /// set `BENCHMARK_MODE=true` to enable. Surfaced via `GET /health`.
     pub benchmark_mode: bool,
-    /// Operator write-pause flag from `WRITES_PAUSED`. Surfaced on
-    /// `GET /health` as `writes: "paused"` vs `"ok"`. Distinct from
-    /// sidecar liveness (`write_ready`).
+    /// Operator write-pause flag from `WRITES_PAUSED`. When true, write
+    /// routes reject with HTTP 503 and `/health` reports `writes: "paused"`
+    /// while staying HTTP 200. Distinct from sidecar liveness (`write_ready`).
     pub writes_paused: bool,
     /// Master visibility flag for the memory-deletion feature family.
     pub enable_memory_deletion: bool,
@@ -927,6 +927,21 @@ pub(crate) fn writes_health_status(paused: bool) -> String {
     }
 }
 
+/// Stable client-facing body for write-path 503 when `WRITES_PAUSED` is set.
+pub(crate) const WRITES_PAUSED_ERROR: &str = "writes are paused";
+
+/// Reject write-path admission when `WRITES_PAUSED` is set.
+///
+/// Shared by `remember`, `remember_bulk`, `remember_manual`, and `analyze`
+/// so `/health` `writes: "paused"` and write rejection stay one flag.
+pub(crate) fn reject_if_writes_paused(paused: bool) -> Result<(), AppError> {
+    if paused {
+        Err(AppError::WritesPaused(WRITES_PAUSED_ERROR.to_string()))
+    } else {
+        Ok(())
+    }
+}
+
 fn parse_walrus_aggregator_urls(primary: &str, extra_csv: Option<&str>) -> Vec<String> {
     let mut urls = Vec::new();
     let mut push_unique = |raw: &str| {
@@ -1345,9 +1360,7 @@ pub fn validate_namespace(namespace: &str) -> Result<(), AppError> {
     // paths, rejecting them here would strand any namespace already written
     // with one — unreadable via recall/ask/stats and undeletable via forget.
     if namespace.contains('\0') {
-        return Err(AppError::BadRequest(
-            "namespace contains a NUL byte".into(),
-        ));
+        return Err(AppError::BadRequest("namespace contains a NUL byte".into()));
     }
     Ok(())
 }
@@ -1893,7 +1906,8 @@ pub struct HealthResponse {
     /// succeed. `status` stays `"ok"` while the relayer process is up.
     pub write_ready: bool,
     /// Write-path admission: `"ok"` or `"paused"`. `"paused"` when
-    /// `WRITES_PAUSED` is set. Distinct from `write_ready`.
+    /// `WRITES_PAUSED` is set; write routes then return HTTP 503.
+    /// Distinct from `write_ready`. `/health` stays HTTP 200.
     pub writes: String,
 }
 
@@ -2074,6 +2088,9 @@ pub enum AppError {
     /// silently-dropped turn into one retried with exponential backoff —
     /// closing the bench-completion gap diagnosed during the LME v2 run.
     UpstreamUnavailable(String),
+    /// Operator write pause (`WRITES_PAUSED`). HTTP 503 with a stable
+    /// client-visible message, distinct from transient upstream failures.
+    WritesPaused(String),
 }
 
 impl std::fmt::Display for AppError {
@@ -2088,6 +2105,7 @@ impl std::fmt::Display for AppError {
             AppError::RateLimited(msg) => write!(f, "Rate Limited: {}", msg),
             AppError::QuotaExceeded(msg) => write!(f, "Quota Exceeded: {}", msg),
             AppError::UpstreamUnavailable(msg) => write!(f, "Upstream Unavailable: {}", msg),
+            AppError::WritesPaused(msg) => write!(f, "Writes Paused: {}", msg),
         }
     }
 }
@@ -2119,6 +2137,9 @@ impl axum::response::IntoResponse for AppError {
             AppError::Conflict(msg) => (axum::http::StatusCode::CONFLICT, msg.clone()),
             AppError::RateLimited(msg) => (axum::http::StatusCode::TOO_MANY_REQUESTS, msg.clone()),
             AppError::QuotaExceeded(msg) => (axum::http::StatusCode::PAYMENT_REQUIRED, msg.clone()),
+            AppError::WritesPaused(msg) => {
+                (axum::http::StatusCode::SERVICE_UNAVAILABLE, msg.clone())
+            }
             AppError::UpstreamUnavailable(msg) => {
                 // log the upstream details server-side, return
                 // 503 so the SDK / harness will retry per their
@@ -2156,6 +2177,7 @@ impl AppError {
             AppError::RateLimited(_) => "rate_limited",
             AppError::QuotaExceeded(_) => "quota_exceeded",
             AppError::UpstreamUnavailable(_) => "upstream_unavailable",
+            AppError::WritesPaused(_) => "writes_paused",
         }
     }
 }
@@ -2924,7 +2946,10 @@ mod tests {
     #[test]
     fn auth_clock_drift_accepts_exact_ceiling() {
         with_auth_clock_drift_env(Some("900"), || {
-            assert_eq!(configured_auth_clock_drift_secs(), MAX_AUTH_CLOCK_DRIFT_SECS);
+            assert_eq!(
+                configured_auth_clock_drift_secs(),
+                MAX_AUTH_CLOCK_DRIFT_SECS
+            );
         });
     }
 
@@ -2932,24 +2957,36 @@ mod tests {
     fn auth_clock_drift_rejects_just_over_ceiling() {
         // Pin the exact inclusive boundary: 900 accepted, 901 falls back.
         with_auth_clock_drift_env(Some("901"), || {
-            assert_eq!(configured_auth_clock_drift_secs(), DEFAULT_AUTH_CLOCK_DRIFT_SECS);
+            assert_eq!(
+                configured_auth_clock_drift_secs(),
+                DEFAULT_AUTH_CLOCK_DRIFT_SECS
+            );
         });
     }
 
     #[test]
     fn auth_clock_drift_falls_back_when_env_exceeds_cap() {
         with_auth_clock_drift_env(Some("3600"), || {
-            assert_eq!(configured_auth_clock_drift_secs(), DEFAULT_AUTH_CLOCK_DRIFT_SECS);
+            assert_eq!(
+                configured_auth_clock_drift_secs(),
+                DEFAULT_AUTH_CLOCK_DRIFT_SECS
+            );
         });
     }
 
     #[test]
     fn auth_clock_drift_falls_back_on_negative_or_garbage() {
         with_auth_clock_drift_env(Some("-5"), || {
-            assert_eq!(configured_auth_clock_drift_secs(), DEFAULT_AUTH_CLOCK_DRIFT_SECS);
+            assert_eq!(
+                configured_auth_clock_drift_secs(),
+                DEFAULT_AUTH_CLOCK_DRIFT_SECS
+            );
         });
         with_auth_clock_drift_env(Some("not-a-number"), || {
-            assert_eq!(configured_auth_clock_drift_secs(), DEFAULT_AUTH_CLOCK_DRIFT_SECS);
+            assert_eq!(
+                configured_auth_clock_drift_secs(),
+                DEFAULT_AUTH_CLOCK_DRIFT_SECS
+            );
         });
     }
 
@@ -3223,5 +3260,29 @@ mod tests {
             serde_json::to_value(&sample_health_response("paused")).unwrap()["writes"],
             "paused"
         );
+    }
+
+    #[test]
+    fn reject_if_writes_paused_is_noop_when_writes_are_ok() {
+        assert!(reject_if_writes_paused(false).is_ok());
+    }
+
+    #[test]
+    fn reject_if_writes_paused_uses_stable_503_message() {
+        match reject_if_writes_paused(true) {
+            Err(AppError::WritesPaused(msg)) => assert_eq!(msg, WRITES_PAUSED_ERROR),
+            other => panic!("expected WritesPaused, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn writes_paused_maps_to_503_with_stable_message() {
+        let err = AppError::WritesPaused(WRITES_PAUSED_ERROR.to_string());
+        assert_eq!(err.kind(), "writes_paused");
+        let resp = axum::response::IntoResponse::into_response(err);
+        assert_eq!(resp.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], WRITES_PAUSED_ERROR);
     }
 }
