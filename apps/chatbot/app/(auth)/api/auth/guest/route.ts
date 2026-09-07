@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { signIn } from "@/app/(auth)/auth";
-import { isDevelopmentEnvironment } from "@/lib/constants";
 import {
   checkGuestAuthRateLimit,
   GUEST_AUTH_RATE_LIMIT_TTL_SECONDS,
   GuestAuthRateLimitError,
 } from "@/lib/ratelimit";
+import { getSessionToken } from "@/lib/session-token";
 
 /**
  * Validate a redirect target before forwarding to auth.
@@ -40,11 +39,7 @@ export async function GET(request: Request) {
     ? rawRedirectUrl
     : "/";
 
-  const token = await getToken({
-    req: request,
-    secret: process.env.AUTH_SECRET,
-    secureCookie: !isDevelopmentEnvironment,
-  });
+  const token = await getSessionToken(request);
 
   if (token) {
     return NextResponse.redirect(new URL("/", request.url));

@@ -113,6 +113,10 @@ export async function DELETE(request: Request) {
 
   const [document] = documents;
 
+  if (!document) {
+    return new ChatbotError("not_found:document").toResponse();
+  }
+
   if (document.userId !== session.user.id) {
     return new ChatbotError("forbidden:document").toResponse();
   }
