@@ -3,13 +3,13 @@ import "server-only";
 import { jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { getUserById } from "@/lib/db/queries";
+import { getAuthSecretKey } from "@/lib/auth/auth-secret";
 import {
   SESSION_MAX_AGE_SECONDS,
   signSessionIdentity,
 } from "@/lib/auth/session-token";
 
 const COOKIE_NAME = "session";
-const secret = new TextEncoder().encode(process.env.AUTH_SECRET);
 
 type SessionUser = {
   id: string;
@@ -26,6 +26,11 @@ export async function getSession(): Promise<{ user: SessionUser } | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) return null;
+
+  // Same order as proxy.ts: a missing/short AUTH_SECRET must throw, not look
+  // like an invalid cookie. /api/auth/* skips the proxy guard, so this is the
+  // path GET /api/auth/profile takes.
+  const secret = getAuthSecretKey();
 
   try {
     const { payload } = await jwtVerify(token, secret);
@@ -55,7 +60,7 @@ export async function createSession(
 ): Promise<void> {
   const token = await signSessionIdentity(
     { userId, publicKey, accountId },
-    secret
+    getAuthSecretKey()
   );
   const cookieStore = await cookies();
   cookieStore.set(COOKIE_NAME, token, {
