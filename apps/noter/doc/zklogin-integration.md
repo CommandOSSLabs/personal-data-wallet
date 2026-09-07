@@ -6,8 +6,10 @@ auth tRPC router (`package/feature/auth/api/route.ts`) and consumed by the `useA
 1. **Enoki zkLogin** (`connectEnoki`) — the primary sign-in. The Enoki flow runs client-side
    (`app/components/enoki-login-card.tsx` / `sui-providers.tsx`); on completion the app registers or
    looks up the user by Sui address and creates a session. This is the login the UI drives.
-2. **Sui wallet** (`connectWallet`) — sign-in with a Sui wallet (e.g. Slush). The server verifies the
-   personal-message signature before creating a session.
+2. **Sui wallet** (`connectWallet`) — sign-in with a Sui wallet (e.g. Slush). Two-step, like the Enoki
+   flow: the client calls `issueWalletChallenge` for a server-issued single-use message, signs it with
+   the wallet, and returns `{ challengeId, signature }`. The server verifies the signature against the
+   challenge and consumes it before creating a session, so a captured signature cannot be replayed.
 3. **Delegate key** (`connectDelegateKey`) — manual login with a delegate private key + account id.
 
 Sessions are stored in the `wallet_sessions` table (Enoki reuses it with `walletType = "enoki"`).
