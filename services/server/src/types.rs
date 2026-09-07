@@ -928,7 +928,7 @@ pub(crate) fn writes_health_status(paused: bool) -> String {
 }
 
 /// Stable client-facing body for write-path 503 when `WRITES_PAUSED` is set.
-pub(crate) const WRITES_PAUSED_ERROR: &str = "writes are paused";
+const WRITES_PAUSED_ERROR: &str = "writes are paused";
 
 /// Reject write-path admission when `WRITES_PAUSED` is set.
 ///
@@ -3216,7 +3216,18 @@ mod tests {
         // The benchmark harness reads exactly these field names — pin the
         // wire shape so a rename can't silently break the run-artifact
         // pipeline.
-        let resp = sample_health_response("ok");
+        let resp = HealthResponse {
+            status: "ok".to_string(),
+            version: "0.1.0".to_string(),
+            compatibility: crate::compatibility::version_response(),
+            mode: "benchmark".to_string(),
+            prompt_versions: PromptVersions {
+                extract: "extract.v1".to_string(),
+                ask: "ask.v1".to_string(),
+            },
+            write_ready: true,
+            writes: "ok".to_string(),
+        };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["prompt_versions"]["extract"], "extract.v1");
         assert_eq!(json["prompt_versions"]["ask"], "ask.v1");
@@ -3233,51 +3244,12 @@ mod tests {
         );
     }
 
-    fn sample_health_response(writes: &str) -> HealthResponse {
-        HealthResponse {
-            status: "ok".to_string(),
-            version: "0.1.0".to_string(),
-            compatibility: crate::compatibility::version_response(),
-            mode: "benchmark".to_string(),
-            prompt_versions: PromptVersions {
-                extract: "extract.v1".to_string(),
-                ask: "ask.v1".to_string(),
-            },
-            write_ready: true,
-            writes: writes.to_string(),
-        }
-    }
-
-    #[test]
-    fn health_response_writes_ok_vs_paused() {
-        assert_eq!(writes_health_status(false), "ok");
-        assert_eq!(writes_health_status(true), "paused");
-        assert_eq!(
-            serde_json::to_value(&sample_health_response("ok")).unwrap()["writes"],
-            "ok"
-        );
-        assert_eq!(
-            serde_json::to_value(&sample_health_response("paused")).unwrap()["writes"],
-            "paused"
-        );
-    }
-
-    #[test]
-    fn reject_if_writes_paused_is_noop_when_writes_are_ok() {
-        assert!(reject_if_writes_paused(false).is_ok());
-    }
-
-    #[test]
-    fn reject_if_writes_paused_uses_stable_503_message() {
-        match reject_if_writes_paused(true) {
-            Err(AppError::WritesPaused(msg)) => assert_eq!(msg, WRITES_PAUSED_ERROR),
-            other => panic!("expected WritesPaused, got {other:?}"),
-        }
-    }
-
     #[tokio::test]
     async fn writes_paused_maps_to_503_with_stable_message() {
-        let err = AppError::WritesPaused(WRITES_PAUSED_ERROR.to_string());
+        assert_eq!(writes_health_status(false), "ok");
+        assert_eq!(writes_health_status(true), "paused");
+        assert!(reject_if_writes_paused(false).is_ok());
+        let err = reject_if_writes_paused(true).expect_err("paused writes");
         assert_eq!(err.kind(), "writes_paused");
         let resp = axum::response::IntoResponse::into_response(err);
         assert_eq!(resp.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
