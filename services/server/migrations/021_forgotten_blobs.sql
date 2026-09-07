@@ -14,7 +14,11 @@
 -- record that survives the index row it removed. `restore()` unions these
 -- blob_ids into the same "already accounted for, do not re-import" set it
 -- builds from live rows and `restore_failed_blobs`, so a retracted memory
--- stays retracted.
+-- stays retracted. That set is only a snapshot, though, so `restore`'s insert
+-- ALSO re-reads this table in the same statement it writes the row
+-- (`insert_vector_unless_forgotten`), under a per-blob advisory lock shared
+-- with `forget_blob`. Without that second check a retraction that commits
+-- while a restore is mid-pass is silently and permanently undone.
 --
 -- WHY NOT A COLUMN ON vector_entries. Migration 020's header records the
 -- approved WALM-363 design: no soft-delete column on `vector_entries`,

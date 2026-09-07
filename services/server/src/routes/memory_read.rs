@@ -814,6 +814,10 @@ mod tests {
             include_str!("../../migrations/018_memory_expiry_synced_at_index.sql"),
             include_str!("../../migrations/019_memory_read_api_updated_at_set_not_null.sql"),
             include_str!("../../migrations/020_read_api_followups.sql"),
+            // Not read by any memory_read query, but `forgotten_blobs` is now
+            // referenced by `insert_vector_unless_forgotten`, so a pool built
+            // here without it would fail the moment a test reached that path.
+            include_str!("../../migrations/021_forgotten_blobs.sql"),
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }

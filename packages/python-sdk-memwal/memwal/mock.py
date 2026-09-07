@@ -369,6 +369,12 @@ class MemWalMock:
             "build": {},
         }
 
+    # Deliberately still `forget(blob_id) -> bool`, unlike the TypeScript
+    # mock, which became `async forget(blobId, namespace?)` in WALM-392. This
+    # mock mirrors the Python client, and the Python client did not gain
+    # `POST /api/forget/blob` in that change. Matching the TS mock here would
+    # make this mock expose a method its own client does not have, which is
+    # the worse divergence. Re-sync when the Python client gains `forget`.
     def forget(self, blob_id: str) -> bool:
         for index, memory in enumerate(self._memories):
             if memory.blob_id == blob_id:

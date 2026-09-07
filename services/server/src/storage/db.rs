@@ -1091,6 +1091,533 @@ mod tests {
             .await
             .unwrap();
     }
+
+    // ── POST /api/forget/blob — per-blob retraction (WALM-392) ─────────
+    //
+    // These run against a real Postgres whenever `DATABASE_URL` is set (the
+    // same gate every other DB test in this module uses). Before them the
+    // retraction SQL — `forget_blob`, `get_forgotten_blob_ids` and migration
+    // 021 — was executed by no test at all, so a wrong column name, a wrong
+    // `ON CONFLICT` target or a migration that failed to apply would have
+    // shipped green. For a security-containment primitive that is not an
+    // acceptable place to be.
+
+    /// Cleanup helper: retraction tests write to three tables.
+    async fn purge_owner(db: &VectorDb, owner: &str) {
+        for stmt in [
+            "DELETE FROM vector_entries WHERE owner = $1",
+            "DELETE FROM memory_tombstones WHERE owner = $1",
+            "DELETE FROM forgotten_blobs WHERE owner = $1",
+        ] {
+            sqlx::query(stmt)
+                .bind(owner)
+                .execute(db.pool())
+                .await
+                .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn forget_blob_removes_index_row_and_records_durable_retraction() {
+        let Some(db) = test_db().await else {
+            eprintln!("skipping DB integration test: DATABASE_URL is not configured");
+            return;
+        };
+        let suffix = uuid::Uuid::new_v4();
+        let owner = format!("0xforget-basic-{suffix}");
+        let namespace = format!("forget-basic-ns-{suffix}");
+        let blob_id = format!("forget-basic-blob-{suffix}");
+        let vector = vec![0.0; 1536];
+
+        db.insert_vector(
+            &format!("row-{suffix}"),
+            &owner,
+            &namespace,
+            &blob_id,
+            &vector,
+            42,
+            0.5,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let (deleted, newly_forgotten) =
+            db.forget_blob(&blob_id, &owner, &namespace).await.unwrap();
+
+        assert_eq!(deleted, 1, "the one index row must be removed");
+        assert!(newly_forgotten, "first retraction creates the record");
+
+        let live: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM vector_entries WHERE owner = $1 AND blob_id = $2",
+        )
+        .bind(&owner)
+        .bind(&blob_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(live, 0, "no read path may still see the retracted memory");
+
+        // Console's incremental sync must learn the memory disappeared.
+        let tombstoned: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM memory_tombstones WHERE owner = $1 AND blob_id = $2",
+        )
+        .bind(&owner)
+        .bind(&blob_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            tombstoned, 1,
+            "a tombstone must be written for the sync feed"
+        );
+
+        // The durable half: what `restore` consults.
+        let forgotten = db.get_forgotten_blob_ids(&owner, &namespace).await.unwrap();
+        assert_eq!(forgotten, vec![blob_id.clone()]);
+
+        purge_owner(&db, &owner).await;
+    }
+
+    #[tokio::test]
+    async fn forget_blob_is_idempotent_and_records_even_with_no_index_row() {
+        let Some(db) = test_db().await else {
+            eprintln!("skipping DB integration test: DATABASE_URL is not configured");
+            return;
+        };
+        let suffix = uuid::Uuid::new_v4();
+        let owner = format!("0xforget-idem-{suffix}");
+        let namespace = format!("forget-idem-ns-{suffix}");
+        let blob_id = format!("forget-idem-blob-{suffix}");
+
+        // A blob whose row was already reaped (Walrus-404 cleanup, expiry, an
+        // earlier namespace-wide forget) is still on chain and would still be
+        // re-imported by restore, so the retraction must be recorded anyway.
+        let (deleted, newly_forgotten) =
+            db.forget_blob(&blob_id, &owner, &namespace).await.unwrap();
+        assert_eq!(deleted, 0, "nothing to delete");
+        assert!(
+            newly_forgotten,
+            "the retraction must still be recorded — restore would otherwise re-import it"
+        );
+
+        let first_at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+            "SELECT forgotten_at FROM forgotten_blobs WHERE owner = $1 AND namespace = $2 AND blob_id = $3",
+        )
+        .bind(&owner)
+        .bind(&namespace)
+        .bind(&blob_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        let (deleted, newly_forgotten) =
+            db.forget_blob(&blob_id, &owner, &namespace).await.unwrap();
+        assert_eq!(deleted, 0);
+        assert!(
+            !newly_forgotten,
+            "a repeat retraction is idempotent, not a new record"
+        );
+
+        let second_at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+            "SELECT forgotten_at FROM forgotten_blobs WHERE owner = $1 AND namespace = $2 AND blob_id = $3",
+        )
+        .bind(&owner)
+        .bind(&namespace)
+        .bind(&blob_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            first_at, second_at,
+            "ON CONFLICT DO NOTHING must preserve the original forgotten_at"
+        );
+
+        purge_owner(&db, &owner).await;
+    }
+
+    #[tokio::test]
+    async fn forget_blob_is_namespace_scoped() {
+        let Some(db) = test_db().await else {
+            eprintln!("skipping DB integration test: DATABASE_URL is not configured");
+            return;
+        };
+        let suffix = uuid::Uuid::new_v4();
+        let owner = format!("0xforget-ns-{suffix}");
+        let retracted_ns = format!("retracted-{suffix}");
+        let other_ns = format!("other-{suffix}");
+        let blob_id = format!("forget-ns-blob-{suffix}");
+        let vector = vec![0.0; 1536];
+
+        // The same ciphertext legitimately indexed under two namespaces.
+        for (id, ns) in [
+            (format!("row-a-{suffix}"), &retracted_ns),
+            (format!("row-b-{suffix}"), &other_ns),
+        ] {
+            db.insert_vector(&id, &owner, ns, &blob_id, &vector, 1, 0.5, None, None, None)
+                .await
+                .unwrap();
+        }
+
+        let (deleted, _) = db
+            .forget_blob(&blob_id, &owner, &retracted_ns)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 1, "only the targeted namespace's row is removed");
+
+        let survivors: Vec<String> =
+            sqlx::query_scalar("SELECT namespace FROM vector_entries WHERE owner = $1")
+                .bind(&owner)
+                .fetch_all(db.pool())
+                .await
+                .unwrap();
+        assert_eq!(
+            survivors,
+            vec![other_ns.clone()],
+            "retracting in one namespace must not reach into another"
+        );
+
+        assert_eq!(
+            db.get_forgotten_blob_ids(&owner, &retracted_ns)
+                .await
+                .unwrap(),
+            vec![blob_id.clone()]
+        );
+        assert!(
+            db.get_forgotten_blob_ids(&owner, &other_ns)
+                .await
+                .unwrap()
+                .is_empty(),
+            "the other namespace has no retraction and must still restore"
+        );
+
+        purge_owner(&db, &owner).await;
+    }
+
+    // ── The TOCTOU: restore must not resurrect a retraction ────────────
+
+    /// Regression test for the WALM-392 TOCTOU.
+    ///
+    /// Models the real interleaving: a `/api/restore` pass builds its
+    /// "missing" set, then spends tens of seconds to minutes on Walrus
+    /// download → SEAL decrypt → re-embed. A `POST /api/forget/blob` lands
+    /// inside that window, commits, and returns a success receipt. The
+    /// in-flight restore then reaches the blob and inserts it from its stale
+    /// snapshot.
+    ///
+    /// Before the fix this insert succeeded and the secret was back in
+    /// `vector_entries` — returned by every recall, indefinitely, while the
+    /// user held a receipt saying it had been retracted.
+    #[tokio::test]
+    async fn restore_insert_is_suppressed_after_a_concurrent_retraction() {
+        let Some(db) = test_db().await else {
+            eprintln!("skipping DB integration test: DATABASE_URL is not configured");
+            return;
+        };
+        let suffix = uuid::Uuid::new_v4();
+        let owner = format!("0xtoctou-{suffix}");
+        let namespace = format!("toctou-ns-{suffix}");
+        let blob_id = format!("toctou-blob-{suffix}");
+        let vector = vec![0.0; 1536];
+
+        // T0 — indexed; the restore pass snapshots the forgotten set here.
+        db.insert_vector(
+            &format!("row-a-{suffix}"),
+            &owner,
+            &namespace,
+            &blob_id,
+            &vector,
+            1,
+            0.5,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        // T1 — the user retracts. The receipt says it is gone.
+        let (deleted, newly_forgotten) =
+            db.forget_blob(&blob_id, &owner, &namespace).await.unwrap();
+        assert_eq!(deleted, 1);
+        assert!(newly_forgotten);
+
+        // T2 — the in-flight restore reaches the blob, with a fresh uuid,
+        // exactly as `restore_unbounded`'s insert loop does.
+        let inserted = db
+            .insert_vector_unless_forgotten(
+                &format!("row-b-{suffix}"),
+                &owner,
+                &namespace,
+                &blob_id,
+                &vector,
+                1,
+                0.5,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            !inserted,
+            "restore must refuse to re-import a retracted blob"
+        );
+
+        let live: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM vector_entries WHERE owner = $1 AND namespace = $2 AND blob_id = $3",
+        )
+        .bind(&owner)
+        .bind(&namespace)
+        .bind(&blob_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            live, 0,
+            "a retracted secret must never be resurrected by an in-flight restore"
+        );
+
+        // The tombstone must survive too: clearing it would tell Console the
+        // memory is live again while no row exists.
+        let tombstoned: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM memory_tombstones WHERE owner = $1 AND blob_id = $2",
+        )
+        .bind(&owner)
+        .bind(&blob_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(tombstoned, 1, "the retraction must stay visible to sync");
+
+        purge_owner(&db, &owner).await;
+    }
+
+    /// The guard must suppress only what was actually retracted. A blob
+    /// retracted in another namespace, and an untouched blob, both still
+    /// restore — otherwise the fix would quietly break restore itself.
+    #[tokio::test]
+    async fn restore_insert_still_indexes_blobs_with_no_retraction_here() {
+        let Some(db) = test_db().await else {
+            eprintln!("skipping DB integration test: DATABASE_URL is not configured");
+            return;
+        };
+        let suffix = uuid::Uuid::new_v4();
+        let owner = format!("0xtoctou-scope-{suffix}");
+        let namespace = format!("live-ns-{suffix}");
+        let other_ns = format!("retracted-ns-{suffix}");
+        let blob_id = format!("scope-blob-{suffix}");
+        let vector = vec![0.0; 1536];
+
+        // Retracted in a DIFFERENT namespace only.
+        db.forget_blob(&blob_id, &owner, &other_ns).await.unwrap();
+
+        let inserted = db
+            .insert_vector_unless_forgotten(
+                &format!("row-{suffix}"),
+                &owner,
+                &namespace,
+                &blob_id,
+                &vector,
+                1,
+                0.5,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            inserted,
+            "a retraction in another namespace must not block this one's restore"
+        );
+
+        purge_owner(&db, &owner).await;
+    }
+
+    /// The guarded insert must serialize on the per-blob retraction lock, not
+    /// merely re-read `forgotten_blobs`.
+    ///
+    /// The SQL `NOT EXISTS` alone leaves a residual window: under READ
+    /// COMMITTED a `forget_blob` that commits after this statement takes its
+    /// snapshot is invisible to the insert, while the uncommitted new row is
+    /// invisible to that transaction's `DELETE` — both commit and the row
+    /// survives. Holding the same advisory lock from another session must
+    /// therefore make the insert WAIT, not proceed.
+    #[tokio::test]
+    async fn restore_insert_serializes_on_the_per_blob_retraction_lock() {
+        let Some(db) = test_db().await else {
+            eprintln!("skipping DB integration test: DATABASE_URL is not configured");
+            return;
+        };
+        let Some(database_url) = test_database_url() else {
+            return;
+        };
+        let suffix = uuid::Uuid::new_v4();
+        let owner = format!("0xlock-{suffix}");
+        let namespace = format!("lock-ns-{suffix}");
+        let blob_id = format!("lock-blob-{suffix}");
+        let vector = vec![0.0; 1536];
+
+        // Separate pool so the lock holder cannot starve the pool under test.
+        let holder_pool = PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(Duration::from_secs(5))
+            .connect(&database_url)
+            .await
+            .unwrap();
+        let mut holder = holder_pool.begin().await.unwrap();
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+            .bind(super::forget_lock_key(&owner, &namespace, &blob_id))
+            .execute(&mut *holder)
+            .await
+            .unwrap();
+
+        let blocked = tokio::time::timeout(
+            Duration::from_millis(1500),
+            db.insert_vector_unless_forgotten(
+                &format!("row-{suffix}"),
+                &owner,
+                &namespace,
+                &blob_id,
+                &vector,
+                1,
+                0.5,
+                None,
+                None,
+                None,
+            ),
+        )
+        .await;
+        assert!(
+            blocked.is_err(),
+            "the restore insert must block while a retraction of the same blob holds the lock"
+        );
+
+        // Releasing the lock lets the same insert through, proving the wait
+        // above was the lock and not an unrelated stall.
+        holder.rollback().await.unwrap();
+        drop(holder_pool);
+
+        let inserted = db
+            .insert_vector_unless_forgotten(
+                &format!("row-after-{suffix}"),
+                &owner,
+                &namespace,
+                &blob_id,
+                &vector,
+                1,
+                0.5,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(inserted, "with the lock released the insert proceeds");
+
+        purge_owner(&db, &owner).await;
+    }
+
+    /// The other half of the mutual exclusion: `forget_blob` must take the
+    /// same lock. Mutual exclusion needs both sides — if only the restore
+    /// insert took it, a retraction could still start and commit its `DELETE`
+    /// while an insert of the same blob was in flight and invisible to it.
+    #[tokio::test]
+    async fn forget_blob_serializes_on_the_per_blob_retraction_lock() {
+        let Some(db) = test_db().await else {
+            eprintln!("skipping DB integration test: DATABASE_URL is not configured");
+            return;
+        };
+        let Some(database_url) = test_database_url() else {
+            return;
+        };
+        let suffix = uuid::Uuid::new_v4();
+        let owner = format!("0xlock-forget-{suffix}");
+        let namespace = format!("lock-forget-ns-{suffix}");
+        let blob_id = format!("lock-forget-blob-{suffix}");
+
+        let holder_pool = PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(Duration::from_secs(5))
+            .connect(&database_url)
+            .await
+            .unwrap();
+        let mut holder = holder_pool.begin().await.unwrap();
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+            .bind(super::forget_lock_key(&owner, &namespace, &blob_id))
+            .execute(&mut *holder)
+            .await
+            .unwrap();
+
+        let blocked = tokio::time::timeout(
+            Duration::from_millis(1500),
+            db.forget_blob(&blob_id, &owner, &namespace),
+        )
+        .await;
+        assert!(
+            blocked.is_err(),
+            "forget_blob must block while an insert of the same blob holds the lock"
+        );
+
+        holder.rollback().await.unwrap();
+        drop(holder_pool);
+
+        let (_, newly_forgotten) = db.forget_blob(&blob_id, &owner, &namespace).await.unwrap();
+        assert!(
+            newly_forgotten,
+            "with the lock released the retraction lands"
+        );
+
+        purge_owner(&db, &owner).await;
+    }
+
+    /// The lock key must name exactly one `(owner, namespace, blob_id)`.
+    /// `validate_namespace` accepts separator-ish bytes, so a plainly joined
+    /// key would let two different memories collide before `hashtext` even
+    /// sees them. Pure — runs without a database.
+    #[test]
+    fn forget_lock_key_is_unambiguous_across_field_boundaries() {
+        assert_ne!(
+            super::forget_lock_key("a", "b:c", "d"),
+            super::forget_lock_key("a:b", "c", "d"),
+            "field boundaries must not be ambiguous"
+        );
+        assert_eq!(
+            super::forget_lock_key("a", "b", "c"),
+            super::forget_lock_key("a", "b", "c"),
+            "the key must be deterministic — forget and restore must agree"
+        );
+    }
+}
+
+/// Advisory-lock key naming one retractable memory: `(owner, namespace,
+/// blob_id)` (WALM-392).
+///
+/// Taken by BOTH `forget_blob` and `insert_vector_unless_forgotten` so a
+/// retraction and a concurrent restore-insert of the same blob cannot
+/// interleave — see `insert_vector_unless_forgotten` for why the SQL
+/// `NOT EXISTS` guard alone is not sufficient.
+///
+/// Length-prefixed rather than plainly joined: `validate_namespace` accepts
+/// separators like `\t`, so `owner="a"/ns="b:c"` and `owner="a:b"/ns="c"`
+/// would otherwise hash to one key and serialize two unrelated blobs.
+/// (Post-`hashtext` collisions are still possible and are harmless — they
+/// only ever add serialization, never remove it.)
+pub(crate) fn forget_lock_key(owner: &str, namespace: &str, blob_id: &str) -> String {
+    format!(
+        "forget_blob:{}:{}:{}:{}{}{}",
+        owner.len(),
+        namespace.len(),
+        blob_id.len(),
+        owner,
+        namespace,
+        blob_id
+    )
 }
 
 fn db_status<T>(result: &Result<T, AppError>) -> &'static str {
@@ -2011,6 +2538,12 @@ impl VectorDb {
     /// Owner- and namespace-scoped for the same reason `delete_by_blob_id`
     /// is: the same ciphertext can be indexed under more than one namespace,
     /// and retracting it from one must not reach into another.
+    ///
+    /// Takes a per-`(owner, namespace, blob_id)` `pg_advisory_xact_lock`
+    /// before either write. `restore`'s `insert_vector_unless_forgotten`
+    /// takes the same one, which is what stops an in-flight restore from
+    /// re-inserting this blob from a snapshot taken before the retraction —
+    /// see that function for the full argument.
     pub async fn forget_blob(
         &self,
         blob_id: &str,
@@ -2022,6 +2555,23 @@ impl VectorDb {
             self.pool.begin().await.map_err(|e| {
                 AppError::Internal(format!("Failed to begin forget-blob tx: {}", e))
             })?;
+
+        // Serialize against a concurrent `insert_vector_unless_forgotten` for
+        // this exact blob. Without it a restore that is mid-insert is
+        // invisible to the DELETE below and survives the retraction — see
+        // that function's doc-comment. Taken FIRST, before either write, and
+        // released by the commit/rollback of this transaction.
+        if let Err(e) = sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+            .bind(forget_lock_key(owner, namespace, blob_id))
+            .execute(&mut *tx)
+            .await
+        {
+            crate::observability::observe_db("vector.forget_blob", "error", started.elapsed());
+            return Err(AppError::Internal(format!(
+                "Failed to take retraction lock: {}",
+                e
+            )));
+        }
 
         let recorded = sqlx::query(
             "INSERT INTO forgotten_blobs (owner, namespace, blob_id)
@@ -2088,6 +2638,170 @@ impl VectorDb {
             newly_forgotten
         );
         Ok((rows, newly_forgotten))
+    }
+
+    /// Re-index a blob discovered by `restore()`, UNLESS the owner has
+    /// retracted it (WALM-392). Returns `true` when the row was written,
+    /// `false` when the retraction suppressed it.
+    ///
+    /// This exists because `restore()` cannot safely use `insert_vector`.
+    /// Restore builds its "missing" set once, at the top of a pass, then
+    /// spends tens of seconds to minutes on Walrus download → SEAL decrypt →
+    /// re-embed before it inserts anything. A `POST /api/forget/blob` that
+    /// lands inside that window commits, deletes the index rows and hands
+    /// the caller a success receipt — and then the in-flight restore reaches
+    /// the same blob and re-inserts it, permanently, from a snapshot taken
+    /// before the retraction existed. The user is left holding a receipt for
+    /// a secret that is still being returned by every recall.
+    ///
+    /// So the retraction is re-checked HERE, at the moment of insert, rather
+    /// than trusted from the caller's snapshot. Two mechanisms, both needed:
+    ///
+    /// 1. `WHERE NOT EXISTS (SELECT 1 FROM forgotten_blobs ...)` inside the
+    ///    same statement as the INSERT. A separate `SELECT` then `INSERT`
+    ///    would just reopen the same window in miniature; as one statement
+    ///    the check cannot be outrun by anything that committed before the
+    ///    statement began.
+    /// 2. A per-`(owner, namespace, blob_id)` `pg_advisory_xact_lock`, taken
+    ///    by this function AND by `forget_blob`, which closes the residual
+    ///    overlap that (1) alone cannot: under READ COMMITTED a `forget_blob`
+    ///    that commits *after* this statement takes its snapshot is invisible
+    ///    here, while this row is still uncommitted and therefore invisible to
+    ///    that transaction's `DELETE`. Both would commit and the row would
+    ///    survive. Sharing one lock makes the two orderings the only possible
+    ///    ones: forget-then-insert (the `NOT EXISTS` sees the retraction and
+    ///    inserts nothing) or insert-then-forget (the `DELETE` sees the row
+    ///    and removes it). Either way the blob ends up retracted.
+    ///
+    /// (2) IS NOT OPTIONAL, and the size of that residual window is why.
+    /// Measured against Postgres 17, 120 rounds of `forget_blob` raced against
+    /// this insert on the same blob: the old unguarded `insert_vector`
+    /// resurrected 118/120; the `NOT EXISTS` guard WITHOUT the shared lock
+    /// resurrected 119/120 — essentially no improvement, because under real
+    /// concurrency the retraction is still uncommitted when this statement
+    /// takes its snapshot. With both, 0/120. Do not "simplify" this by
+    /// dropping the lock and keeping the SQL guard: it reads like a fix and
+    /// measurably is not one.
+    ///
+    /// The lock is per blob and held only for this one insert, so it does not
+    /// serialize a restore pass or block unrelated writes. `insert_vector`,
+    /// the hot `/api/remember` path, deliberately does NOT take it and is
+    /// deliberately NOT guarded: a fresh deliberate write is not a
+    /// resurrection, it gets its own blob, and `restore` is the only path
+    /// that re-imports an already-retracted blob_id.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_vector_unless_forgotten(
+        &self,
+        id: &str,
+        owner: &str,
+        namespace: &str,
+        blob_id: &str,
+        vector: &[f32],
+        blob_size_bytes: i64,
+        importance: f32,
+        agent_id: Option<&str>,
+        package_id: Option<&str>,
+        end_epoch: Option<i32>,
+    ) -> Result<bool, AppError> {
+        let embedding = Vector::from(vector.to_vec());
+
+        let started = std::time::Instant::now();
+        let mut tx =
+            self.pool.begin().await.map_err(|e| {
+                AppError::Internal(format!("Failed to begin guarded insert tx: {}", e))
+            })?;
+
+        // Same key, same lock, as `forget_blob`. hashtext() → int4; advisory
+        // locks take int8 (mirrors the per-job lock in jobs.rs).
+        if let Err(e) = sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+            .bind(forget_lock_key(owner, namespace, blob_id))
+            .execute(&mut *tx)
+            .await
+        {
+            crate::observability::observe_db(
+                "vector.insert_unless_forgotten",
+                "error",
+                started.elapsed(),
+            );
+            return Err(AppError::Internal(format!(
+                "Failed to take retraction lock: {}",
+                e
+            )));
+        }
+
+        let result = sqlx::query(
+            "INSERT INTO vector_entries (id, owner, namespace, blob_id, embedding, blob_size_bytes, importance, agent_id, package_id, end_epoch)
+             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM forgotten_blobs
+                 WHERE owner = $2 AND namespace = $3 AND blob_id = $4
+             )
+             ON CONFLICT (id) DO UPDATE SET
+                owner = EXCLUDED.owner,
+                namespace = EXCLUDED.namespace,
+                blob_id = EXCLUDED.blob_id,
+                embedding = EXCLUDED.embedding,
+                blob_size_bytes = EXCLUDED.blob_size_bytes,
+                importance = EXCLUDED.importance,
+                agent_id = EXCLUDED.agent_id,
+                package_id = EXCLUDED.package_id,
+                end_epoch = EXCLUDED.end_epoch,
+                updated_at = NOW()",
+        )
+        .bind(id)
+        .bind(owner)
+        .bind(namespace)
+        .bind(blob_id)
+        .bind(embedding)
+        .bind(blob_size_bytes)
+        .bind(importance)
+        .bind(agent_id)
+        .bind(package_id)
+        .bind(end_epoch)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to insert vector: {}", e)));
+        crate::observability::observe_db(
+            "vector.insert_unless_forgotten",
+            db_status(&result),
+            started.elapsed(),
+        );
+        let inserted = result?.rows_affected() > 0;
+
+        // Only when the row actually came back. Clearing the tombstone for a
+        // blob that stayed retracted would tell Console's incremental sync the
+        // memory is live again while no row exists — the retraction would look
+        // undone to every client even though it held.
+        if inserted {
+            sqlx::query("DELETE FROM memory_tombstones WHERE memory_id = $1")
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| AppError::Internal(format!("Failed to clear tombstone: {}", e)))?;
+        }
+
+        tx.commit().await.map_err(|e| {
+            AppError::Internal(format!("Failed to commit guarded insert tx: {}", e))
+        })?;
+
+        if inserted {
+            tracing::debug!(
+                "inserted vector: id={}, blob_id={}, owner={}, ns={}, size={}B",
+                id,
+                blob_id,
+                owner,
+                namespace,
+                blob_size_bytes
+            );
+        } else {
+            tracing::info!(
+                "restore: suppressed re-import of retracted blob_id={} owner={} ns={} (WALM-392)",
+                blob_id,
+                owner,
+                namespace
+            );
+        }
+        Ok(inserted)
     }
 
     /// Blob_ids the owner has explicitly retracted in this namespace

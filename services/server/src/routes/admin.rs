@@ -570,6 +570,13 @@ pub async fn ask(
 /// the retraction silently undoes itself, which is the exact failure WALM-392
 /// exists to close. Excluded blobs are reported as "skipped", same as any
 /// other locally-accounted-for blob.
+///
+/// This is the FIRST of two defenses, not the only one. It is a snapshot,
+/// taken at the top of a restore pass that then spends tens of seconds to
+/// minutes downloading and decrypting; a retraction landing inside that window
+/// is invisible here. `insert_vector_unless_forgotten` re-checks at the moment
+/// of insert and is what actually makes the guarantee hold. Keep both: this one
+/// avoids the pointless download, that one avoids the resurrection.
 fn select_missing_blobs(
     all_blob_ids: &[String],
     indexed: &[String],
@@ -1022,7 +1029,19 @@ async fn restore_unbounded(
         .collect();
 
     // Step 6: Insert only new entries (no delete!)
-    let restored = results.len();
+    //
+    // Each insert re-checks `forgotten_blobs` at the instant it writes rather
+    // than trusting `forgotten_blob_ids` above (WALM-392). That set was read at
+    // the TOP of this pass — before a Walrus download, a SEAL decrypt and a
+    // re-embed that together take tens of seconds to minutes. A
+    // `POST /api/forget/blob` landing inside that window commits, deletes the
+    // index rows and hands its caller a success receipt; without the re-check
+    // this loop would then re-insert the very secret that receipt says was
+    // retracted, permanently, from a snapshot taken before the retraction
+    // existed. Suppressed blobs are counted as skipped rather than restored so
+    // the response stays truthful about what is actually indexed.
+    let mut restored = 0usize;
+    let mut suppressed = 0usize;
     for (blob_id, vector) in &results {
         let id = uuid::Uuid::new_v4().to_string();
         let blob_size = blob_sizes.get(blob_id).copied().unwrap_or_else(|| {
@@ -1042,9 +1061,9 @@ async fn restore_unbounded(
         // Some(""), not None. Normalize both provenance fields the same way
         // so a blob with no known agent gets a real SQL NULL, not "".
         let agent_id = agent_id.filter(|s| !s.is_empty());
-        state
+        let inserted = state
             .db
-            .insert_vector(
+            .insert_vector_unless_forgotten(
                 &id,
                 owner,
                 namespace,
@@ -1066,12 +1085,23 @@ async fn restore_unbounded(
                 None,
             )
             .await?;
+        if inserted {
+            restored += 1;
+        } else {
+            suppressed += 1;
+        }
     }
 
+    // A blob retracted mid-pass is "accounted for locally and not re-imported"
+    // — the same thing every other exclusion means to restore — so it belongs
+    // in `skipped`, not silently missing from both counters.
+    let skipped = skipped + suppressed;
+
     tracing::info!(
-        "restore complete: restored={} skipped={} total={} owner={} ns={}",
+        "restore complete: restored={} skipped={} (suppressed_retracted={}) total={} owner={} ns={}",
         restored,
         skipped,
+        suppressed,
         total,
         owner,
         namespace

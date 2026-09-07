@@ -619,8 +619,20 @@ def main() -> int:
         # parametric size cases that the prior tiny-payload tests
         # missed. Share the same Walrus + SEAL prerequisites as the happy
         # path, so they run together.
-        size_checks = (
+        # Retraction durability is not a payload-size case; it only shares
+        # the Walrus + SEAL prerequisites. Kept as its own tuple so the
+        # grouping does not misdescribe what it checks.
+        retraction_checks = (
             ("forget_blob_survives_restore", test_forget_blob_survives_restore),
+        )
+        for name, fn in retraction_checks:
+            try:
+                fn(delegate_key, account_id)
+            except (AssertionError, urllib.error.URLError, urllib.error.HTTPError) as e:
+                failures.append(f"{name}: {e}")
+                print(f"[FAIL] {name}: {e}")
+
+        size_checks = (
             ("size_64kb_summarized", test_remember_size_64kb_summarized),
             ("size_large_accepted", test_remember_size_large_accepted),
             ("size_over_limit_rejected", test_remember_size_over_limit_rejected),
