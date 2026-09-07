@@ -15,6 +15,9 @@
  *   node scripts/synthetic-seal-cross-account.mjs --help
  */
 
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 const E_NO_ACCESS = 100;
 const FAIL_TOKEN = "SYNTHETIC_SEAL_CROSS_ACCOUNT_FAIL";
 const OBJECT_ID_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -231,7 +234,7 @@ function roleOnAccount(address, account) {
     return null;
 }
 
-function extractAbortCode(inspect) {
+export function extractAbortCode(inspect) {
     const effects = inspect?.effects ?? inspect?.transactionEffects ?? inspect;
     const status = effects?.status ?? inspect?.status;
     if (!status) return { outcome: "unknown", detail: JSON.stringify(inspect).slice(0, 500) };
@@ -244,7 +247,10 @@ function extractAbortCode(inspect) {
     const error = status.error ?? inspect?.error ?? effects?.error;
     const text = typeof error === "string" ? error : JSON.stringify(error ?? status);
 
-    const moveAbort = text.match(/MoveAbort\([^,]+,\s*(\d+)\)/);
+    // JSON-RPC Display: MoveAbort(<location>, <code>) in command N.
+    // Location is MoveLocation { module: ModuleId { ... }, function, ... } and
+    // contains commas, so the abort code is the decimal after that location.
+    const moveAbort = text.match(/MoveAbort\([\s\S]*,\s*(\d+)\)/);
     if (moveAbort) {
         return { outcome: "abort", code: Number(moveAbort[1]), detail: text };
     }
@@ -257,7 +263,7 @@ function extractAbortCode(inspect) {
             return { outcome: "abort", code: Number(abort.abortCode), detail: text };
         }
     }
-    const abortCode = text.match(/"abortCode"\s*:\s*"?(\d+)/);
+    const abortCode = text.match(/abort code:\s*(\d+)/i) ?? text.match(/"abortCode"\s*:\s*"?(\d+)/);
     if (abortCode) {
         return { outcome: "abort", code: Number(abortCode[1]), detail: text };
     }
@@ -573,14 +579,20 @@ async function run() {
     console.log("synthetic-seal-cross-account: ok (cross-account seal_approve denied as expected)");
 }
 
-const args = process.argv.slice(2);
-if (args.includes("--help") || args.includes("-h")) {
-    usage();
-    process.exit(0);
-}
+const isMain =
+    Boolean(process.argv[1]) &&
+    path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
-run().catch((err) => {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`synthetic-seal-cross-account: ${msg}`);
-    process.exit(2);
-});
+if (isMain) {
+    const args = process.argv.slice(2);
+    if (args.includes("--help") || args.includes("-h")) {
+        usage();
+        process.exit(0);
+    }
+
+    run().catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`synthetic-seal-cross-account: ${msg}`);
+        process.exit(2);
+    });
+}
