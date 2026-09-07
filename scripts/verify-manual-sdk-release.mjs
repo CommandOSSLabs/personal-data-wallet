@@ -5,13 +5,13 @@ import { readFileSync } from "node:fs";
 const releases = [
     {
         name: "TypeScript SDK",
-        version: "0.1.5",
+        version: "0.1.6",
         manifests: [["packages/sdk/package.json", "version"]],
         changelogs: ["packages/sdk/CHANGELOG.md", "docs/sdk/changelog.mdx"],
     },
     {
         name: "Python SDK",
-        version: "0.1.8",
+        version: "0.1.9",
         manifests: [
             ["packages/python-sdk-memwal/pyproject.toml", "toml-version"],
             ["packages/python-sdk-memwal/memwal/__init__.py", "python-version"],
