@@ -129,7 +129,8 @@ pub async fn stats(
 /// here means only "the server process is up," not "your delegate
 /// key/account ID are valid." A caller preflighting credentials before a
 /// signed call should not treat this as a substitute for that call
-/// succeeding.
+/// succeeding. `WRITES_PAUSED` does not change this status: `/health`
+/// stays HTTP 200 with `writes: "paused"` while write routes return 503.
 pub async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok".to_string(),
@@ -149,6 +150,7 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> 
             ask: ASK_SYSTEM_PROMPT_VERSION.to_string(),
         },
         write_ready: sidecar_write_ready(&state).await,
+        writes: writes_health_status(state.config.writes_paused),
     })
 }
 
