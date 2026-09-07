@@ -27,8 +27,13 @@ export async function getSession(): Promise<{ user: SessionUser } | null> {
   const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) return null;
 
+  // Same order as proxy.ts: a missing/short AUTH_SECRET must throw, not look
+  // like an invalid cookie. /api/auth/* skips the proxy guard, so this is the
+  // path GET /api/auth/profile takes.
+  const secret = getAuthSecretKey();
+
   try {
-    const { payload } = await jwtVerify(token, getAuthSecretKey());
+    const { payload } = await jwtVerify(token, secret);
     if (typeof payload.userId !== "string") return null;
 
     const user = await getUserById(payload.userId);

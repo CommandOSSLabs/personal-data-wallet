@@ -102,9 +102,12 @@ export async function verifyAndConsumeEnokiChallenge({
     return false;
   }
 
+  // A missing/short AUTH_SECRET must not look like a failed ownership check.
+  const secret = getAuthSecretKey();
+
   try {
     const address = normalizeSuiAddress(rawAddress);
-    const { payload } = await jwtVerify(token, getAuthSecretKey(), {
+    const { payload } = await jwtVerify(token, secret, {
       algorithms: ["HS256"],
       audience: "enoki-auth",
       issuer: "walrus-memory-researcher",

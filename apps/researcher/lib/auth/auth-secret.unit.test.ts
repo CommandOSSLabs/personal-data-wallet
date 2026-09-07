@@ -105,6 +105,21 @@ for (const path of ["lib/auth/session.ts", "proxy.ts"]) {
   });
 }
 
+test("session.ts and enoki-challenge.ts read the key before the verify try", () => {
+  // jwtVerify's try treats every throw as a bad cookie / failed ownership
+  // check. The key must be read outside that catch so a missing AUTH_SECRET
+  // fails loud instead of looking like "not authenticated".
+  for (const path of ["lib/auth/session.ts", "lib/auth/enoki-challenge.ts"]) {
+    const source = readFileSync(resolve(path), "utf8");
+
+    assert.match(source, /const secret = getAuthSecretKey\(\);/);
+    assert.doesNotMatch(
+      source,
+      /jwtVerify\(\s*\w+\s*,\s*getAuthSecretKey\(\)/
+    );
+  }
+});
+
 test("enoki-challenge.ts shares the one guard rather than its own copy", () => {
   const source = readFileSync(resolve("lib/auth/enoki-challenge.ts"), "utf8");
 
