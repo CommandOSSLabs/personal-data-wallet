@@ -195,17 +195,17 @@ export class MemWal {
     private sessionBuildPromise: Promise<string> | null = null;
     /** Single-flight guard so concurrent requests share one compatibility probe. */
     private compatibilityPromise: Promise<RelayerVersionMetadata> | null = null;
+    /** Resolved owner address for this account. See `resolveOwner()`. */
+    private ownerAddress: string | null = null;
+    /** Single-flight guard so concurrent reads share one owner resolution. */
+    private ownerPromise: Promise<string> | null = null;
+
     /**
      * Keep a generated idempotency key while a remember request has no
      * acknowledged response. If the transport times out after the server
      * accepted the write, the caller's next identical attempt reuses the key
      * and collapses onto the original paid job.
      */
-    /** Resolved owner address for this account. See `resolveOwner()`. */
-    private ownerAddress: string | null = null;
-    /** Single-flight guard so concurrent reads share one owner resolution. */
-    private ownerPromise: Promise<string> | null = null;
-
     private pendingRememberKeys = new Map<string, string>();
 
     private constructor(config: MemWalConfig) {
@@ -919,9 +919,6 @@ export class MemWal {
     }
 
     /**
-     * Check server health. The endpoint is public and does not require request signing.
-     */
-    /**
      * List the namespaces this account holds memories in.
      *
      * Recall is similarity-ranked and needs a namespace to search; without
@@ -934,12 +931,13 @@ export class MemWal {
      *
      * ```ts
      * let cursor: string | undefined;
-     * do {
+     * let more = true;
+     * while (more) {
      *     const page = await memwal.listNamespaces({ cursor });
      *     for (const ns of page.namespaces) console.log(ns.name, ns.memory_count);
      *     cursor = page.next_cursor ?? undefined;
-     *     var more = page.has_more;
-     * } while (more);
+     *     more = page.has_more;
+     * }
      * ```
      */
     async listNamespaces(options: ListNamespacesOptions = {}): Promise<NamespacesResult> {
@@ -1004,6 +1002,9 @@ export class MemWal {
         return this.ownerPromise;
     }
 
+    /**
+     * Check server health. The endpoint is public and does not require request signing.
+     */
     async health(): Promise<HealthResult> {
         const res = await fetch(`${this.serverUrl}/health`);
         if (!res.ok) {

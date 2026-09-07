@@ -49,7 +49,7 @@ const ONE_PAGE = {
     ],
     next_cursor: "2026-08-20T10:00:00Z",
     has_more: false,
-    snapshot_version: 1,
+    snapshot_version: 2,
 };
 
 test.afterEach(() => {

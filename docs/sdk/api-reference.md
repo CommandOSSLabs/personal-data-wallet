@@ -271,12 +271,12 @@ Rebuild missing indexed entries for one namespace from Walrus. Incremental — o
 
 ### `listNamespaces(options?): Promise<NamespacesResult>`
 
-List the namespaces this account holds memories in. Metadata only — no blob fetch and no decryption.
+List the namespaces this account holds memories in. Returns metadata only, with no blob fetch or decryption.
 
 Recall is similarity-ranked and needs a namespace to search, so an agent connecting to an unfamiliar account would otherwise have to guess names or fall back to `"default"`.
 
-- `options.cursor` — the previous page's `next_cursor`, to continue a walk or poll incrementally
-- `options.limit` — page size; the relayer defaults to `100` and clamps to `500`
+- `options.cursor`: The previous page's `next_cursor`, to continue a walk or poll incrementally
+- `options.limit`: Page size; the relayer defaults to `100` and clamps to `500`
 
 **Returns:**
 
@@ -295,7 +295,7 @@ Recall is similarity-ranked and needs a namespace to search, so an agent connect
 }
 ```
 
-Paginate on `has_more`, not on page length — the relayer clamps `limit`, so a caller asking for more than the cap gets exactly the cap back and would wrongly conclude it was done.
+Paginate on `has_more`, not on page length. The relayer clamps `limit`, so a caller asking for more than the cap gets exactly the cap back and would wrongly conclude it was done.
 
 ```ts
 let cursor: string | undefined;

@@ -222,3 +222,38 @@ test("MemWalMock.listNamespaces reports the relayer's current snapshot_version",
     const page = await MemWalMock.create().listNamespaces();
     assert.equal(page.snapshot_version, 2);
 });
+
+test("MemWalMock namespace cursors use the relayer wire format and reset after a walk", async () => {
+    const mock = MemWalMock.create({ initialMemories: [
+        { text: "a", namespace: "旅行" },
+        { text: "b", namespace: "work" },
+    ] });
+    const first = await mock.listNamespaces({ limit: 1 });
+    assert.match(first.next_cursor, /^[A-Za-z0-9_-]+$/);
+    const cursor = JSON.parse(Buffer.from(first.next_cursor, "base64url").toString("utf8"));
+    assert.equal(cursor.namespace, "旅行");
+    assert.equal(cursor.updated_at, first.namespaces[0].updated_at);
+    assert.ok(cursor.snapshot_at);
+    const last = await mock.listNamespaces({ cursor: first.next_cursor });
+    assert.deepEqual(last.namespaces.map(ns => ns.name), ["work"]);
+    assert.equal(last.has_more, false);
+    assert.equal(JSON.parse(Buffer.from(last.next_cursor, "base64url")).snapshot_at, null);
+    const empty = await mock.listNamespaces({ cursor: last.next_cursor });
+    assert.deepEqual(empty.namespaces, []);
+    assert.equal(empty.next_cursor, last.next_cursor);
+});
+
+test("MemWalMock namespace walks defer new writes until the next poll", async () => {
+    const mock = MemWalMock.create({ initialMemories: [
+        { text: "a", namespace: "alpha" },
+        { text: "b", namespace: "bravo" },
+    ] });
+    const first = await mock.listNamespaces({ limit: 1 });
+    await mock.remember("new", "bravo");
+    const last = await mock.listNamespaces({ cursor: first.next_cursor });
+    assert.deepEqual(last.namespaces, []);
+    assert.equal(last.has_more, false);
+    const poll = await mock.listNamespaces({ cursor: last.next_cursor });
+    assert.deepEqual(poll.namespaces.map(ns => ns.name), ["bravo"]);
+    assert.equal(poll.namespaces[0].memory_count, 2);
+});

@@ -404,7 +404,6 @@ export interface RecallManualHit {
     distance: number;
 }
 
-/** Result from restore() */
 /** One namespace in a `listNamespaces()` page. Mirrors the relayer wire shape. */
 export interface NamespaceSummary {
     id: string;
@@ -446,6 +445,7 @@ export interface ListNamespacesOptions {
     limit?: number;
 }
 
+/** Result from restore() */
 export interface RestoreResult {
     restored: number;
     skipped: number;

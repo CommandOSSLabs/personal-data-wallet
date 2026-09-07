@@ -410,18 +410,38 @@ export class MemWalMock {
                     : a.updated_at.localeCompare(b.updated_at)
             );
 
-        // Mirrors the relayer's keyset walk: `cursor` is an exclusive
-        // `updated_after` watermark, and `has_more` — not page length — says
-        // whether to keep going.
-        const remaining = options.cursor
-            ? all.filter((ns) => ns.updated_at > options.cursor!)
-            : all;
+        // Match the relayer's URL_SAFE_NO_PAD JSON cursor and snapshot walk.
+        const cursor: { updated_at: string; namespace: string; snapshot_at?: string | null } | null =
+            options.cursor === undefined ? null : JSON.parse(new TextDecoder().decode(
+                Uint8Array.from(
+                    atob(options.cursor.replace(/-/g, "+").replace(/_/g, "/")),
+                    (char) => char.charCodeAt(0),
+                ),
+            ));
+        const snapshotAt = cursor?.snapshot_at ?? new Date(
+            MOCK_NAMESPACE_EPOCH_MS + this.sequence * 1000,
+        ).toISOString();
+        const remaining = all.filter((ns) =>
+            Date.parse(ns.updated_at) <= Date.parse(snapshotAt) &&
+            (!cursor || Date.parse(ns.updated_at) > Date.parse(cursor.updated_at) ||
+                (Date.parse(ns.updated_at) === Date.parse(cursor.updated_at) &&
+                    ns.name > cursor.namespace))
+        );
         const page = remaining.slice(0, options.limit ?? remaining.length);
+        const hasMore = remaining.length > page.length;
+        const last = page.at(-1);
+        const watermark = last ? { updated_at: last.updated_at, namespace: last.name } : cursor;
+        const nextCursor = watermark ? btoa(Array.from(new TextEncoder().encode(JSON.stringify({
+            updated_at: watermark.updated_at,
+            namespace: watermark.namespace,
+            snapshot_at: hasMore ? snapshotAt : null,
+        })), (byte) => String.fromCharCode(byte)).join(""))
+            .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : null;
 
         return {
             namespaces: page,
-            next_cursor: page.length ? page[page.length - 1].updated_at : null,
-            has_more: remaining.length > page.length,
+            next_cursor: nextCursor,
+            has_more: hasMore,
             // Matches the live relayer's current wire-format version.
             snapshot_version: 2,
         };
