@@ -60,3 +60,37 @@ def test_create_warns_on_plaintext_remote(caplog: pytest.LogCaptureFixture) -> N
     )
     assert client._server_url == "http://relayer.example.com"
     assert "plaintext" in caplog.text
+
+
+def test_plaintext_remote_warning_omits_url_credentials(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """HTTPX userinfo must stay on the transport URL and out of the warning."""
+
+    caplog.set_level(logging.WARNING, logger="memwal")
+    url = "http://alice:example-secret@relayer.example.com/?token=super-secret"
+    assert (
+        normalize_server_url(url)
+        == "http://alice:example-secret@relayer.example.com/?token=super-secret"
+    )
+    assert "plaintext" in caplog.text
+    assert "http://relayer.example.com" in caplog.text
+    assert "alice" not in caplog.text
+    assert "example-secret" not in caplog.text
+    assert "super-secret" not in caplog.text
+    for rec in caplog.records:
+        assert "example-secret" not in rec.getMessage()
+        assert "example-secret" not in str(rec.args)
+        assert "super-secret" not in rec.getMessage()
+        assert "super-secret" not in str(rec.args)
+
+
+def test_create_preserves_url_credentials_and_redacts_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="memwal")
+    url = "http://alice:example-secret@relayer.example.com/"
+    client = MemWal.create(key=_KEY, account_id=_ACCOUNT, server_url=url)
+    assert client._server_url == "http://alice:example-secret@relayer.example.com"
+    assert "plaintext" in caplog.text
+    assert "example-secret" not in caplog.text
