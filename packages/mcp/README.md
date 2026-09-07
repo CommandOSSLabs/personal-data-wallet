@@ -55,6 +55,30 @@ Use CLI flags or environment variables to override the default Walrus Memory end
 
 Enable verbose stderr logging with `MEMWAL_MCP_DEBUG=1`.
 
+These environment variables tune how long the bridge waits for a single tool
+call before it gives up on the reply. They have no CLI flag and the defaults
+suit normal use.
+
+| Environment variable | Default | Description |
+| --- | --- | --- |
+| `MEMWAL_MCP_CALL_TIMEOUT_MS` | `240000` | How long one forwarded call may go unanswered before the bridge stops waiting. Covers the slowest server-side tool (`memwal_analyze`) plus overhead, so expiry means the reply is lost rather than merely late. |
+| `MEMWAL_MCP_CALL_RETRIES` | `2` | How many times a timed-out **read** (`memwal_recall`, `memwal_health`) is replayed on a fresh session before the bridge answers with an error. Set `0` to disable. Writes are never replayed, because the relayer may already have applied the first attempt. |
+
+When the retries run out, the bridge answers the call itself rather than
+letting it hang: the tool result is an error carrying a `structuredContent`
+object with `code`, `class` (`relayer_overload`, `transient_network`, or
+`bridge_misconfigured`), `attempts`, `retryable`, and a `nextStep`, so an agent
+can decide whether to retry or reach Walrus Memory another way. `attempts`
+counts the calls that actually reached the relayer rather than the retries that
+were configured, so `0` means the call never left the bridge.
+
+`retryable` accounts for what the call would repeat, not just why it failed. A
+write that already reached the relayer may have been applied even though no
+result came back, so it is reported as `retryable: false` and its `nextStep`
+asks you to check with `memwal_recall` before re-sending — repeating it would
+store the memory twice. Reads, and any call that never left the bridge, keep
+the plain retry advice.
+
 ## Default Namespace
 
 By default the MCP tool schemas expose an optional `namespace` argument and the

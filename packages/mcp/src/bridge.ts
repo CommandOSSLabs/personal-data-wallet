@@ -229,6 +229,198 @@ function resolveCallTimeoutMs(): number {
     return n;
 }
 
+/** Tools whose work is safe to re-drive after a lost reply. A call only times
+ * out AFTER the relayer accepted the POST, so the tool may already have run:
+ * a retry can execute it a SECOND time. That is harmless for a search and a
+ * duplicate write for anything else, so this set tracks `readOnlyHint: true`
+ * in the tool annotations (see `TOOL_DEFINITIONS`) and nothing else. Writes
+ * still get the structured error below — they just never get a silent retry.
+ * Exported so `tool-definitions.test.mjs` can bind it to those annotations
+ * rather than leaving two hand-maintained lists to drift apart silently. */
+export const RETRY_SAFE_TOOLS = new Set(["memwal_recall", "memwal_health"]);
+
+/** Tool name behind a `tools/call`, for retry-safety and for naming the tool in
+ * the failure payload. Null for anything that is not a tool call. */
+function toolNameOf(msg: RpcMessage): string | null {
+    if (msg.method !== "tools/call") return null;
+    const params = msg.params as { name?: string } | undefined;
+    return typeof params?.name === "string" ? params.name : null;
+}
+
+/** Whether the bridge tracks this message in `inFlight`: an id-bearing
+ * request, which is everything except notifications (no id) and the client's
+ * own responses (no method). Only tracked messages have an owner that can
+ * answer or replay them, so only they are subject to the ownership checks
+ * around the POST sites. */
+function isTracked(msg: RpcMessage): msg is RpcMessage & { id: string | number } {
+    return msg.method !== undefined && msg.id !== undefined && msg.id !== null;
+}
+
+/** Whether sending this message a second time is harmless. True for everything
+ * that is not a tool call (`ping`, `tools/list`, `initialize` — all reads the
+ * relayer answers without side effects) and for the read-only tools. */
+function isReplaySafe(msg: RpcMessage): boolean {
+    const tool = toolNameOf(msg);
+    return tool === null || RETRY_SAFE_TOOLS.has(tool);
+}
+
+/** Two extra attempts covers a relayer that dropped one reply under load
+ * without turning a genuine outage into a multi-minute stall. */
+const DEFAULT_CALL_RETRIES = 2;
+
+/** Past this the retries outlive any host's own tool timeout, so the agent
+ * has long since given up on a reply we are still chasing. */
+const MAX_CALL_RETRIES = 5;
+
+/** How many times a timed-out read is replayed before we answer with an error.
+ * Override via `MEMWAL_MCP_CALL_RETRIES`; `0` disables retrying. Backoff is
+ * `reconnect()`'s existing exponential curve — the retry rides the same
+ * reconnect/replay path, so there is no second schedule to tune. */
+function resolveCallRetries(): number {
+    const raw = process.env.MEMWAL_MCP_CALL_RETRIES;
+    if (!raw) return DEFAULT_CALL_RETRIES;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) return DEFAULT_CALL_RETRIES;
+    return Math.min(MAX_CALL_RETRIES, Math.floor(n));
+}
+
+/** What an agent should do differently, which is the only reason to classify
+ * at all: back off and retry the same call (`relayer_overload`), retry once
+ * the network settles or reach Walrus Memory another way (`transient_network`),
+ * or stop retrying because no amount of it will help (`bridge_misconfigured`). */
+type CallFailureClass = "transient_network" | "relayer_overload" | "bridge_misconfigured";
+
+/** Machine-readable half of an exhausted-retry answer. Sent as
+ * `result.structuredContent` alongside the human text, which stays the
+ * load-bearing channel — hosts that ignore `structuredContent` still get a
+ * legible message. */
+interface CallFailurePayload extends Record<string, unknown> {
+    code: "MEMWAL_CALL_TIMEOUT";
+    class: CallFailureClass;
+    tool: string | null;
+    attempts: number;
+    elapsedMs: number;
+    timeoutMs: number;
+    retryable: boolean;
+    nextStep: string;
+}
+
+/** Signals the bridge already holds when a call runs out of attempts. Kept as
+ * a plain record so the decision is a pure function of observed state and can
+ * be reasoned about (and tested) without a live session. */
+interface CallFailureSignals {
+    /** A live SSE handle exists — the stream is up and heartbeating. */
+    streamAlive: boolean;
+    /** HTTP status of the last POST we made for this session, if any. */
+    lastPostStatus: number | null;
+    /** Message from the last failed SSE handshake, if one has failed. */
+    lastConnectError: string | null;
+}
+
+/** Errors that no retry can fix: the relayer refused our identity, answered
+ * something that is not an SSE stream, or is too old to talk to. These come
+ * out of `openSseStream` / `ensureCompatibleRelayer` as thrown messages, so we
+ * match on the wording those throw sites own. */
+function isMisconfigurationError(message: string): boolean {
+    return (
+        message.includes("HTTP 401") ||
+        message.includes("unexpected content-type") ||
+        message.includes("incompatible") ||
+        message.includes("minSupportedSdk") ||
+        message.includes("too old")
+    );
+}
+
+/** Decide which of the three failure classes an exhausted call belongs to.
+ *
+ * Order matters: a misconfigured relayer also looks like a dead stream, and an
+ * overloaded one also fails to hand back a session, so the specific causes are
+ * checked before the generic "no stream" fallback.
+ */
+function classifyCallFailure(signals: CallFailureSignals): CallFailureClass {
+    const { streamAlive, lastPostStatus, lastConnectError } = signals;
+    if (lastConnectError && isMisconfigurationError(lastConnectError)) {
+        return "bridge_misconfigured";
+    }
+    // The relayer explicitly told us it is shedding load. That verdict holds
+    // whether or not the stream survived it.
+    if (lastPostStatus === 429 || lastPostStatus === 503) return "relayer_overload";
+    if (lastConnectError && lastConnectError.includes("429")) return "relayer_overload";
+    // Stream up, POST accepted, no reply: the relayer took the work and never
+    // came back with it. Nothing about the transport is broken.
+    if (streamAlive) return "relayer_overload";
+    // No live stream and no specific verdict — the connection itself is the
+    // problem, which is the one class that may resolve on its own.
+    return "transient_network";
+}
+
+/** Human sentence for each class, in the vocabulary the relayer sidecar's own
+ * tool errors already use ("Walrus Memory ..."), so an agent routes the same
+ * way regardless of which side produced the failure. Every one states plainly
+ * that the call did not run to completion and what to do next. */
+const CALL_FAILURE_GUIDANCE: Record<
+    CallFailureClass,
+    { retryable: boolean; nextStep: string }
+> = {
+    relayer_overload: {
+        retryable: true,
+        nextStep:
+            "The relayer accepted this call but never returned a result. Wait a few seconds and retry the same call.",
+    },
+    transient_network: {
+        retryable: true,
+        nextStep:
+            "The connection to the relayer dropped before a result came back. Retry shortly, or reach Walrus Memory another way (for example the SDK) if it keeps failing.",
+    },
+    bridge_misconfigured: {
+        retryable: false,
+        nextStep:
+            "Retrying will not help. Check the relayer URL and run `memwal-mcp login` to refresh credentials.",
+    },
+};
+
+/** Whether the failed call may nevertheless have been applied: a non-read
+ * whose POST went out. This is the one case where the bridge must not tell the
+ * caller "the call did not run" — the POST was accepted, so on an append-only
+ * store the memory may well be there, and a confident denial is what pushes an
+ * agent into writing it a second time. */
+function mayHaveApplied(tool: string | null, attempts: number): boolean {
+    return attempts > 0 && tool !== null && !RETRY_SAFE_TOOLS.has(tool);
+}
+
+/** Guidance for one failure, narrowed by what was actually sent.
+ *
+ * The class alone cannot answer "should the agent re-issue this call", because
+ * the answer differs by tool. A call only fails this way AFTER its POST was
+ * accepted, so for anything outside `RETRY_SAFE_TOOLS` the work may already
+ * have been applied — which is exactly why the bridge refuses to replay such a
+ * call itself. Handing the agent a `retryable: true` and "retry the same call"
+ * would just move that duplicate one level up: on an append-only store a second
+ * `memwal_remember` is a second memory, not an idempotent redo.
+ *
+ * `attempts === 0` is the one case where a write is safe to repeat — nothing
+ * left the bridge — so it keeps the plain class guidance.
+ */
+function guidanceForFailure(
+    failureClass: CallFailureClass,
+    tool: string | null,
+    attempts: number,
+): { retryable: boolean; nextStep: string } {
+    const base = CALL_FAILURE_GUIDANCE[failureClass];
+    // Nothing was sent, or the call is safe to run twice: the class says it all.
+    if (!mayHaveApplied(tool, attempts)) return base;
+    // Already "do not retry" — narrowing it further would only lose the reason.
+    if (!base.retryable) return base;
+    return {
+        retryable: false,
+        nextStep:
+            "This call reached the relayer, so it may already have been applied even " +
+            "though no result came back. Do not simply repeat it: Walrus Memory is " +
+            "append-only, so a second send stores it a second time. Check with " +
+            "`memwal_recall` whether it landed, and only re-send it if it did not.",
+    };
+}
+
 interface RpcMessage {
     jsonrpc: "2.0";
     id?: number | string | null;
@@ -242,6 +434,40 @@ interface RpcMessage {
 interface InFlightEntry {
     msg: RpcMessage;
     startedAt: number;
+    /** Deadline for the answer we are waiting on RIGHT NOW. Set one
+     * `callTimeoutMs` out when the request arrives, and moved forward only when
+     * a retry actually goes out. Deriving the budget from `startedAt` instead
+     * (`callTimeoutMs * (attempts + 1)`) charged the retry for the reconnect
+     * that carries it: backoff plus handshake runs to ~25s, so with any
+     * deadline shorter than that the budget expired mid-reconnect and the call
+     * was closed out as exhausted before its replay had been posted at all. */
+    deadlineAt: number;
+    /** POSTs of this request the bridge actually put on the wire — the first
+     * forward, plus every replay. Reported as `attempts`, which is the point:
+     * that number is a diagnostic, so it must never claim a send that did not
+     * happen. Counted where the POST is made rather than where one is decided
+     * on, since those are not the same moment. */
+    attempts: number;
+    /** Timeout retries the sweeper has ASKED for. Deliberately separate from
+     * `attempts`: this is what bounds the retry loop, and it has to keep
+     * bounding it even when the reconnect carrying a retry dies before posting
+     * anything — which `attempts`, by design, does not record. Reconnect
+     * replays do not consume it either: they are not this request's failure,
+     * and counting them would spend a read's retries on session churn. */
+    retriesRequested: number;
+    /** A retry that has been asked for but has not gone out yet. While it is
+     * set and a reconnect is running, the sweeper must not call the request
+     * exhausted — that verdict would pre-judge a send still in flight, and
+     * answering would delete the entry the replay was about to re-post. The
+     * POST that carries the retry clears this and moves `deadlineAt`. */
+    retryPending?: boolean;
+    /** Set when a call-timeout retry is about to tear down a HEALTHY session
+     * that already accepted this request. Reconnect replays every in-flight
+     * entry, so without this the teardown would re-send an accepted write and
+     * duplicate it. Sticky and reason-independent on purpose: aborting the
+     * stream makes the server pump report EOF, and that reconnect must skip
+     * the entry too. The request still expires into its own structured error. */
+    noReplay?: boolean;
 }
 
 interface SseHandshakeResult {
@@ -782,6 +1008,11 @@ export async function runBridge(
     let sessionEpoch = 0;
     /** One in-flight POST per SSE session — overlapping POSTs drop the stream. */
     let postChain: Promise<unknown> = Promise.resolve();
+    /** Status of the most recent POST, and the message from the most recent
+     * failed handshake. Both exist purely so an exhausted call can say WHY it
+     * failed instead of just that it did — see `classifyCallFailure`. */
+    let lastPostStatus: number | null = null;
+    let lastConnectError: string | null = null;
     function enqueuePost<T>(fn: () => Promise<T>): Promise<T> {
         const run = postChain.then(fn, fn);
         postChain = run.then(
@@ -796,8 +1027,40 @@ export async function runBridge(
         msg: RpcMessage,
         postCreds: MemWalCredentials,
     ): Promise<number> {
+        // Skipped as stale: not an observation about the relayer, so leave
+        // `lastPostStatus` reporting the last POST that actually went out.
         if (epoch !== sessionEpoch) return Promise.resolve(0);
-        return postMessage(postUrl, msg, postCreds, extraHeaders);
+        const entry = isTracked(msg) ? inFlight.get(msg.id) : undefined;
+        // Answered while this POST waited its turn — on `postChain`, or on the
+        // reconnect the forwarding path parks against. The sweeper's timeout
+        // reply deletes the entry and closes the id out, so sending now would
+        // run a call the client has already been told did NOT run. For
+        // `memwal_remember` that is a write reported as failed that still
+        // lands, and an agent following our own `nextStep` then stores it
+        // twice. Last line of defence for every POST site; the forwarding path
+        // checks earlier too, where it can name the reason.
+        if (isTracked(msg) && !entry) {
+            log.info("bridge.post_skipped_answered", {
+                id: msg.id,
+                method: msg.method ?? null,
+            });
+            return Promise.resolve(0);
+        }
+        return postMessage(postUrl, msg, postCreds, extraHeaders).then((status) => {
+            lastPostStatus = status;
+            // The send happened, whatever the relayer made of it. Counting it
+            // here — the only place a POST actually leaves the bridge — is what
+            // keeps `attempts` a record of sends rather than of intentions.
+            if (entry) {
+                entry.attempts += 1;
+                // A retry only earns its own deadline once it is on the wire.
+                if (entry.retryPending) {
+                    entry.retryPending = false;
+                    entry.deadlineAt = Date.now() + callTimeoutMs;
+                }
+            }
+            return status;
+        });
     }
     let credentialGeneration = 0;
     let activeCredentialGeneration = 0;
@@ -908,6 +1171,7 @@ export async function runBridge(
     // would otherwise keep pushing the deadline out.
     const inFlight = new Map<string | number, InFlightEntry>();
     const callTimeoutMs = resolveCallTimeoutMs();
+    const callRetries = resolveCallRetries();
 
     /** IDs of `tools/list` requests we've forwarded to the relayer. When
      * the response comes back through the SSE pump, we splice in the
@@ -1001,6 +1265,12 @@ export async function runBridge(
                     firstConnectDone = true;
                     activeCredentialGeneration = openingGeneration;
                     reconnectAttempt = 0;
+                    // A fresh session invalidates both failure signals: a stale
+                    // handshake error would otherwise keep classifying healthy
+                    // sessions as misconfigured, and the old session's last POST
+                    // status says nothing about this one.
+                    lastConnectError = null;
+                    lastPostStatus = null;
                     log.info("bridge.reconnected", {
                         relayer: openingCreds.relayerUrl,
                         replayCount: inFlight.size,
@@ -1026,6 +1296,18 @@ export async function runBridge(
                         if (loggedOut || openingGeneration !== credentialGeneration) {
                             log.info("bridge.replay_halted_signed_out", { id });
                             break;
+                        }
+                        // Marked un-replayable by the call-timeout sweeper: the
+                        // relayer accepted this write on a healthy stream, so
+                        // re-sending it could store the memory twice. Checked
+                        // here rather than on `reason` because tearing the
+                        // stream down also surfaces as `server-pump-eof`.
+                        if (entry.noReplay) {
+                            log.info("bridge.replay_skipped_write", {
+                                id,
+                                tool: toolNameOf(entry.msg),
+                            });
+                            continue;
                         }
                         const msg = entry.msg;
                         try {
@@ -1076,9 +1358,9 @@ export async function runBridge(
                     break;
                 }
             } catch (err) {
-                log.error("bridge.reconnect_failed", {
-                    err: err instanceof Error ? err.message : String(err),
-                });
+                const message = err instanceof Error ? err.message : String(err);
+                lastConnectError = message;
+                log.error("bridge.reconnect_failed", { err: message });
                 // Try again on the next stdin message rather than spinning.
             }
         })();
@@ -1352,8 +1634,19 @@ export async function runBridge(
     // if the message races the new handshake), trigger another reconnect.
     const handleClientLine = (line: string): void => {
         void (async () => {
+            let msg: RpcMessage;
+            // Parse in its own try so `bridge.stdin_parse_failed` means ONLY
+            // that. One try used to wrap the parse AND every await below it, so
+            // a failed POST — a network error — was reported as unparseable
+            // client input, and the request was dropped with no reply at all.
+            // That combination is why a stalled call left nothing to debug.
             try {
-                const msg = JSON.parse(line) as RpcMessage;
+                msg = JSON.parse(line) as RpcMessage;
+            } catch {
+                log.warn("bridge.stdin_parse_failed", { line: line.slice(0, 120) });
+                return;
+            }
+            try {
 
                 // Answer `initialize` LOCALLY and instantly so the MCP client's
                 // handshake never waits on the relayer connect (the cold-start
@@ -1477,12 +1770,15 @@ export async function runBridge(
                 // Track requests (have both method and id) so we can replay
                 // them on reconnect. Notifications and responses are not
                 // tracked.
-                if (
-                    msg.method !== undefined &&
-                    msg.id !== undefined &&
-                    msg.id !== null
-                ) {
-                    inFlight.set(msg.id, { msg, startedAt: Date.now() });
+                if (isTracked(msg)) {
+                    const startedAt = Date.now();
+                    inFlight.set(msg.id, {
+                        msg,
+                        startedAt,
+                        deadlineAt: startedAt + callTimeoutMs,
+                        attempts: 0,
+                        retriesRequested: 0,
+                    });
                 }
                 // Relayer session not up yet, OR the post-connect flush is still
                 // draining — buffer so this request stays behind everything that
@@ -1521,6 +1817,26 @@ export async function runBridge(
                     await reconnect("sse-missing");
                     return;
                 }
+                // The awaits above can park this forward for as long as a
+                // reconnect takes. The request is in `inFlight` the whole time,
+                // so two other owners can act on it while we are parked: the
+                // sweeper can answer it with a timeout error, and the reconnect
+                // replays the entire map against the fresh session. Posting
+                // unconditionally on resume therefore either duplicates a send
+                // reconnect already made — the replay path takes care to avoid
+                // exactly that — or sends a call we have already reported as
+                // failed. Neither send is ours to make.
+                if (isTracked(msg)) {
+                    const tracked = inFlight.get(msg.id);
+                    if (!tracked || tracked.attempts > 0) {
+                        log.info("bridge.forward_abandoned", {
+                            id: msg.id,
+                            method: msg.method ?? null,
+                            reason: tracked ? "already sent by reconnect" : "already answered",
+                        });
+                        return;
+                    }
+                }
                 const epoch = sessionEpoch;
                 const postUrl = sse.postUrl;
                 const postCreds = creds;
@@ -1533,8 +1849,45 @@ export async function runBridge(
                     // session, so no explicit per-message retry is needed.
                     await reconnect("post-404");
                 }
-            } catch {
-                log.warn("bridge.stdin_parse_failed", { line: line.slice(0, 120) });
+            } catch (err) {
+                // Everything here is transport or session work: a thrown fetch,
+                // an aborted stream, a reconnect that gave up. Name it as such
+                // and answer the caller, instead of leaving the request in
+                // `inFlight` for the sweeper to rediscover a deadline later.
+                const message = err instanceof Error ? err.message : String(err);
+                log.error("bridge.forward_failed", {
+                    id: msg.id ?? null,
+                    method: msg.method ?? null,
+                    err: message,
+                });
+                const failureClass = isMisconfigurationError(message)
+                    ? "bridge_misconfigured"
+                    : "transient_network";
+                // `attempts: 1` below is deliberate and conservative: a socket
+                // torn down after the relayer read the body is indistinguishable
+                // from one that never left, so a write here gets the same
+                // "may already have landed" treatment as a timed-out one.
+                const guidance = guidanceForFailure(failureClass, toolNameOf(msg), 1);
+                failRequest(msg, "send failed", {
+                    toolText:
+                        `❌ Walrus Memory could not send this call to the relayer ` +
+                        `[${failureClass}]: ${message}. ` +
+                        (mayHaveApplied(toolNameOf(msg), 1) ? "" : "The call did not run. ") +
+                        guidance.nextStep,
+                    errorMessage:
+                        `Walrus Memory could not send this call to the relayer ` +
+                        `[${failureClass}]: ${message}. ${guidance.nextStep}`,
+                    structured: {
+                        code: "MEMWAL_CALL_TIMEOUT",
+                        class: failureClass,
+                        tool: toolNameOf(msg),
+                        attempts: 1,
+                        elapsedMs: 0,
+                        timeoutMs: callTimeoutMs,
+                        retryable: guidance.retryable,
+                        nextStep: guidance.nextStep,
+                    },
+                });
             }
         })();
     };
@@ -1637,7 +1990,15 @@ export async function runBridge(
     function failRequest(
         msg: RpcMessage,
         reason: string,
-        opts: { toolText?: string; errorMessage?: string } = {},
+        opts: {
+            toolText?: string;
+            errorMessage?: string;
+            /** Machine-readable detail for an agent deciding what to do next.
+             * Attached as `result.structuredContent` on tool calls and as
+             * `error.data` otherwise. Purely additive: a host that ignores it
+             * still gets the same text it got before. */
+            structured?: CallFailurePayload;
+        } = {},
     ): void {
         if (msg.id == null) return; // notification — nothing to answer
         if (msg.method === "initialize") {
@@ -1666,6 +2027,9 @@ export async function runBridge(
                         },
                     ],
                     isError: true,
+                    ...(opts.structured
+                        ? { structuredContent: opts.structured }
+                        : {}),
                 },
             });
         } else {
@@ -1677,6 +2041,7 @@ export async function runBridge(
                     message:
                         opts.errorMessage ??
                         `Walrus Memory relayer unavailable: ${reason}`,
+                    ...(opts.structured ? { data: opts.structured } : {}),
                 },
             });
         }
@@ -1706,20 +2071,105 @@ export async function runBridge(
     const orphanSweeper = setInterval(() => {
         const now = Date.now();
         for (const [id, entry] of Array.from(inFlight.entries())) {
+            if (now <= entry.deadlineAt) continue;
             const elapsedMs = now - entry.startedAt;
-            if (elapsedMs <= callTimeoutMs) continue;
-            log.warn("bridge.call_orphaned", {
+
+            const tool = toolNameOf(entry.msg);
+            // Only reads are replayed: the POST was accepted before we gave up,
+            // so a write may already have landed and a retry would duplicate it.
+            const retriesAllowed = tool !== null && RETRY_SAFE_TOOLS.has(tool) ? callRetries : 0;
+
+            // A retry we asked for has not gone out yet, and the reconnect
+            // carrying it is still in backoff or handshake. Every verdict
+            // available here would be premature: retrying again would double
+            // up, and answering would delete the entry the replay is about to
+            // re-post, so the configured retry would never happen while the
+            // error claimed it had. `reconnect()` is bounded, so a later sweep
+            // decides this with the outcome actually known.
+            if (entry.retryPending && reconnectPromise) continue;
+
+            if (entry.retriesRequested < retriesAllowed) {
+                // A reconnect already under way replays the whole `inFlight`
+                // map, so this request is about to be re-sent for free. Don't
+                // spend an attempt on it — the deadline has not moved, so the
+                // next sweep re-decides with the outcome known.
+                if (reconnectPromise) continue;
+                // The reconnect below aborts a healthy stream and replays
+                // everything still outstanding. Every write in flight right now
+                // was already accepted by the relayer, so freeze it out of that
+                // replay before starting it.
+                for (const other of inFlight.values()) {
+                    if (!isReplaySafe(other.msg)) other.noReplay = true;
+                }
+                entry.retriesRequested += 1;
+                // Not `attempts`: nothing has been sent yet. The replay POST
+                // records the send and extends the deadline; until then the
+                // guard above keeps this request off the exhausted path.
+                entry.retryPending = true;
+                log.warn("bridge.call_timeout_retry", {
+                    id,
+                    method: entry.msg.method ?? null,
+                    tool,
+                    attempt: entry.retriesRequested,
+                    retriesAllowed,
+                    elapsedMs,
+                });
+                // Reuse the existing reconnect: it aborts the stale stream,
+                // applies the established exponential backoff, and replays
+                // every in-flight request against the fresh session. A second
+                // retry schedule here would race that one.
+                void reconnect("call-timeout").catch(() => {
+                    /* reconnect logs its own failure; the sweep retries */
+                });
+                continue;
+            }
+
+            const failureClass = classifyCallFailure({
+                streamAlive: sse !== null,
+                lastPostStatus,
+                lastConnectError,
+            });
+            // Sends we actually made. Zero is a real outcome — a request that
+            // expired while still buffered, or whose every reconnect failed,
+            // never left the bridge — and saying so is more use to an agent
+            // than a fabricated `1`.
+            const attempts = entry.attempts;
+            const attemptSummary =
+                attempts === 0
+                    ? "did not reach the relayer on any attempt"
+                    : `timed out after ${attempts} attempt${attempts === 1 ? "" : "s"}`;
+            log.error("bridge.call_timeout_exhausted", {
                 id,
                 method: entry.msg.method ?? null,
+                tool,
+                class: failureClass,
+                attempts,
                 elapsedMs,
             });
+            const guidance = guidanceForFailure(failureClass, tool, attempts);
+            const structured: CallFailurePayload = {
+                code: "MEMWAL_CALL_TIMEOUT",
+                class: failureClass,
+                tool,
+                attempts,
+                elapsedMs,
+                timeoutMs: callTimeoutMs,
+                retryable: guidance.retryable,
+                nextStep: guidance.nextStep,
+            };
             failRequest(entry.msg, "no response", {
                 toolText:
-                    "❌ Walrus Memory did not answer this call. The connection to " +
-                    "the relayer dropped before the result came back. Please retry.",
+                    `❌ Walrus Memory call ${attemptSummary} ` +
+                    `(${elapsedMs}ms, limit ${callTimeoutMs}ms per attempt). ` +
+                    (mayHaveApplied(tool, attempts)
+                        ? `No result came back [${failureClass}]. `
+                        : `The call did not complete and returned no data [${failureClass}]. `) +
+                    guidance.nextStep,
                 errorMessage:
-                    "Walrus Memory call was orphaned by a reconnect and never " +
-                    "received a response. Please retry.",
+                    `Walrus Memory call ${attemptSummary} and received no response ` +
+                    `[${failureClass}]. ` +
+                    guidance.nextStep,
+                structured,
             });
         }
     }, sweepIntervalMs);

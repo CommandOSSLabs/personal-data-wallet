@@ -9,6 +9,7 @@ import {
     TOOL_DEFINITIONS,
     SIGNED_OUT_TOOL_DEFINITIONS,
 } from "../dist/auth-required.js";
+import { RETRY_SAFE_TOOLS } from "../dist/bridge.js";
 
 function desc(list, name) {
     const tool = list.find((t) => t.name === name);
@@ -64,4 +65,19 @@ test("memwal_recall is advertised as a read-only search", () => {
         readOnlyHint: true,
         destructiveHint: false,
     });
+});
+
+test("the timeout-retry set is exactly the tools advertised as read-only", () => {
+    // A timed-out call in this set is replayed on a fresh session, so every
+    // member has to be safe to run twice. `RETRY_SAFE_TOOLS` is a hand-written
+    // literal, and the drift that matters fails silently: a tool in it that
+    // gains write behaviour turns a rescued read into a duplicated memory.
+    // Bind it to the `readOnlyHint` annotations this package advertises, which
+    // is the claim clients act on. (The relayer sidecar keeps its own mirror
+    // in services/server/scripts/mcp/tools/annotations.ts. That copy is out of
+    // this package's reach and still matches by hand.)
+    const readOnly = TOOL_DEFINITIONS.filter((t) => t.annotations?.readOnlyHint === true).map(
+        (t) => t.name,
+    );
+    assert.deepEqual([...RETRY_SAFE_TOOLS].sort(), readOnly.sort());
 });

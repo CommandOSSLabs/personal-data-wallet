@@ -92,7 +92,7 @@ If it keeps failing, confirm that nothing blocks localhost traffic, then run `np
 
 ## Saving and timeouts
 
-This section covers slow or timed-out writes.
+This section covers slow or timed-out saves and recalls.
 
 ### `memwal_analyze` times out while recall works
 
@@ -111,6 +111,20 @@ A client-side timeout does not mean the save failed. The relayer accepts the wor
 3. Confirm connectivity first. Run `memwal_health`, which calls the unauthenticated health endpoint and is the fastest way to confirm the relayer is reachable.
 4. Wait correctly in the SDK. The `remember` and `analyze` methods return immediately with job IDs, so wait with `waitForRememberJob` or `analyzeAndWait` and a sensible timeout, or poll the job status, rather than wrapping the whole operation in one short blocking call.
 5. Collect logs if the problem persists. Set `MEMWAL_MCP_DEBUG=1` for the MCP server, or pass `debug: true` to the `withMemWal()` AI middleware, and capture the per-request output. The core SDK (`MemWal.create()`) has no built-in debug flag.
+
+### `memwal_recall` times out and returns no memories
+
+**Symptom:** Sign-in worked and other calls succeed, but a `memwal_recall` never comes back, or it returns an error saying the call timed out after several attempts.
+
+**Cause:** The MCP bridge forwards each call to the relayer and waits for the reply on a separate event stream. If the relayer accepts the call but the reply is lost, nothing on the stream signals it: the keepalive heartbeat keeps arriving, so the connection still looks healthy. The bridge therefore gives each call its own deadline, `MEMWAL_MCP_CALL_TIMEOUT_MS`, which defaults to 240 seconds and is sized for the slowest tool rather than for recall.
+
+**Fix:**
+
+1. Read the error rather than the timeout. Once the bridge stops waiting, it answers the call itself with an error naming the failure, so the agent gets something actionable instead of a bare timeout. `relayer_overload` means the relayer took the call and never returned a result, so retry the same call after a few seconds. `transient_network` means the connection dropped, so retry, or read through the SDK. `bridge_misconfigured` means retrying will not help, so check the relayer URL and run `memwal_login` again.
+2. Retry a recall freely. Recall is a read, so the bridge replays a timed-out one on a fresh session up to `MEMWAL_MCP_CALL_RETRIES` times (default 2) before reporting failure. Read the error's `attempts` field rather than assuming that maximum was reached: it counts the calls that actually went out, and a retry whose reconnect never completed is not one of them. Unlike a save, repeating a recall cannot duplicate anything.
+3. Confirm the relayer is reachable. Run `memwal_health`, which needs no authentication and separates a relayer problem from a credentials problem.
+4. Shorten the deadline when you would rather fail fast. The default is deliberately longer than most MCP hosts' own tool-call timeout, because it also has to cover `memwal_analyze`. Setting `MEMWAL_MCP_CALL_TIMEOUT_MS` to something like `45000` makes the bridge report a structured failure before the host gives up on its own, at the cost of cutting off genuinely slow saves.
+5. Collect logs if it persists. With `MEMWAL_MCP_DEBUG=1`, a retry logs `bridge.call_timeout_retry` and a final failure logs `bridge.call_timeout_exhausted` with the tool, attempt count, and elapsed time.
 
 ### Recall returns no results immediately after a save
 
@@ -132,6 +146,8 @@ Use these values for quick configuration and triage:
 | MCP environment presets | `--prod`, `--staging`, `--local` |
 | Local credentials file | `~/.memwal/credentials.json` |
 | Verbose MCP logs | `MEMWAL_MCP_DEBUG=1` |
+| MCP per-call deadline | `MEMWAL_MCP_CALL_TIMEOUT_MS`, default 240000 ms |
+| MCP retries for a timed-out read | `MEMWAL_MCP_CALL_RETRIES`, default 2 |
 | Unauthenticated health check | `memwal_health` |
 | Maximum delegate keys per account | 20 |
 | Request timestamp window | 5 minutes |

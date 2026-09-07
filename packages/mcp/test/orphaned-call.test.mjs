@@ -283,9 +283,13 @@ test("a call whose reply never arrives is closed out with a retryable error", as
         "the relayer was healthy — saying otherwise sends debugging the wrong way",
     );
 
-    // The stream stayed healthy throughout, so no reconnect should have happened.
-    // If this fails, the watchdog rescued the call and the deadline was never
-    // exercised.
+    // The stream stayed healthy AND the stalled call is a write, which the
+    // timeout path never replays. Both halves matter now: since WALM-393 a
+    // stalled READ does reconnect on purpose, so this is a property of this
+    // case rather than of a healthy stream in general. If it fails, either the
+    // watchdog rescued the call — leaving the deadline unexercised, which is
+    // what this test exists to check — or a write was retried, which would
+    // duplicate the memory.
     assert.equal(
         mock.getSseGetCount(),
         1,
