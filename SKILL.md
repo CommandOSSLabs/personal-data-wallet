@@ -377,7 +377,7 @@ Cross-namespace and cross-owner reads are not just filtered out of results — t
 
 * `limit` defaults to `10` in both TypeScript and Python SDKs and matches the server-side default. The Python SDK historically defaulted to `50`; it is now realigned with the server.
 * `limit` caps the **inspected** blob set, newest-first. It does not cap `restored` independently — if all 10 inspected blobs are already indexed, `restored = 0` and `skipped = 10`.
-* There is no enforced server-side maximum, but very large limits will dominate latency (see below).
+* The relayer clamps `limit` to 1–100 (values outside that range are clamped, not rejected).
 
 #### Pagination
 
