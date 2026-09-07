@@ -285,15 +285,25 @@ impl MemoryEngine for WalrusSealEngine {
         let id = uuid::Uuid::new_v4().to_string();
         let blob_size = bytes.len() as i64;
         // Guarded insert (WALM-392): no production path writes a blob_id the
-        // owner has retracted. Reaching the suppressed branch here needs the
-        // Walrus content hash of this ciphertext to equal one already
-        // retracted in this (owner, namespace) — SEAL randomises every
-        // encryption, so it should be unreachable. It is guarded anyway
-        // because the invariant is about `forgotten_blobs`, not about which
-        // caller we have decided to trust; that judgement has been wrong
-        // twice. Failing the request is the safe direction: returning a
-        // `MemoryRef` for a row that was deliberately not written would hand
-        // the caller an id that no read path can resolve.
+        // owner has retracted.
+        //
+        // DO NOT delete this branch as unreachable. A Walrus blob_id is
+        // content-addressed (`walrus::OnChainBlob::blob_id`), so byte-identical
+        // ciphertext always yields the SAME id. On `/api/remember` the bytes
+        // are produced by SEAL here and are randomised per write, so a
+        // collision with a retracted id is vanishingly unlikely — but
+        // `/api/remember/manual` (and the SDKs' `rememberManual`) hands us
+        // `encrypted_data` verbatim from the caller and we upload it
+        // unchanged. Re-POSTing a saved payload after
+        // `POST /api/forget/blob` — a client-side retry, an offline queue
+        // flush, a replayed request — therefore reproduces the retracted
+        // blob_id EXACTLY, with no race and no timing window. This branch is
+        // the only thing that stops that request from silently re-indexing
+        // the secret the owner just retracted.
+        //
+        // Failing the request is the safe direction: returning a `MemoryRef`
+        // for a row that was deliberately not written would hand the caller
+        // an id that no read path can resolve.
         let indexed = self
             .db
             .insert_vector_unless_forgotten(

@@ -325,6 +325,8 @@ Register a client-encrypted payload. The client sends Seal-encrypted data (base6
 }
 ```
 
+Returns `409 Conflict` when the resulting `blob_id` has been retracted with [`POST /api/forget/blob`](#post-apiforgetblob) in this namespace. Walrus blob IDs are content-addressed, so re-sending byte-identical `encrypted_data` reproduces the same `blob_id`; the relayer will not re-index a retracted memory, and the retraction stays authoritative. Re-encrypt the plaintext (which yields a new `blob_id`) if you genuinely intend to store it again.
+
 ### `POST /api/recall/manual`
 
 Search with a precomputed query vector. Returns index hits only; the client handles downloading and decrypting. The request accepts the same optional `scoring_weights` object as [`POST /api/recall`](#scoring-weights), and the server applies the same `limit` cap of `100`.
