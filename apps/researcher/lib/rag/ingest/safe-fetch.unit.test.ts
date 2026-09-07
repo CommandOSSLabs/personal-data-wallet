@@ -41,8 +41,14 @@ const BLOCKED = [
   "fe80::1%eth0",
   // IPv4-mapped and NAT64 forms both carry a blocked IPv4 destination.
   "::ffff:127.0.0.1",
+  "::ffff:7f00:1",
   "::ffff:169.254.169.254",
   "64:ff9b::7f00:1",
+  // Deprecated IPv4-compatible and SIIT embeddings of loopback.
+  "::7f00:1",
+  "::ffff:0:7f00:1",
+  // IPv6 multicast; v4 multicast 224.0.0.1 is already in the list above.
+  "ff02::1",
 ];
 
 const ALLOWED = [
@@ -54,6 +60,9 @@ const ALLOWED = [
   "128.0.0.1",
   "2606:4700:4700::1111",
   "::ffff:8.8.8.8",
+  // Unwrap, do not blanket-block: public IPv4 via compatible / SIIT stays public.
+  "::8.8.8.8",
+  "::ffff:0:8.8.8.8",
 ];
 
 // ChatbotError puts the caller-facing detail in `cause` and leaves `message` as

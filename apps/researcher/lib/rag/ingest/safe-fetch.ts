@@ -45,6 +45,8 @@ const BLOCKED_V6_RANGES: [string, number][] = [
   // NAT64 addresses carry an IPv4 destination in their low 32 bits, so they are a
   // way back into the ranges above.
   ["64:ff9b::", 96],
+  // IPv4 already blocks 224.0.0.0/4; the v6 multicast range is the counterpart.
+  ["ff00::", 8],
 ];
 
 function ipv4ToBytes(address: string): number[] | null {
@@ -138,12 +140,32 @@ function withinRange(
   return true;
 }
 
+function isBlockedIpv4Bytes(bytes: number[]): boolean {
+  return BLOCKED_V4_RANGES.some(([network, prefix]) =>
+    withinRange(bytes, ipv4ToBytes(network) as number[], prefix)
+  );
+}
+
 function isMappedIpv4(bytes: number[]): boolean {
   return (
     bytes.slice(0, 10).every((byte) => byte === 0) &&
     bytes[10] === 0xff &&
     bytes[11] === 0xff
   );
+}
+
+function isSiitIpv4(bytes: number[]): boolean {
+  return (
+    bytes.slice(0, 8).every((byte) => byte === 0) &&
+    bytes[8] === 0xff &&
+    bytes[9] === 0xff &&
+    bytes[10] === 0 &&
+    bytes[11] === 0
+  );
+}
+
+function isIpv4Compatible(bytes: number[]): boolean {
+  return bytes.slice(0, 12).every((byte) => byte === 0);
 }
 
 /**
@@ -157,11 +179,7 @@ export function isBlockedAddress(address: string): boolean {
   if (version === 4) {
     const bytes = ipv4ToBytes(address);
 
-    return bytes
-      ? BLOCKED_V4_RANGES.some(([network, prefix]) =>
-          withinRange(bytes, ipv4ToBytes(network) as number[], prefix)
-        )
-      : true;
+    return bytes ? isBlockedIpv4Bytes(bytes) : true;
   }
 
   if (version === 6) {
@@ -170,10 +188,11 @@ export function isBlockedAddress(address: string): boolean {
     if (!bytes) {
       return true;
     }
-    if (isMappedIpv4(bytes)) {
-      return BLOCKED_V4_RANGES.some(([network, prefix]) =>
-        withinRange(bytes.slice(12), ipv4ToBytes(network) as number[], prefix)
-      );
+    // Mapped, deprecated IPv4-compatible (::/96), and SIIT stash IPv4 in the
+    // last 32 bits. Check that payload against the v4 table so ::7f00:1 and
+    // ::ffff:0:7f00:1 cannot skip a denylist that already unwraps ::ffff:7f00:1.
+    if (isMappedIpv4(bytes) || isSiitIpv4(bytes) || isIpv4Compatible(bytes)) {
+      return isBlockedIpv4Bytes(bytes.slice(12));
     }
 
     return BLOCKED_V6_RANGES.some(([network, prefix]) =>
