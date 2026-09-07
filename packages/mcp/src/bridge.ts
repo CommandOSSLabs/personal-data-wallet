@@ -267,6 +267,70 @@ function resolveCallTimeoutMs(): number {
     return n;
 }
 
+/** How long to wait before retrying a handshake the relayer refused with a 429
+ * that carried NO `Retry-After`. That is the relayer's concurrent-session cap
+ * (`ip_active_cap`), which deliberately sends no header because it clears when
+ * some other session closes, not on a timer — so the ordinary sub-second
+ * geometric retry is pure noise against it.
+ *
+ * Override via `MEMWAL_MCP_THROTTLE_FLOOR_MS` (mostly for tests). */
+const DEFAULT_THROTTLE_FLOOR_MS = 5_000;
+
+/** A relayer-supplied interval is a remote-controlled sleep, so cap it: a
+ * misconfigured (or hostile) `Retry-After: 86400` must not park the bridge for
+ * a day. Past this we retry anyway and take another 429 if we were wrong. */
+const MAX_THROTTLE_WAIT_MS = 60_000;
+
+function resolveThrottleFloorMs(): number {
+    const raw = process.env.MEMWAL_MCP_THROTTLE_FLOOR_MS;
+    if (!raw) return DEFAULT_THROTTLE_FLOOR_MS;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) return DEFAULT_THROTTLE_FLOOR_MS;
+    return Math.min(n, MAX_THROTTLE_WAIT_MS);
+}
+
+/** Parse a `Retry-After` value into ms. The header is legally either
+ * delta-seconds or an HTTP-date (this relayer only ever emits the former, but
+ * a proxy in the path may rewrite it). Returns null for absent / unparseable
+ * values so the caller falls back to the floor — never NaN, which would poison
+ * the backoff arithmetic and break the retry loop outright. */
+function parseRetryAfterMs(raw: string | null): number | null {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    if (trimmed === "") return null;
+    if (/^\d+$/.test(trimmed)) {
+        const seconds = Number(trimmed);
+        return Number.isFinite(seconds) ? seconds * 1000 : null;
+    }
+    const at = Date.parse(trimmed);
+    if (!Number.isFinite(at)) return null;
+    return Math.max(0, at - Date.now());
+}
+
+/** The relayer refused the handshake with HTTP 429. Carried as a typed error so
+ * the retry loops can honour the throttle interval instead of re-deriving it
+ * from a message string — the whole point of WALM-386. `retryAfterMs` is
+ * already resolved (header, else floor) and clamped, so callers just sleep it. */
+class RelayerThrottledError extends Error {
+    readonly status = 429;
+    /** How long to wait before the next attempt, ms. Always a finite number. */
+    readonly retryAfterMs: number;
+    /** True when the relayer actually sent a usable `Retry-After`. False means
+     * we applied the floor — the `ip_active_cap` shape, which has no ETA. */
+    readonly serverAdvised: boolean;
+
+    constructor(message: string, retryAfterHeader: string | null) {
+        super(message);
+        this.name = "RelayerThrottledError";
+        const advised = parseRetryAfterMs(retryAfterHeader);
+        this.serverAdvised = advised !== null;
+        this.retryAfterMs = Math.min(
+            MAX_THROTTLE_WAIT_MS,
+            Math.max(0, advised ?? resolveThrottleFloorMs()),
+        );
+    }
+}
+
 interface RpcMessage {
     jsonrpc: "2.0";
     id?: number | string | null;
@@ -364,6 +428,14 @@ async function openSseStream(
         throw err;
     }
 
+    // Every non-OK exit below DRAINS the body and deliberately does NOT abort
+    // `controller`. Aborting a handshake response we have already read is what
+    // produced the Windows libuv assertion in WALM-386
+    // (`!(handle->flags & UV_HANDLE_CLOSING)`, src/win/async.c:76); 45b0ad87
+    // removed those aborts on purpose ("the stdio bridge drains handshake error
+    // bodies instead of aborting the socket", CHANGELOG 0.0.11). Draining to
+    // completion lets undici return the socket to its pool normally. Do not
+    // re-add `controller.abort()` here.
     if (resp.status === 401) {
         clearConnectTimer();
         if (resp.body) {
@@ -389,15 +461,20 @@ async function openSseStream(
     if (resp.status === 429) {
         clearConnectTimer();
         const retryAfter = resp.headers.get("retry-after");
-        const body = resp.body ? await resp.text() : "";
-        throw new Error(
+        const body = resp.body ? await resp.text().catch(() => "") : "";
+        // Throw a TYPED error: the interval has to survive as a number for the
+        // retry loops to honour it. Stringifying it into the message (what this
+        // used to do) left both loops guessing, so they retried a throttled
+        // handshake after 500ms — WALM-386.
+        throw new RelayerThrottledError(
             `Walrus Memory relayer SSE handshake rate-limited (HTTP 429` +
-                `${retryAfter ? `, retry after ${retryAfter}s` : ""}). ${body.slice(0, 200)}`.trim()
+                `${retryAfter ? `, retry after ${retryAfter}s` : ""}). ${body.slice(0, 200)}`.trim(),
+            retryAfter,
         );
     }
     if (!resp.ok || !resp.body) {
         clearConnectTimer();
-        const body = resp.body ? await resp.text() : "";
+        const body = resp.body ? await resp.text().catch(() => "") : "";
         throw new Error(
             `Walrus Memory relayer SSE handshake failed: HTTP ${resp.status} ${body.slice(0, 200)}`
         );
@@ -873,6 +950,14 @@ export async function runBridge(
     let reconnectAttempt = 0;
     let reconnectPromise: Promise<void> | null = null;
     let firstConnectDone = false;
+    /** Wall-clock instant before which the relayer told us (HTTP 429) not to
+     * open another session. Both retry loops floor their backoff at this, so a
+     * throttle survives across the separate `reconnect()` calls that would
+     * otherwise each start from a fresh 500ms. 0 = not throttled. */
+    let throttledUntilMs = 0;
+    /** One "we are being throttled" note per throttle episode. A sustained cap
+     * would otherwise print a line per retry cycle for as long as it lasts. */
+    let throttleNoticed = false;
     /** Bumped when the live SSE session is aborted or replaced so queued
      * POSTs captured against a stale URL are skipped (reconnect replays). */
     let sessionEpoch = 0;
@@ -1017,6 +1102,30 @@ export async function runBridge(
      * with a relayer it did not come from. */
     const pendingHealthIds = new Map<string | number, string>();
 
+    /** Record a 429 and tell the user ONCE that this is a rate limit rather
+     * than a broken config — the distinction the MCP host cannot make for
+     * itself, and the reason a throttled bridge reads as "memwal is down". */
+    function noteThrottled(err: RelayerThrottledError): void {
+        throttledUntilMs = Math.max(throttledUntilMs, Date.now() + err.retryAfterMs);
+        log.warn("bridge.relayer_throttled", {
+            retryAfterMs: err.retryAfterMs,
+            serverAdvised: err.serverAdvised,
+            err: err.message,
+        });
+        if (throttleNoticed) return;
+        throttleNoticed = true;
+        const seconds = Math.max(1, Math.round(err.retryAfterMs / 1000));
+        note(
+            `Relayer is rate-limiting new MCP sessions (HTTP 429). This is a ` +
+                `throttle, not a bad config or bad credentials — retrying in ` +
+                `${seconds}s. Memory tools start working once a session opens.` +
+                (err.serverAdvised
+                    ? ""
+                    : " The cap counts concurrent sessions, so closing another " +
+                      "MCP client using this account clears it sooner."),
+        );
+    }
+
     /** Reopen the SSE stream and replay outstanding `inFlight` requests against
      * the fresh session. All callers await the SAME reconnect via
      * `reconnectPromise` — returning immediately while one is active would let
@@ -1037,9 +1146,15 @@ export async function runBridge(
             } catch {
                 /* already dead */
             }
+            // `immediate` (a login credential swap) still bypasses everything,
+            // throttle included: that path trades a possible extra 429 for a
+            // re-login that doesn't stall behind a multi-second floor.
             const backoff = immediate
                 ? 0
-                : Math.min(15_000, 500 * Math.pow(2, reconnectAttempt));
+                : Math.max(
+                      Math.min(15_000, 500 * Math.pow(2, reconnectAttempt)),
+                      throttledUntilMs - Date.now(),
+                  );
             reconnectAttempt += 1;
             log.warn("bridge.reconnecting", {
                 reason,
@@ -1103,6 +1218,8 @@ export async function runBridge(
                     firstConnectDone = true;
                     activeCredentialGeneration = openingGeneration;
                     reconnectAttempt = 0;
+                    throttledUntilMs = 0;
+                    throttleNoticed = false;
                     log.info("bridge.reconnected", {
                         relayer: openingCreds.relayerUrl,
                         replayCount: inFlight.size,
@@ -1178,6 +1295,10 @@ export async function runBridge(
                     break;
                 }
             } catch (err) {
+                // A 429 must outlive this call: reconnect() gives up after one
+                // failure, so without recording the deadline the next caller
+                // would compute a fresh sub-second backoff and hammer the cap.
+                if (err instanceof RelayerThrottledError) noteThrottled(err);
                 log.error("bridge.reconnect_failed", {
                     err: err instanceof Error ? err.message : String(err),
                 });
@@ -1937,6 +2058,8 @@ export async function runBridge(
                 sessionEpoch += 1;
                 sse = candidate;
                 firstConnectDone = true;
+                throttledUntilMs = 0;
+                throttleNoticed = false;
                 note(`Connected. Bridging stdio MCP ↔ ${creds.relayerUrl}`);
                 log.info("bridge.connected", { relayer: creds.relayerUrl });
                 signalFirstConnect();
@@ -1945,9 +2068,16 @@ export async function runBridge(
             } catch (err) {
                 const reason = err instanceof Error ? err.message : String(err);
                 attempt += 1;
+                if (err instanceof RelayerThrottledError) noteThrottled(err);
                 log.error("bridge.initial_connect_failed", { err: reason, attempt });
                 if (stdinClosed) break;
-                const backoff = Math.min(15_000, 500 * Math.pow(2, attempt - 1));
+                // Floor the geometric backoff at whatever throttle window is
+                // still open. Without this the first retry after a 429 lands
+                // 500ms later, well inside the interval the relayer asked for.
+                const backoff = Math.max(
+                    Math.min(15_000, 500 * Math.pow(2, attempt - 1)),
+                    throttledUntilMs - Date.now(),
+                );
                 await new Promise<void>((resolve) => {
                     const timer = setTimeout(() => {
                         unregister();
