@@ -286,7 +286,11 @@ export async function fetchPublicUrl(
       return response;
     }
 
-    target = new URL(location, url).toString();
+    try {
+      target = new URL(location, url).toString();
+    } catch {
+      throw new ChatbotError("bad_request:api", "Invalid URL format");
+    }
   }
 
   throw new ChatbotError(

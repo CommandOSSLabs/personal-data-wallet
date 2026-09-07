@@ -238,3 +238,30 @@ test("fetchPublicUrl refuses a redirect into a blocked range", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("fetchPublicUrl maps a malformed redirect Location to ChatbotError", async () => {
+  // new URL(location, url) throws TypeError on a broken Location. Without a
+  // catch, chat's generic handler turns that into offline:chat (503) instead
+  // of the same 400 assertPublicUrl uses for a bad user-supplied URL.
+  const originalFetch = globalThis.fetch;
+  const requested: string[] = [];
+
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    requested.push(String(input));
+
+    return new Response(null, {
+      status: 302,
+      headers: { location: "http://[" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await assertRejectedWith(
+      () => fetchPublicUrl("https://8.8.8.8/file.pdf"),
+      /Invalid URL format/
+    );
+    assert.deepEqual(requested, ["https://8.8.8.8/file.pdf"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
