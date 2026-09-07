@@ -4393,6 +4393,96 @@ different transaction: TransactionDigest(8bjFgRyXRRYwrzQapgEjpHnGhdfNDY7d6xA82Bt
         );
     }
 
+    /// The likeliest real-world shape of this bug, and the one where the
+    /// user's receipt is strongest: the memory WAS indexed, the retraction
+    /// deleted a row and tombstoned it (`deleted: 1`), and a queued
+    /// `FinalizeUploadedBlob` / `SetMetadataAndTransfer` job then re-runs.
+    /// Those two arms call the index write directly, without consulting
+    /// `upload_resume_disposition`, so `status='done'` does not stop them.
+    ///
+    /// The vector id is the job id, so the re-run collides with the ORIGINAL
+    /// row's primary key — the `ON CONFLICT (id) DO UPDATE` branch, not a
+    /// fresh insert. The retraction must survive that, and so must its
+    /// tombstone: clearing the tombstone would tell Console's incremental
+    /// sync the memory is live again while no row exists.
+    #[tokio::test]
+    async fn requeued_finalize_job_never_reindexes_an_already_deleted_retraction() {
+        let Some(db) = crate::storage::db::tests::test_db().await else {
+            eprintln!("skipping DB integration test: DATABASE_URL is not configured");
+            return;
+        };
+        let pool = test_pool().await;
+        let suffix = uuid::Uuid::new_v4();
+        let job_id = format!("remember-job-{suffix}");
+        let owner = format!("0xrequeue-forget-{suffix}");
+        let namespace = format!("requeue-ns-{suffix}");
+        let blob_id = format!("requeue-blob-{suffix}");
+        let vector = vec![0.0f32; 1536];
+
+        sqlx::query(
+            "INSERT INTO remember_jobs (id, owner, namespace, status) VALUES ($1, $2, $3, 'running')",
+        )
+        .bind(&job_id)
+        .bind(&owner)
+        .bind(&namespace)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // The first pass indexes the memory and finalizes the job.
+        assert!(super::index_and_finalize_remember_job(
+            &db, &job_id, Some(&job_id), &owner, &namespace, &blob_id, &vector, 1, 0.5, None, None,
+            None,
+        )
+        .await
+        .unwrap());
+
+        // The user retracts. This time a row really is removed.
+        let (deleted, newly_forgotten) = db.forget_blob(&blob_id, &owner, &namespace).await.unwrap();
+        assert_eq!(deleted, 1);
+        assert!(newly_forgotten);
+
+        // A stale queued finalize job runs the index write again.
+        let reindexed = super::index_and_finalize_remember_job(
+            &db, &job_id, Some(&job_id), &owner, &namespace, &blob_id, &vector, 1, 0.5, None, None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let live: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM vector_entries WHERE owner = $1 AND namespace = $2 AND blob_id = $3",
+        )
+        .bind(&owner)
+        .bind(&namespace)
+        .bind(&blob_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        let tombstoned: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM memory_tombstones WHERE owner = $1 AND blob_id = $2",
+        )
+        .bind(&owner)
+        .bind(&blob_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        sqlx::query("DELETE FROM remember_jobs WHERE id = $1")
+            .bind(&job_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        crate::storage::db::tests::purge_owner(&db, &owner).await;
+
+        assert!(!reindexed, "the re-run must not resurrect the deleted row");
+        assert_eq!(live, 0, "a retracted secret must stay out of the index");
+        assert_eq!(
+            tombstoned, 1,
+            "the suppressed re-run must not clear the tombstone — Console's sync would read the memory as live again"
+        );
+    }
+
     /// The mirror of the test above: with no retraction the same resume path
     /// still indexes and still finalizes. Without this, deleting the write
     /// entirely would satisfy the containment test.
