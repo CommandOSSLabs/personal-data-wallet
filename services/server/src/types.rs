@@ -1,5 +1,6 @@
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
@@ -1822,6 +1823,40 @@ pub struct RestoreRequest {
     pub limit: usize,
 }
 
+/// Why the blobs counted by `RestoreResponse.skipped` were skipped
+/// (WALM-385).
+///
+/// `skipped` on its own cannot distinguish "already indexed, nothing to do"
+/// — entirely benign — from "in the permanent-failure negative cache, no
+/// future call can ever restore this" — a silent dead end. A namespace whose
+/// blobs were all encrypted under a superseded SEAL package reports
+/// `restored: 0, skipped: N, total: N`, identical to a fully-restored
+/// namespace, while `recall` returns nothing.
+///
+/// The three buckets partition `skipped` exactly:
+/// `already_indexed + permanently_failed + over_limit == skipped`.
+/// They describe the blobs this call declined to restore *before* any
+/// download; blobs that were attempted and failed mid-flight reduce
+/// `restored` instead, so `restored + skipped` can still be below `total`.
+#[derive(Debug, Default, Serialize)]
+pub struct SkipBreakdown {
+    /// Already present in the local vector index — the benign case.
+    pub already_indexed: usize,
+    /// Excluded by the `restore_failed_blobs` negative cache (GH #501 /
+    /// WALM-299). Permanent by construction: only deterministic decrypt
+    /// rejections and invalid UTF-8 are recorded there, and nothing in the
+    /// relayer clears the cache, so retrying or raising `limit` cannot
+    /// recover these.
+    pub permanently_failed: usize,
+    /// Missing locally and restorable, but beyond this call's `limit`.
+    /// Unlike the other two, these come back on a later call.
+    pub over_limit: usize,
+    /// `permanently_failed` split by the `reason` recorded at failure time —
+    /// `"decrypt_permanent"` (SEAL rejected it deterministically) or
+    /// `"invalid_utf8"`. Sums to `permanently_failed`.
+    pub by_reason: BTreeMap<String, usize>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct RestoreResponse {
     pub restored: usize,
@@ -1829,6 +1864,9 @@ pub struct RestoreResponse {
     pub total: usize,
     pub namespace: String,
     pub owner: String,
+    /// Breakdown of `skipped` by cause, so a permanent dead end stops
+    /// looking identical to a no-op (WALM-385). See [`SkipBreakdown`].
+    pub skipped_reasons: SkipBreakdown,
     /// True when this restore is known-incomplete: more on-chain blobs were
     /// missing locally than `limit` allowed this call to restore, or the
     /// sidecar's owner-wide candidate fetch hit its cap *and* raising

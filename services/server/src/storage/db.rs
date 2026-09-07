@@ -2974,18 +2974,24 @@ impl VectorDb {
         Ok(rows)
     }
 
-    /// Return blob_ids that have permanently failed to restore for `owner` +
-    /// `namespace` (GH #501 / WALM-299). Used by restore() to exclude blobs
-    /// that already failed decrypt/validation once and should never be
-    /// re-downloaded and re-decrypt-attempted on every subsequent restore() call.
-    pub async fn get_failed_blob_ids(
+    /// Return `(blob_id, reason)` for every blob that has permanently failed
+    /// to restore for `owner` + `namespace` (GH #501 / WALM-299). Used by
+    /// restore() to exclude blobs that already failed decrypt/validation once
+    /// and should never be re-downloaded and re-decrypt-attempted on every
+    /// subsequent restore() call.
+    ///
+    /// The `reason` column rides along because restore() reports *why* each
+    /// blob was skipped rather than a bare count (WALM-385): a blob excluded
+    /// by this negative cache is a permanent dead end, which is a materially
+    /// different outcome from one skipped because it is already indexed.
+    pub async fn get_failed_blob_reasons(
         &self,
         owner: &str,
         namespace: &str,
-    ) -> Result<Vec<String>, AppError> {
+    ) -> Result<Vec<(String, String)>, AppError> {
         let started = std::time::Instant::now();
-        let result: Result<Vec<(String,)>, AppError> = sqlx::query_as(
-            "SELECT blob_id FROM restore_failed_blobs
+        let result: Result<Vec<(String, String)>, AppError> = sqlx::query_as(
+            "SELECT blob_id, reason FROM restore_failed_blobs
              WHERE owner = $1 AND namespace = $2",
         )
         .bind(owner)
@@ -2994,13 +3000,12 @@ impl VectorDb {
         .await
         .map_err(|e| AppError::Internal(format!("Failed to get failed blobs: {}", e)));
         crate::observability::observe_db(
-            "vector.get_failed_blob_ids",
+            "vector.get_failed_blob_reasons",
             db_status(&result),
             started.elapsed(),
         );
-        let rows = result?;
 
-        Ok(rows.into_iter().map(|(blob_id,)| blob_id).collect())
+        result
     }
 
     /// Record that `blob_id` permanently failed to restore for `owner` +
