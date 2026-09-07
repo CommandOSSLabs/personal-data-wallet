@@ -1284,9 +1284,11 @@ pub(crate) mod tests {
             (format!("row-a-{suffix}"), &retracted_ns),
             (format!("row-b-{suffix}"), &other_ns),
         ] {
-            db.insert_vector_unless_forgotten(&id, &owner, ns, &blob_id, &vector, 1, 0.5, None, None, None)
-                .await
-                .unwrap();
+            db.insert_vector_unless_forgotten(
+                &id, &owner, ns, &blob_id, &vector, 1, 0.5, None, None, None,
+            )
+            .await
+            .unwrap();
         }
 
         let (deleted, _) = db

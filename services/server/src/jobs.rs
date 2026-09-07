@@ -4325,7 +4325,8 @@ different transaction: TransactionDigest(8bjFgRyXRRYwrzQapgEjpHnGhdfNDY7d6xA82Bt
 
         // The client retracts. Nothing is indexed, so zero rows are deleted —
         // but the receipt still says `forgotten: true`.
-        let (deleted, newly_forgotten) = db.forget_blob(&blob_id, &owner, &namespace).await.unwrap();
+        let (deleted, newly_forgotten) =
+            db.forget_blob(&blob_id, &owner, &namespace).await.unwrap();
         assert_eq!(deleted, 0);
         assert!(newly_forgotten);
 
@@ -4431,20 +4432,41 @@ different transaction: TransactionDigest(8bjFgRyXRRYwrzQapgEjpHnGhdfNDY7d6xA82Bt
 
         // The first pass indexes the memory and finalizes the job.
         assert!(super::index_and_finalize_remember_job(
-            &db, &job_id, Some(&job_id), &owner, &namespace, &blob_id, &vector, 1, 0.5, None, None,
+            &db,
+            &job_id,
+            Some(&job_id),
+            &owner,
+            &namespace,
+            &blob_id,
+            &vector,
+            1,
+            0.5,
+            None,
+            None,
             None,
         )
         .await
         .unwrap());
 
         // The user retracts. This time a row really is removed.
-        let (deleted, newly_forgotten) = db.forget_blob(&blob_id, &owner, &namespace).await.unwrap();
+        let (deleted, newly_forgotten) =
+            db.forget_blob(&blob_id, &owner, &namespace).await.unwrap();
         assert_eq!(deleted, 1);
         assert!(newly_forgotten);
 
         // A stale queued finalize job runs the index write again.
         let reindexed = super::index_and_finalize_remember_job(
-            &db, &job_id, Some(&job_id), &owner, &namespace, &blob_id, &vector, 1, 0.5, None, None,
+            &db,
+            &job_id,
+            Some(&job_id),
+            &owner,
+            &namespace,
+            &blob_id,
+            &vector,
+            1,
+            0.5,
+            None,
+            None,
             None,
         )
         .await
