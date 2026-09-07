@@ -51,9 +51,9 @@ export const authRouter = router({
   ),
 
   /**
-   * Logout - clear the caller's own session (works for both zkLogin and wallet).
-   * Like getSession, the id comes from the header, so knowing another user's
-   * session id is not enough to end their session.
+   * Logout - end only the session presented in x-session-id (zkLogin and wallet).
+   * A body/input id is ignored. The header value is still a bearer credential:
+   * presenting a session id there is enough to delete that session.
    */
   logout: procedure.mutation(async ({ ctx }) => {
     if (ctx.sessionId) {
