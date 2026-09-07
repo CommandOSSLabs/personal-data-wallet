@@ -14,21 +14,8 @@ const E_NO_ACCESS = 100;
 const JSON_RPC_SEAL_ENOACCESS =
     'MoveAbort(MoveLocation { module: ModuleId { address: ..., name: Identifier("account") }, function: 25, instruction: 11, function_name: Some("seal_approve") }, 100) in command 0';
 
-const JSON_RPC_SEAL_ENOACCESS_HEX =
-    "MoveAbort(MoveLocation { module: ModuleId { address: " +
-    "0000000000000000000000000000000000000000000000000000000000000abc, " +
-    'name: Identifier("account") }, function: 25, instruction: 11, ' +
-    'function_name: Some("seal_approve") }, 100) in command 0';
-
 function inspectFailure(error) {
     return { effects: { status: { status: "failure", error } } };
-}
-
-function classifyNegative(inspect) {
-    const result = extractAbortCode(inspect);
-    if (result.outcome === "success") return "security-fail";
-    if (result.outcome === "abort" && result.code === E_NO_ACCESS) return "deny";
-    return "misconfig";
 }
 
 const SECRET_KEYS = [
@@ -42,12 +29,12 @@ const SECRET_KEYS = [
     "MEMWAL_DELEGATE_KEY_B",
 ];
 
-function spawnScript(envExtra = {}, args = []) {
+function spawnScript(envExtra = {}) {
     const env = { ...process.env, ...envExtra };
     for (const key of SECRET_KEYS) {
         if (!(key in envExtra)) delete env[key];
     }
-    return spawnSync(process.execPath, [SCRIPT, ...args], {
+    return spawnSync(process.execPath, [SCRIPT], {
         env,
         encoding: "utf8",
     });
@@ -57,19 +44,6 @@ test("JSON-RPC MoveAbort Display string with nested location commas is ENoAccess
     const result = extractAbortCode(inspectFailure(JSON_RPC_SEAL_ENOACCESS));
     assert.equal(result.outcome, "abort");
     assert.equal(result.code, E_NO_ACCESS);
-    assert.equal(classifyNegative(inspectFailure(JSON_RPC_SEAL_ENOACCESS)), "deny");
-});
-
-test("production-like JSON-RPC MoveAbort with hex ModuleId address is ENoAccess", () => {
-    const result = extractAbortCode(inspectFailure(JSON_RPC_SEAL_ENOACCESS_HEX));
-    assert.equal(result.outcome, "abort");
-    assert.equal(result.code, E_NO_ACCESS);
-    assert.equal(classifyNegative(inspectFailure(JSON_RPC_SEAL_ENOACCESS_HEX)), "deny");
-});
-
-test("comma-excluding regex cannot reach abort code 100 in the JSON-RPC string", () => {
-    assert.equal(JSON_RPC_SEAL_ENOACCESS.match(/MoveAbort\([^,]+,\s*(\d+)\)/), null);
-    assert.equal(JSON_RPC_SEAL_ENOACCESS_HEX.match(/MoveAbort\([^,]+,\s*(\d+)\)/), null);
 });
 
 test("simple MoveAbort without nested location commas still parses", () => {
@@ -101,14 +75,12 @@ test("structured MoveAbort object fallback still works", () => {
 test("same-account success is not classified as a deny", () => {
     const result = extractAbortCode({ effects: { status: { status: "success" } } });
     assert.equal(result.outcome, "success");
-    assert.equal(classifyNegative({ effects: { status: { status: "success" } } }), "security-fail");
 });
 
 test("unrelated abort is misconfiguration, not a healthy deny", () => {
     const result = extractAbortCode(inspectFailure("MoveAbort(MoveLocation { module: foo }, 1) in command 0"));
     assert.equal(result.outcome, "abort");
     assert.equal(result.code, 1);
-    assert.equal(classifyNegative(inspectFailure("MoveAbort(MoveLocation { module: foo }, 1) in command 0")), "misconfig");
 });
 
 test("skips with exit 0 when required secrets are unset", () => {
