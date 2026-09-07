@@ -5,7 +5,7 @@
 //! `jobs.rs` (the `RememberJob` / `BulkRememberJob` workers):
 //!
 //! - **store_blob**: pick a Sui key (round-robin pool) → `walrus::upload_blob`
-//!   the prepared ciphertext → `db.insert_vector`.
+//!   the prepared ciphertext → `db.insert_vector_unless_forgotten`.
 //! - **fetch_one**: Redis blob-cache lookup → on miss,
 //!   `walrus::download_blob` with cache write-back → `seal::seal_decrypt` →
 //!   UTF-8. Reactive cleanup of the index row (scoped to `owner` and

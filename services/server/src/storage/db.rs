@@ -325,7 +325,7 @@ pub(crate) mod tests {
         let other_namespace = format!("other-{suffix}");
         let vector = vec![0.0; 1536];
 
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &format!("queried-row-{suffix}"),
             &owner,
             &queried_namespace,
@@ -339,7 +339,7 @@ pub(crate) mod tests {
         )
         .await
         .unwrap();
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &format!("other-row-{suffix}"),
             &owner,
             &other_namespace,
@@ -393,7 +393,7 @@ pub(crate) mod tests {
         };
         let id = format!("test-{}", uuid::Uuid::new_v4());
 
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &id,
             "0xtest-owner",
             "test-ns",
@@ -432,7 +432,7 @@ pub(crate) mod tests {
         };
         let id = format!("test-{}", uuid::Uuid::new_v4());
 
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &id,
             "0xtest-owner",
             "test-ns",
@@ -462,7 +462,7 @@ pub(crate) mod tests {
             .await;
     }
 
-    /// Reproduces an Apalis retry re-entering `insert_vector` with the same
+    /// Reproduces an Apalis retry re-entering the index write with the same
     /// primary key (`jobs.rs` sets `vector_id = remember_job_id`): the second
     /// call takes the `ON CONFLICT (id) DO UPDATE` branch. Console's
     /// `updated_after` incremental sync depends on `updated_at` actually
@@ -475,7 +475,7 @@ pub(crate) mod tests {
         };
         let id = format!("test-conflict-{}", uuid::Uuid::new_v4());
 
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &id,
             "0xtest-owner-conflict",
             "test-ns",
@@ -503,7 +503,7 @@ pub(crate) mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         // Simulate the Apalis retry: same id, same conflict branch.
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &id,
             "0xtest-owner-conflict",
             "test-ns",
@@ -548,7 +548,7 @@ pub(crate) mod tests {
         let owner = format!("0xtest-{}", uuid::Uuid::new_v4());
 
         // never synced (NULL expiry_synced_at) — should be selected
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &format!("{}-a", owner),
             &owner,
             "ns",
@@ -610,7 +610,7 @@ pub(crate) mod tests {
         };
         let id = format!("test-expiry-scheduled-updated-at-{}", uuid::Uuid::new_v4());
 
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &id,
             "0xtest-owner-expiry-scheduled-updated-at",
             "test-ns",
@@ -679,7 +679,7 @@ pub(crate) mod tests {
         };
         let id = format!("test-expiry-set-updated-at-{}", uuid::Uuid::new_v4());
 
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &id,
             "0xtest-owner-expiry-set-updated-at",
             "test-ns",
@@ -768,7 +768,7 @@ pub(crate) mod tests {
 
     /// The mainline write path, which the test above does not reach.
     ///
-    /// `insert_vector` writes `end_epoch` but never `expires_at`. So when the
+    /// The index write sets `end_epoch` but never `expires_at`. So when the
     /// sweep first resolves that row, `end_epoch` is already equal and only
     /// `expires_at` changes. Guarding the bump on `end_epoch` alone made that
     /// write invisible to incremental sync: a client that synced the row in
@@ -783,7 +783,7 @@ pub(crate) mod tests {
         let id = format!("test-expiry-inserted-end-epoch-{}", uuid::Uuid::new_v4());
 
         // end_epoch supplied at INSERT, exactly as the wallet-job path does.
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &id,
             "0xtest-owner-expiry-inserted-end-epoch",
             "test-ns",
@@ -954,7 +954,7 @@ pub(crate) mod tests {
         let id = format!("imp-row-{suffix}");
         let other_id = format!("imp-other-{suffix}");
 
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &id,
             &owner,
             "notes",
@@ -968,7 +968,7 @@ pub(crate) mod tests {
         )
         .await
         .unwrap();
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &other_id,
             &other_owner,
             "notes",
@@ -1030,7 +1030,7 @@ pub(crate) mod tests {
         let vector_id = job_id.clone();
         let key = format!("analyze:{suffix}");
 
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &vector_id,
             &owner,
             "notes",
@@ -1157,7 +1157,7 @@ pub(crate) mod tests {
         let blob_id = format!("forget-basic-blob-{suffix}");
         let vector = vec![0.0; 1536];
 
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &format!("row-{suffix}"),
             &owner,
             &namespace,
@@ -1284,7 +1284,7 @@ pub(crate) mod tests {
             (format!("row-a-{suffix}"), &retracted_ns),
             (format!("row-b-{suffix}"), &other_ns),
         ] {
-            db.insert_vector(&id, &owner, ns, &blob_id, &vector, 1, 0.5, None, None, None)
+            db.insert_vector_unless_forgotten(&id, &owner, ns, &blob_id, &vector, 1, 0.5, None, None, None)
                 .await
                 .unwrap();
         }
@@ -1351,7 +1351,7 @@ pub(crate) mod tests {
         let vector = vec![0.0; 1536];
 
         // T0 — indexed; the restore pass snapshots the forgotten set here.
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &format!("row-a-{suffix}"),
             &owner,
             &namespace,
@@ -2064,86 +2064,6 @@ impl VectorDb {
         &self.pool
     }
 
-    /// Insert a vector entry (with blob size tracking for storage quota).
-    ///
-    /// `importance` is the per-fact score set at extraction time
-    /// (0.0–1.0, mapped from the extractor LLM's vital/standard/trivial
-    /// bucket via `services::extractor::importance_for_bucket`). Stored
-    /// on the new `importance` column (migration 009) so the recall
-    /// `CompositeRanker` can weight it into the composite score when
-    /// `scoring_weights.importance` is non-zero.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn insert_vector(
-        &self,
-        id: &str,
-        owner: &str,
-        namespace: &str,
-        blob_id: &str,
-        vector: &[f32],
-        blob_size_bytes: i64,
-        importance: f32,
-        agent_id: Option<&str>,
-        package_id: Option<&str>,
-        end_epoch: Option<i32>,
-    ) -> Result<(), AppError> {
-        let embedding = Vector::from(vector.to_vec());
-
-        let started = std::time::Instant::now();
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| AppError::Internal(format!("Failed to begin insert tx: {}", e)))?;
-        let result = sqlx::query(
-            "INSERT INTO vector_entries (id, owner, namespace, blob_id, embedding, blob_size_bytes, importance, agent_id, package_id, end_epoch)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-             ON CONFLICT (id) DO UPDATE SET
-                owner = EXCLUDED.owner,
-                namespace = EXCLUDED.namespace,
-                blob_id = EXCLUDED.blob_id,
-                embedding = EXCLUDED.embedding,
-                blob_size_bytes = EXCLUDED.blob_size_bytes,
-                importance = EXCLUDED.importance,
-                agent_id = EXCLUDED.agent_id,
-                package_id = EXCLUDED.package_id,
-                end_epoch = EXCLUDED.end_epoch,
-                updated_at = NOW()",
-        )
-        .bind(id)
-        .bind(owner)
-        .bind(namespace)
-        .bind(blob_id)
-        .bind(embedding)
-        .bind(blob_size_bytes)
-        .bind(importance)
-        .bind(agent_id)
-        .bind(package_id)
-        .bind(end_epoch)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| AppError::Internal(format!("Failed to insert vector: {}", e)));
-        crate::observability::observe_db("vector.insert", db_status(&result), started.elapsed());
-        result?;
-        sqlx::query("DELETE FROM memory_tombstones WHERE memory_id = $1")
-            .bind(id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| AppError::Internal(format!("Failed to clear tombstone: {}", e)))?;
-        tx.commit()
-            .await
-            .map_err(|e| AppError::Internal(format!("Failed to commit insert tx: {}", e)))?;
-
-        tracing::debug!(
-            "inserted vector: id={}, blob_id={}, owner={}, ns={}, size={}B",
-            id,
-            blob_id,
-            owner,
-            namespace,
-            blob_size_bytes
-        );
-        Ok(())
-    }
-
     /// Insert a vector entry with its plaintext (benchmark mode only —
     /// `PlaintextEngine`, selected only when `BENCHMARK_MODE=true`).
     /// Production rows never use this; they go through
@@ -2682,8 +2602,7 @@ impl VectorDb {
     /// retracted it (WALM-392). Returns `true` when the row was written,
     /// `false` when the retraction suppressed it.
     ///
-    /// This exists because `restore()` cannot safely use `insert_vector`.
-    /// Restore builds its "missing" set once, at the top of a pass, then
+    /// The guard began as a restore-only concern. Restore builds its "missing" set once, at the top of a pass, then
     /// spends tens of seconds to minutes on Walrus download → SEAL decrypt →
     /// re-embed before it inserts anything. A `POST /api/forget/blob` that
     /// lands inside that window commits, deletes the index rows and hands
@@ -2713,7 +2632,7 @@ impl VectorDb {
     ///
     /// (2) IS NOT OPTIONAL, and the size of that residual window is why.
     /// Measured against Postgres 17, 120 rounds of `forget_blob` raced against
-    /// this insert on the same blob: the old unguarded `insert_vector`
+    /// this insert on the same blob: an unguarded plain INSERT
     /// resurrected 118/120; the `NOT EXISTS` guard WITHOUT the shared lock
     /// resurrected 119/120 — essentially no improvement, because under real
     /// concurrency the retraction is still uncommitted when this statement
@@ -3080,7 +2999,7 @@ impl VectorDb {
     ///
     /// `updated_at` advances when `end_epoch` changes, and also whenever
     /// `expires_at` is still NULL. The second half matters because
-    /// `insert_vector` writes `end_epoch` but not `expires_at`, so on the
+    /// the index write sets `end_epoch` but not `expires_at`, so on the
     /// mainline write path the sweep's first call finds `end_epoch` already
     /// equal and would otherwise populate `expires_at` invisibly, leaving a
     /// client that synced the row pre-sweep on `null` forever. This was
@@ -4155,7 +4074,7 @@ mod quota_admission_tests {
     /// Seed committed usage so exactly one `ITEM_BYTES` write still fits.
     async fn seed_to_one_slot_remaining(db: &VectorDb, owner: &str) {
         let seeded = MAX_BYTES - ITEM_BYTES;
-        db.insert_vector(
+        db.insert_vector_unless_forgotten(
             &format!("seed-{}", uuid::Uuid::new_v4()),
             owner,
             "default",
@@ -4228,7 +4147,7 @@ mod quota_admission_tests {
                     return false;
                 }
 
-                db.insert_vector(
+                db.insert_vector_unless_forgotten(
                     &id,
                     &owner,
                     "default",
@@ -4311,7 +4230,7 @@ mod quota_admission_tests {
                 // Stands in for embed → encrypt → Walrus upload.
                 tokio::time::sleep(Duration::from_millis(150)).await;
 
-                db.insert_vector(
+                db.insert_vector_unless_forgotten(
                     &id,
                     &owner,
                     "default",

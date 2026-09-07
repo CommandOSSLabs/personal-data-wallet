@@ -139,7 +139,7 @@ pub enum WalletOperation {
         #[serde(default = "default_importance")]
         importance: f32,
         /// Carried from the originating SetMetadataAndTransfer job so the
-        /// eventual insert_vector call can persist them.
+        /// eventual index write can persist them.
         /// `#[serde(default)]` so in-flight jobs enqueued before this field
         /// existed deserialize as None rather than failing.
         #[serde(default)]
@@ -147,7 +147,7 @@ pub enum WalletOperation {
         #[serde(default)]
         package_id: Option<String>,
         /// Carried from the originating SetMetadataAndTransfer job so the
-        /// eventual insert_vector call can persist it, the same
+        /// eventual index write can persist it, the same
         /// way agent_id/package_id already are. `#[serde(default)]` so
         /// in-flight jobs enqueued before this field existed deserialize as
         /// `None` rather than failing.
@@ -955,7 +955,7 @@ async fn insert_vector_and_mark_remember_done(
     {
         Ok(indexed) => indexed,
         Err(e) => {
-            let msg = format!("insert_vector failed: {}", e);
+            let msg = format!("index write failed: {}", e);
             let classified = WalletJobError::classify_sidecar_error(&msg);
             update_remember_job_after_wallet_error(
                 state.db.pool(),
