@@ -1,0 +1,5 @@
+---
+"@mysten-incubation/memwal": minor
+---
+
+Add `forget(blobId, namespace?)` for retracting a single memory (WALM-392). The write surface is append-only, so a fact stored by mistake — a leaked API key, a credential, personal data — was returned by every subsequent `recall()` with no way to take it back. `forget()` removes the memory from the relayer's index permanently: it stops appearing in recall, and unlike a plain delete it is not undone by `restore()`. The Walrus blob is not deleted (Walrus is immutable storage), so rotate any live credential that was stored. `MemWalMock.forget()` now matches the real signature. That is a breaking change for mock users: it was `forget(blobId): boolean` and is now `async forget(blobId, namespace?): Promise<ForgetResult>`. TypeScript callers get a compile error, but plain JavaScript callers do not — `if (mock.forget(id))` now always takes the true branch, because a Promise is truthy, where it previously returned `false` for a blob the mock did not hold. Await the call and read `deleted`/`forgotten`.

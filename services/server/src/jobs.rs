@@ -139,7 +139,7 @@ pub enum WalletOperation {
         #[serde(default = "default_importance")]
         importance: f32,
         /// Carried from the originating SetMetadataAndTransfer job so the
-        /// eventual insert_vector call can persist them.
+        /// eventual index write can persist them.
         /// `#[serde(default)]` so in-flight jobs enqueued before this field
         /// existed deserialize as None rather than failing.
         #[serde(default)]
@@ -147,7 +147,7 @@ pub enum WalletOperation {
         #[serde(default)]
         package_id: Option<String>,
         /// Carried from the originating SetMetadataAndTransfer job so the
-        /// eventual insert_vector call can persist it, the same
+        /// eventual index write can persist it, the same
         /// way agent_id/package_id already are. `#[serde(default)]` so
         /// in-flight jobs enqueued before this field existed deserialize as
         /// `None` rather than failing.
@@ -837,6 +837,87 @@ async fn execute_set_metadata_and_transfer(
     }
 }
 
+/// The durable half of `insert_vector_and_mark_remember_done`: the guarded
+/// index write, then the job's terminal-state transition. Split out of the
+/// `AppState`-shaped wrapper so it can be driven against real Postgres from a
+/// test — the WALM-392 resurrection this closes lives entirely in these two
+/// statements, and the wrapper around them only classifies errors, logs and
+/// returns the storage reservation.
+///
+/// `Ok(true)` = the row was written. `Ok(false)` = the owner had retracted
+/// this blob and the write was suppressed. BOTH are successes and both drive
+/// the job to `done`; see the wrapper's doc-comment for why a suppressed
+/// write must not be reported as a failure.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn index_and_finalize_remember_job(
+    db: &crate::storage::db::VectorDb,
+    vector_id: &str,
+    remember_job_id: Option<&str>,
+    owner: &str,
+    namespace: &str,
+    blob_id: &str,
+    vector: &[f32],
+    blob_size_bytes: i64,
+    importance: f32,
+    agent_id: Option<&str>,
+    package_id: Option<&str>,
+    end_epoch: Option<i32>,
+) -> Result<bool, crate::types::AppError> {
+    let indexed = db
+        .insert_vector_unless_forgotten(
+            vector_id,
+            owner,
+            namespace,
+            blob_id,
+            vector,
+            blob_size_bytes,
+            importance,
+            agent_id,
+            package_id,
+            end_epoch,
+        )
+        .await?;
+
+    if let Some(jid) = remember_job_id {
+        let _ = sqlx::query(
+            "UPDATE remember_jobs SET status = 'done', blob_id = $1, prepare_claimed_at = NULL, prepare_claim_token = NULL, recovery_claimed_at = NULL, recovery_claim_token = NULL, error_msg = NULL, updated_at = NOW() WHERE id = $2",
+        )
+        .bind(blob_id)
+        .bind(jid)
+        .execute(db.pool())
+        .await;
+    }
+
+    Ok(indexed)
+}
+
+/// Index a successfully uploaded blob and drive its `remember_jobs` row to
+/// its terminal `done` state.
+///
+/// The insert is the GUARDED one (WALM-392). Every one of this function's
+/// four callers reaches it from a row that already carries a durable
+/// `blob_id` — `persist_uploaded_state` writes `status='uploaded'` with the
+/// blob_id BEFORE anything is indexed, and `GET /api/remember/{job_id}`
+/// hands that blob_id to the client for any status. So the client can
+/// retract the blob in the gap, and the resume (`UploadResume::ResumeIndex`,
+/// an Apalis retry of `UploadAndTransfer`, the `FinalizeUploadedBlob`
+/// index-only retry, or the paid-recovery re-drive) must not undo that. The
+/// gap is not microseconds: `uploaded -> done` spans an on-chain transfer
+/// with retry/backoff, and a wedged job can sit at `uploaded` indefinitely.
+///
+/// A suppressed insert is a SUCCESS, not an error. The job still goes to
+/// `done` and still releases its storage reservation:
+/// * `done` is terminal, so Apalis stops retrying. Returning an error here
+///   would retry a write that is guaranteed to be suppressed forever —
+///   `forgotten_blobs` is append-only — until the attempt budget ran out and
+///   the job died `failed`, which is a worse and more confusing outcome.
+/// * `done` also makes the next `upload_resume_disposition` return
+///   `AlreadyDone`, so no later attempt even reaches the insert. That is
+///   defence in depth, NOT the containment mechanism: containment is the
+///   guard inside the INSERT statement, which holds however the job is
+///   re-driven and whatever its status says.
+/// * releasing the reservation is right precisely because no row was
+///   written — the bytes are accounted nowhere, which matches reality.
 #[allow(clippy::too_many_arguments)]
 async fn insert_vector_and_mark_remember_done(
     state: &AppState,
@@ -856,49 +937,65 @@ async fn insert_vector_and_mark_remember_done(
         .map(str::to_owned)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    if let Err(e) = state
-        .db
-        .insert_vector(
-            &vector_id,
-            owner,
-            namespace,
-            blob_id,
-            vector,
-            blob_size_bytes,
-            importance,
-            agent_id,
-            package_id,
-            end_epoch,
-        )
-        .await
+    let indexed = match index_and_finalize_remember_job(
+        &state.db,
+        &vector_id,
+        remember_job_id,
+        owner,
+        namespace,
+        blob_id,
+        vector,
+        blob_size_bytes,
+        importance,
+        agent_id,
+        package_id,
+        end_epoch,
+    )
+    .await
     {
-        let msg = format!("insert_vector failed: {}", e);
-        let classified = WalletJobError::classify_sidecar_error(&msg);
-        update_remember_job_after_wallet_error(state.db.pool(), remember_job_id, &classified, &msg)
+        Ok(indexed) => indexed,
+        Err(e) => {
+            let msg = format!("index write failed: {}", e);
+            let classified = WalletJobError::classify_sidecar_error(&msg);
+            update_remember_job_after_wallet_error(
+                state.db.pool(),
+                remember_job_id,
+                &classified,
+                &msg,
+            )
             .await;
-        tracing::error!(
-            "[wallet-job:upload] job_id={} {} classification={} retryable={}",
+            tracing::error!(
+                "[wallet-job:upload] job_id={} {} classification={} retryable={}",
+                remember_job_id.unwrap_or("-"),
+                msg,
+                classified.kind(),
+                !classified.aborts_retries()
+            );
+            return Err(classified);
+        }
+    };
+
+    if !indexed {
+        // The owner retracted this blob while the job was in flight. Fall
+        // through to the terminal-state update below: the write is finished,
+        // it just deliberately produced no index row.
+        tracing::warn!(
+            "[wallet-job:upload] job_id={} blob_id={} owner={} ns={} retracted mid-flight — indexing suppressed, job finalized without a vector row (WALM-392)",
             remember_job_id.unwrap_or("-"),
-            msg,
-            classified.kind(),
-            !classified.aborts_retries()
+            blob_id,
+            &owner[..10.min(owner.len())],
+            namespace,
         );
-        return Err(classified);
     }
 
     if let Some(jid) = remember_job_id {
-        let _ = sqlx::query(
-            "UPDATE remember_jobs SET status = 'done', blob_id = $1, prepare_claimed_at = NULL, prepare_claim_token = NULL, recovery_claimed_at = NULL, recovery_claim_token = NULL, error_msg = NULL, updated_at = NOW() WHERE id = $2",
-        )
-        .bind(blob_id)
-        .bind(jid)
-        .execute(state.db.pool())
-        .await;
-
-        // Release only now that the vector row is committed. The row carries
-        // the bytes from here on, so holding the reservation would double count
-        // them; releasing before the insert would instead open a window where
-        // neither counts and a concurrent burst could slip past the quota.
+        // Release only now that the index write has settled. When a row was
+        // written it carries the bytes from here on, so holding the
+        // reservation would double count them; releasing before the write
+        // would instead open a window where neither counts and a concurrent
+        // burst could slip past the quota. When the write was suppressed no
+        // row exists at all, so the reservation must go back for the same
+        // reason `forget_blob` frees the quota of the rows it deletes.
         crate::rate_limit::release_storage_quota_one(state, jid).await;
     }
 
@@ -2882,7 +2979,10 @@ SequenceNumber(884613305), o#B61aVqEgDskxru255FTdzua2RxbbnhDMFxmQ8SCxvj3n) alrea
 different transaction: TransactionDigest(8bjFgRyXRRYwrzQapgEjpHnGhdfNDY7d6xA82BtHrp3F) \
 { k#80127c70.., k#81626d03.. } with 6842 stake].";
 
-    static DB_SETUP_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    /// Same one-time-DDL rule as `storage::db::tests::test_db` — see the
+    /// comment there. Re-running these batches while another test writes to
+    /// `remember_jobs` is a lock cycle, not just wasted work.
+    static DB_SETUP_LOCK: OnceLock<tokio::sync::Mutex<bool>> = OnceLock::new();
 
     fn test_database_url() -> String {
         std::env::var("DATABASE_URL")
@@ -2897,10 +2997,13 @@ different transaction: TransactionDigest(8bjFgRyXRRYwrzQapgEjpHnGhdfNDY7d6xA82Bt
             .await
             .unwrap();
 
-        let _guard = DB_SETUP_LOCK
-            .get_or_init(|| tokio::sync::Mutex::new(()))
+        let mut applied = DB_SETUP_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(false))
             .lock()
             .await;
+        if *applied {
+            return pool;
+        }
         sqlx::raw_sql(include_str!("../migrations/005_remember_jobs.sql"))
             .execute(&pool)
             .await
@@ -2917,6 +3020,7 @@ different transaction: TransactionDigest(8bjFgRyXRRYwrzQapgEjpHnGhdfNDY7d6xA82Bt
         .execute(&pool)
         .await
         .unwrap();
+        *applied = true;
 
         pool
     }
@@ -4158,5 +4262,379 @@ different transaction: TransactionDigest(8bjFgRyXRRYwrzQapgEjpHnGhdfNDY7d6xA82Bt
             }
             other => panic!("expected transient handoff error, got {other}"),
         }
+    }
+
+    /// WALM-392 round 3: a resumed `remember` job must not re-index a blob
+    /// the owner retracted while the job sat at `status='uploaded'` with no
+    /// vector row yet.
+    ///
+    /// This is the reproduction that was red before the fix. It drives the
+    /// exact durable state the resume path reads, then the exact code the
+    /// resume arm at `UploadResume::ResumeIndex` runs.
+    #[tokio::test]
+    async fn resumed_remember_job_never_reindexes_a_retracted_blob() {
+        let Some(db) = crate::storage::db::tests::test_db().await else {
+            eprintln!("skipping DB integration test: DATABASE_URL is not configured");
+            return;
+        };
+        let pool = test_pool().await;
+        let suffix = uuid::Uuid::new_v4();
+        let job_id = format!("remember-job-{suffix}");
+        let owner = format!("0xresume-forget-{suffix}");
+        let namespace = format!("resume-ns-{suffix}");
+        let blob_id = format!("resume-blob-{suffix}");
+        let vector = vec![0.0f32; 1536];
+
+        sqlx::query(
+            "INSERT INTO remember_jobs (id, owner, namespace, status) VALUES ($1, $2, $3, 'running')",
+        )
+        .bind(&job_id)
+        .bind(&owner)
+        .bind(&namespace)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // The paid blob is minted and durably recorded. No vector row exists yet.
+        persist_uploaded_state(&pool, &job_id, &blob_id, None)
+            .await
+            .unwrap();
+
+        // `GET /api/remember/{job_id}` returns `blob_id` for ANY status, so
+        // the client can read it right here, before anything is indexed.
+        let (status, polled_blob_id): (String, Option<String>) =
+            sqlx::query_as("SELECT status, blob_id FROM remember_jobs WHERE id = $1")
+                .bind(&job_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(status, "uploaded");
+        assert_eq!(
+            polled_blob_id.as_deref(),
+            Some(blob_id.as_str()),
+            "the client can poll the blob_id out before any row exists — this is the window"
+        );
+
+        // ...and this is exactly the row shape that resumes via ResumeIndex.
+        assert_eq!(
+            upload_resume_disposition(&pool, &job_id).await,
+            UploadResume::ResumeIndex {
+                blob_id: blob_id.clone()
+            }
+        );
+
+        // The client retracts. Nothing is indexed, so zero rows are deleted —
+        // but the receipt still says `forgotten: true`.
+        let (deleted, newly_forgotten) =
+            db.forget_blob(&blob_id, &owner, &namespace).await.unwrap();
+        assert_eq!(deleted, 0);
+        assert!(newly_forgotten);
+
+        // The job resumes and indexes.
+        let indexed = super::index_and_finalize_remember_job(
+            &db,
+            &job_id,
+            Some(&job_id),
+            &owner,
+            &namespace,
+            &blob_id,
+            &vector,
+            1,
+            0.5,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let live: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM vector_entries WHERE owner = $1 AND namespace = $2 AND blob_id = $3",
+        )
+        .bind(&owner)
+        .bind(&namespace)
+        .bind(&blob_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        // The job must still be terminal, or Apalis retries a write that is
+        // guaranteed to stay suppressed until the attempt budget runs out.
+        let final_status: String =
+            sqlx::query_scalar("SELECT status FROM remember_jobs WHERE id = $1")
+                .bind(&job_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        // ...and a further resume must not even reach the insert.
+        let next = upload_resume_disposition(&pool, &job_id).await;
+
+        sqlx::query("DELETE FROM remember_jobs WHERE id = $1")
+            .bind(&job_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        crate::storage::db::tests::purge_owner(&db, &owner).await;
+
+        assert!(!indexed, "the retracted blob must not be indexed");
+        assert_eq!(
+            live, 0,
+            "a resumed remember job must not resurrect a retracted blob"
+        );
+        assert_eq!(
+            final_status, "done",
+            "a suppressed index write must still finalize the job"
+        );
+        assert_eq!(
+            next,
+            UploadResume::AlreadyDone {
+                blob_id: blob_id.clone()
+            },
+            "a finalized job must not resume into the index path again"
+        );
+    }
+
+    /// The likeliest real-world shape of this bug, and the one where the
+    /// user's receipt is strongest: the memory WAS indexed, the retraction
+    /// deleted a row and tombstoned it (`deleted: 1`), and a queued
+    /// `FinalizeUploadedBlob` / `SetMetadataAndTransfer` job then re-runs.
+    /// Those two arms call the index write directly, without consulting
+    /// `upload_resume_disposition`, so `status='done'` does not stop them.
+    ///
+    /// The vector id is the job id, so the re-run collides with the ORIGINAL
+    /// row's primary key — the `ON CONFLICT (id) DO UPDATE` branch, not a
+    /// fresh insert. The retraction must survive that, and so must its
+    /// tombstone: clearing the tombstone would tell Console's incremental
+    /// sync the memory is live again while no row exists.
+    #[tokio::test]
+    async fn requeued_finalize_job_never_reindexes_an_already_deleted_retraction() {
+        let Some(db) = crate::storage::db::tests::test_db().await else {
+            eprintln!("skipping DB integration test: DATABASE_URL is not configured");
+            return;
+        };
+        let pool = test_pool().await;
+        let suffix = uuid::Uuid::new_v4();
+        let job_id = format!("remember-job-{suffix}");
+        let owner = format!("0xrequeue-forget-{suffix}");
+        let namespace = format!("requeue-ns-{suffix}");
+        let blob_id = format!("requeue-blob-{suffix}");
+        let vector = vec![0.0f32; 1536];
+
+        sqlx::query(
+            "INSERT INTO remember_jobs (id, owner, namespace, status) VALUES ($1, $2, $3, 'running')",
+        )
+        .bind(&job_id)
+        .bind(&owner)
+        .bind(&namespace)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // The first pass indexes the memory and finalizes the job.
+        assert!(super::index_and_finalize_remember_job(
+            &db,
+            &job_id,
+            Some(&job_id),
+            &owner,
+            &namespace,
+            &blob_id,
+            &vector,
+            1,
+            0.5,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap());
+
+        // The user retracts. This time a row really is removed.
+        let (deleted, newly_forgotten) =
+            db.forget_blob(&blob_id, &owner, &namespace).await.unwrap();
+        assert_eq!(deleted, 1);
+        assert!(newly_forgotten);
+
+        // A stale queued finalize job runs the index write again.
+        let reindexed = super::index_and_finalize_remember_job(
+            &db,
+            &job_id,
+            Some(&job_id),
+            &owner,
+            &namespace,
+            &blob_id,
+            &vector,
+            1,
+            0.5,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let live: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM vector_entries WHERE owner = $1 AND namespace = $2 AND blob_id = $3",
+        )
+        .bind(&owner)
+        .bind(&namespace)
+        .bind(&blob_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        let tombstoned: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM memory_tombstones WHERE owner = $1 AND blob_id = $2",
+        )
+        .bind(&owner)
+        .bind(&blob_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        sqlx::query("DELETE FROM remember_jobs WHERE id = $1")
+            .bind(&job_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        crate::storage::db::tests::purge_owner(&db, &owner).await;
+
+        assert!(!reindexed, "the re-run must not resurrect the deleted row");
+        assert_eq!(live, 0, "a retracted secret must stay out of the index");
+        assert_eq!(
+            tombstoned, 1,
+            "the suppressed re-run must not clear the tombstone — Console's sync would read the memory as live again"
+        );
+    }
+
+    /// The mirror of the test above: with no retraction the same resume path
+    /// still indexes and still finalizes. Without this, deleting the write
+    /// entirely would satisfy the containment test.
+    #[tokio::test]
+    async fn resumed_remember_job_still_indexes_when_nothing_was_retracted() {
+        let Some(db) = crate::storage::db::tests::test_db().await else {
+            eprintln!("skipping DB integration test: DATABASE_URL is not configured");
+            return;
+        };
+        let pool = test_pool().await;
+        let suffix = uuid::Uuid::new_v4();
+        let job_id = format!("remember-job-{suffix}");
+        let owner = format!("0xresume-live-{suffix}");
+        let namespace = format!("resume-live-ns-{suffix}");
+        let blob_id = format!("resume-live-blob-{suffix}");
+        let vector = vec![0.0f32; 1536];
+
+        sqlx::query(
+            "INSERT INTO remember_jobs (id, owner, namespace, status) VALUES ($1, $2, $3, 'running')",
+        )
+        .bind(&job_id)
+        .bind(&owner)
+        .bind(&namespace)
+        .execute(&pool)
+        .await
+        .unwrap();
+        persist_uploaded_state(&pool, &job_id, &blob_id, None)
+            .await
+            .unwrap();
+
+        let indexed = super::index_and_finalize_remember_job(
+            &db,
+            &job_id,
+            Some(&job_id),
+            &owner,
+            &namespace,
+            &blob_id,
+            &vector,
+            1,
+            0.5,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let live: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM vector_entries WHERE owner = $1 AND namespace = $2 AND blob_id = $3",
+        )
+        .bind(&owner)
+        .bind(&namespace)
+        .bind(&blob_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        let final_status: String =
+            sqlx::query_scalar("SELECT status FROM remember_jobs WHERE id = $1")
+                .bind(&job_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        sqlx::query("DELETE FROM remember_jobs WHERE id = $1")
+            .bind(&job_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        crate::storage::db::tests::purge_owner(&db, &owner).await;
+
+        assert!(indexed, "an unretracted blob must still be indexed");
+        assert_eq!(live, 1, "the ordinary write path must still land its row");
+        assert_eq!(final_status, "done");
+    }
+
+    /// A retraction recorded in another namespace must not suppress this
+    /// namespace's write — the guard has to be scoped, not global.
+    #[tokio::test]
+    async fn remember_job_indexing_is_not_blocked_by_another_namespaces_retraction() {
+        let Some(db) = crate::storage::db::tests::test_db().await else {
+            eprintln!("skipping DB integration test: DATABASE_URL is not configured");
+            return;
+        };
+        let pool = test_pool().await;
+        let suffix = uuid::Uuid::new_v4();
+        let job_id = format!("remember-job-{suffix}");
+        let owner = format!("0xresume-scope-{suffix}");
+        let namespace = format!("live-ns-{suffix}");
+        let other_ns = format!("retracted-ns-{suffix}");
+        let blob_id = format!("resume-scope-blob-{suffix}");
+        let vector = vec![0.0f32; 1536];
+
+        sqlx::query(
+            "INSERT INTO remember_jobs (id, owner, namespace, status) VALUES ($1, $2, $3, 'running')",
+        )
+        .bind(&job_id)
+        .bind(&owner)
+        .bind(&namespace)
+        .execute(&pool)
+        .await
+        .unwrap();
+        db.forget_blob(&blob_id, &owner, &other_ns).await.unwrap();
+
+        let indexed = super::index_and_finalize_remember_job(
+            &db,
+            &job_id,
+            Some(&job_id),
+            &owner,
+            &namespace,
+            &blob_id,
+            &vector,
+            1,
+            0.5,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        sqlx::query("DELETE FROM remember_jobs WHERE id = $1")
+            .bind(&job_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        crate::storage::db::tests::purge_owner(&db, &owner).await;
+
+        assert!(
+            indexed,
+            "a retraction in another namespace must not suppress this one's write"
+        );
     }
 }

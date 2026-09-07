@@ -39,7 +39,7 @@
 -- timestamp instead of NULL. That closes the rolling-deploy race where
 -- an old-code replica's INSERT lands between the backfill and
 -- migration 015's `SET NOT NULL`, which would otherwise crash-loop
--- every replica still applying migrations. `VectorDb::insert_vector`
+-- every replica still applying migrations. The `VectorDb` index write
 -- never sets `updated_at` explicitly — it relies entirely on this
 -- column-level default.
 --

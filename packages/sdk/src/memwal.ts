@@ -47,6 +47,7 @@ import type {
     RestoreResult,
     NamespacesResult,
     ListNamespacesOptions,
+    ForgetResult,
     RememberBulkItem,
     RememberBulkOptions,
     RememberBulkResult,
@@ -1000,6 +1001,54 @@ export class MemWal {
         });
 
         return this.ownerPromise;
+    }
+
+    /**
+     * Retract one memory so it stops being returned by recall.
+     *
+     * The remediation path for a write that should never have happened — an
+     * API key, a password, personal data captured by mistake. The write
+     * surface is append-only, so without this a bad write is returned by
+     * every future `recall()` indefinitely.
+     *
+     * **This does not delete the blob from Walrus, and cannot.** Walrus is
+     * immutable storage; the encrypted blob remains on chain as history. What
+     * this removes is the *index* entry, which is what every read path
+     * queries — `recall`, `/api/ask`, and analyze's pre-extraction context all
+     * stop seeing it. If the retracted secret is a live credential, rotate it:
+     * the ciphertext still exists, and anyone who can decrypt it still can.
+     *
+     * **Durable against `restore()`.** A plain delete would not be: `restore`
+     * re-imports any on-chain blob with no local index row, so deleting the
+     * row is precisely what makes restore bring it back. The blob_id is
+     * recorded permanently server-side, so the retraction survives.
+     *
+     * **Idempotent.** Calling it twice is safe. `deleted === 0` is a success,
+     * not a miss — the memory may already have been un-indexed (expiry, an
+     * earlier cleanup) while its blob is still on chain and still restorable;
+     * the retraction is recorded either way. `forgotten === false` means the
+     * blob was already retracted by an earlier call.
+     *
+     * @param blobId - Walrus blob_id of the memory to retract, as returned by
+     *   `remember()` or carried on each `recall()` hit as `blob_id`
+     * @param namespace - Namespace the memory is stored under (defaults to the
+     *   client's namespace). Retraction is namespace-scoped: the same blob can
+     *   legitimately be indexed under two namespaces, and retracting it from
+     *   one does not reach into the other.
+     * @returns ForgetResult with the rows removed and whether this call
+     *   created the retraction
+     *
+     * @example
+     * ```typescript
+     * const hits = await memwal.recall({ query: "api key" });
+     * await memwal.forget(hits.results[0].blob_id);
+     * ```
+     */
+    async forget(blobId: string, namespace?: string): Promise<ForgetResult> {
+        return this.signedRequest<ForgetResult>("POST", "/api/forget/blob", {
+            blob_id: blobId,
+            namespace: namespace ?? this.namespace,
+        });
     }
 
     /**

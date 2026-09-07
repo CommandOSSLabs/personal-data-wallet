@@ -16,6 +16,12 @@ pub const MAX_BULK_ITEMS: usize = 20;
 /// Namespace values participate in a composite PostgreSQL B-tree index.
 /// Keep them small enough that caller input can never exceed an index tuple.
 pub const MAX_NAMESPACE_BYTES: usize = 255;
+/// Same reasoning as `MAX_NAMESPACE_BYTES`, for the one route that accepts a
+/// caller-supplied `blob_id`: `forgotten_blobs`' primary key is
+/// (owner, namespace, blob_id), so an unbounded blob_id overflows the B-tree
+/// tuple and the INSERT fails inside Postgres as an opaque 500. A real Walrus
+/// blob id is 43 base64url characters; 255 leaves ample headroom.
+pub const MAX_BLOB_ID_BYTES: usize = 255;
 
 /// Bounded concurrency for concurrent embed+encrypt in bulk route handler.
 pub const BULK_EMBED_CONCURRENCY: usize = 5;
@@ -1365,6 +1371,39 @@ pub fn validate_namespace(namespace: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Shared validation for a caller-supplied `blob_id`.
+///
+/// Only `POST /api/forget/blob` takes a blob_id from the request body — every
+/// other `blob_id` in this module is server-produced and lands in a response.
+/// That makes this the one place caller text reaches `forgotten_blobs`, whose
+/// primary key is (owner, namespace, blob_id), so it needs the same three
+/// guards `validate_namespace` applies for the same reasons:
+///
+///   - empty: can only ever match nothing, and recording a retraction for `""`
+///     would report success for a request that retracted nothing at all;
+///   - oversized: a blob_id past the B-tree tuple limit makes the INSERT fail
+///     with `index row size N exceeds btree version 4 maximum 2704`;
+///   - NUL: `\0` in a text bind is rejected by Postgres with
+///     `invalid byte sequence for encoding "UTF8": 0x00` (WALM-439 / GH #787).
+///
+/// The last two would otherwise surface as `AppError::Internal` — HTTP 500 on
+/// a plain client-input mistake — instead of an actionable 400.
+pub fn validate_blob_id(blob_id: &str) -> Result<(), AppError> {
+    if blob_id.is_empty() {
+        return Err(AppError::BadRequest("blob_id cannot be empty".into()));
+    }
+    if blob_id.len() > MAX_BLOB_ID_BYTES {
+        return Err(AppError::BadRequest(format!(
+            "blob_id exceeds maximum length of {} bytes",
+            MAX_BLOB_ID_BYTES
+        )));
+    }
+    if blob_id.contains('\0') {
+        return Err(AppError::BadRequest("blob_id contains a NUL byte".into()));
+    }
+    Ok(())
+}
+
 /// Validate a client-supplied embedding vector against what the fact store can
 /// accept. Shared by the manual write and read paths, where the vector comes
 /// from the caller rather than the server-side embedder. Rejects, with an
@@ -1853,6 +1892,36 @@ pub struct ForgetRequest {
 #[derive(Debug, Serialize)]
 pub struct ForgetResponse {
     pub deleted: u64,
+    pub namespace: String,
+    pub owner: String,
+}
+
+/// POST /api/forget/blob — retract ONE memory by blob_id (WALM-392).
+///
+/// Distinct from `ForgetRequest` / `POST /api/forget`, which deletes a whole
+/// namespace and which `/api/restore` can undo. This one is blob-scoped and
+/// durable: the blob_id is recorded in `forgotten_blobs` so restore never
+/// re-imports it. The Walrus blob itself is not deleted — Walrus has no
+/// delete, and the retraction is at the index level by design.
+#[derive(Debug, Deserialize)]
+pub struct ForgetBlobRequest {
+    pub blob_id: String,
+    #[serde(default = "default_namespace")]
+    pub namespace: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ForgetBlobResponse {
+    /// Index rows removed by this call. `0` is a success, not a miss: the
+    /// blob may already have been un-indexed (expiry, Walrus-404 cleanup, an
+    /// earlier forget) while still being on chain and therefore still
+    /// restorable. The retraction is recorded either way, which is what
+    /// `forgotten` reports.
+    pub deleted: u64,
+    /// Whether this call created the retraction record (`true`) or found the
+    /// blob already retracted (`false`). Always safe to call again.
+    pub forgotten: bool,
+    pub blob_id: String,
     pub namespace: String,
     pub owner: String,
 }
@@ -3207,6 +3276,32 @@ mod tests {
         // rejecting them would strand namespaces written before the NUL check.
         assert!(validate_namespace("has\nnewline").is_ok());
         assert!(validate_namespace("has\ttab").is_ok());
+    }
+
+    // ── blob_id validation (WALM-392) ──────────────────────────────────
+    //
+    // `POST /api/forget/blob` is the only route that binds a caller-supplied
+    // blob_id into a Postgres text column, and it lands in `forgotten_blobs`'
+    // (owner, namespace, blob_id) primary key. Both rejections below are
+    // reproducible Postgres errors, not hypotheticals: without the validator
+    // they surface as HTTP 500 on ordinary bad input.
+
+    #[test]
+    fn blob_id_validation_rejects_empty_and_oversized_values() {
+        assert!(validate_blob_id("Xk3rC9tVv0qLmNpQrStUvWxYz1234567890abcdEFGH").is_ok());
+        assert!(validate_blob_id(&"b".repeat(MAX_BLOB_ID_BYTES)).is_ok());
+        assert!(validate_blob_id("").is_err());
+        // `index row size N exceeds btree version 4 maximum 2704` on the
+        // forgotten_blobs primary key.
+        assert!(validate_blob_id(&"b".repeat(MAX_BLOB_ID_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn blob_id_validation_rejects_nul_bytes() {
+        // `invalid byte sequence for encoding "UTF8": 0x00` — the same
+        // failure mode WALM-439 closed for namespace.
+        assert!(validate_blob_id("blob\0evil").is_err());
+        assert!(validate_blob_id("blob-with-dashes_01").is_ok());
     }
 
     // ── HealthResponse.prompt_versions wire shape ────────────────

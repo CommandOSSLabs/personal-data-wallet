@@ -442,7 +442,7 @@ pub async fn analyze(
     // ── Benchmark-mode bypass: synchronous ingestion ──────────────────────
     //
     // The production path below is async (encrypt → enqueue WalletJob →
-    // worker uploads to Walrus → insert_vector → SDK polls job_id). The
+    // worker uploads to Walrus → indexes the row → SDK polls job_id). The
     // benchmark harness expects `POST /api/analyze` to return when the
     // memories are stored and searchable, the way the SDK's synchronous
     // analyze contract worked before. In benchmark mode we honour

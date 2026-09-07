@@ -3,6 +3,7 @@ import type {
     AnalyzeResult,
     AnalyzeWaitResult,
     EmbedResult,
+    ForgetResult,
     HealthResult,
     RecallOptions,
     RecallParams,
@@ -89,6 +90,11 @@ function validateText(text: string, field = "text"): void {
     }
 }
 
+/** Retraction identity: namespace-scoped, matching the relayer. */
+function retractionKey(namespace: string, blobId: string): string {
+    return `${namespace}\u0000${blobId}`;
+}
+
 /**
  * Deterministic, dependency-free in-memory implementation of the core MemWal API.
  * It never opens a socket, reads credentials, or contacts Sui/Walrus. Recall uses
@@ -99,6 +105,8 @@ export class MemWalMock {
     private readonly namespace: string;
     private readonly memories: MockMemory[] = [];
     private readonly jobs = new Map<string, MockMemory>();
+    /** `namespace\u0000blobId` of every retraction, so repeats report forgotten=false. */
+    private readonly forgottenBlobIds = new Set<string>();
     private sequence = 0;
 
     private constructor(config: MemWalMockConfig = {}) {
@@ -117,6 +125,7 @@ export class MemWalMock {
     destroy(): void {
         this.memories.length = 0;
         this.jobs.clear();
+        this.forgottenBlobIds.clear();
     }
 
     async rememberAsync(
@@ -455,15 +464,42 @@ export class MemWalMock {
         return structuredClone(MOCK_VERSION);
     }
 
-    /** Delete one mock record by blob id. Returns whether a record was removed. */
-    forget(blobId: string): boolean {
-        const index = this.memories.findIndex(
-            (memory) => memory.blobId === blobId
+    /**
+     * Retract one mock record by blob id, mirroring `MemWal.forget()`.
+     *
+     * Async and `ForgetResult`-shaped so a test written against the mock keeps
+     * working against the real client. It also models the two things about
+     * retraction that trip callers up:
+     *
+     * - `deleted === 0` is a success, not a miss — an already-un-indexed
+     *   memory is still retracted.
+     * - `forgotten === false` on a repeat call — retraction is idempotent, and
+     *   the record persists in `forgottenBlobIds` so `restore()` could not
+     *   bring it back.
+     */
+    async forget(blobId: string, namespace?: string): Promise<ForgetResult> {
+        const resolved = namespace ?? this.namespace;
+        const forgotten = !this.forgottenBlobIds.has(retractionKey(resolved, blobId));
+        this.forgottenBlobIds.add(retractionKey(resolved, blobId));
+
+        // Namespace-scoped, like the relayer: the same blob can legitimately be
+        // indexed under two namespaces, and retracting one must not touch the
+        // other.
+        const removed = this.memories.filter(
+            (memory) => memory.blobId === blobId && memory.namespace === resolved
         );
-        if (index < 0) return false;
-        const [memory] = this.memories.splice(index, 1);
-        this.jobs.delete(memory.jobId);
-        return true;
+        for (const memory of removed) {
+            this.memories.splice(this.memories.indexOf(memory), 1);
+            this.jobs.delete(memory.jobId);
+        }
+
+        return {
+            deleted: removed.length,
+            forgotten,
+            blob_id: blobId,
+            namespace: resolved,
+            owner: this.owner,
+        };
     }
 
     /** Clear one namespace, or every mock record when omitted. */

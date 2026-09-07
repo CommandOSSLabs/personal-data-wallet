@@ -1664,6 +1664,9 @@ async fn main() {
         // admin/harness endpoints — namespace delete + stats.
         // Mode-blind; owner-scoped via AuthInfo.
         .route("/api/forget", post(routes::forget))
+        // Per-memory retraction (WALM-392). Separate from /api/forget: this
+        // one is blob-scoped and survives /api/restore.
+        .route("/api/forget/blob", post(routes::forget_blob))
         .route("/api/stats", post(routes::stats))
         // Router::layer runs middleware bottom-to-top (last added runs first).
         // Keep auth outer so AuthInfo is in request extensions before rate limiting reads it.

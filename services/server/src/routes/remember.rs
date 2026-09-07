@@ -1193,7 +1193,14 @@ async fn find_remember_job_by_key(
 /// GET /api/remember/:job_id  — poll job status
 ///
 /// Returns `{ job_id, status, blob_id?, error? }` where status is one of
-/// `pending | running | done | failed`.
+/// `pending | running | uploaded | done | failed`.
+///
+/// `blob_id` is returned for ANY status, including `uploaded` — i.e. once the
+/// paid blob is minted but before the memory is indexed. That is deliberate
+/// (the client needs the id to drive recovery), and it is what makes
+/// `POST /api/forget/blob` reachable for a memory that is not indexed yet;
+/// see `jobs::insert_vector_and_mark_remember_done` for how the resume path
+/// honours a retraction taken in that window (WALM-392).
 pub async fn remember_status(
     State(state): State<Arc<AppState>>,
     Extension(auth): Extension<AuthInfo>,

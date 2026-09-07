@@ -93,7 +93,7 @@ Service liveness check. `status` is `"ok"` when the relayer process is up. HTTP 
   "status": "ok",
   "version": "0.1.0",
   "relayerVersion": "0.1.0",
-  "apiVersion": "1.0.0",
+  "apiVersion": "1.1.0",
   "minSupportedSdk": {
     "typescript": "0.0.4",
     "python": "0.1.0",
@@ -102,6 +102,7 @@ Service liveness check. `status` is `"ok"` when the relayer process is up. HTTP 
   "featureFlags": {
     "auth.accountBoundNonce": true,
     "auth.sealSessionHeader": true,
+    "forget.blobTombstone": true,
     "runtime.versionEndpoint": true
   },
   "deprecations": [],
@@ -324,6 +325,8 @@ Register a client-encrypted payload. The client sends Seal-encrypted data (base6
 }
 ```
 
+Returns `409 Conflict` when the resulting `blob_id` has been retracted with [`POST /api/forget/blob`](#post-apiforgetblob) in this namespace. Walrus blob IDs are content-addressed, so re-sending byte-identical `encrypted_data` reproduces the same `blob_id`; the relayer will not re-index a retracted memory, and the retraction stays authoritative. Re-encrypt the plaintext (which yields a new `blob_id`) if you genuinely intend to store it again.
+
 ### `POST /api/recall/manual`
 
 Search with a precomputed query vector. Returns index hits only; the client handles downloading and decrypting. The request accepts the same optional `scoring_weights` object as [`POST /api/recall`](#scoring-weights), and the server applies the same `limit` cap of `100`.
@@ -469,6 +472,8 @@ Rebuild missing vector entries for one namespace. Queries onchain blobs by owner
 }
 ```
 
+`skipped` counts onchain blobs this call did not re-index: already indexed, permanently failed a previous restore, or retracted with `POST /api/forget/blob`. A blob retracted *while* this restore was running is counted here too — the retraction is re-checked at the moment each row is written, so a restore in flight cannot resurrect it.
+
 `truncated=true` means this restore is **known-retryable-incomplete**: more missing blobs than `limit` allowed this call to restore, **or** the sidecar's owner-wide candidate fetch hit its cap **and** raising `limit` can still expand that fetch (`limit < 20`). Once the sidecar cap is saturated (`limit >= 20`, cap pinned at 100), truncation follows this call's missing-blob page length, not onchain `total`. A fully restored namespace does not loop. `truncated=false` is **not** proof the sidecar saw every onchain blob; blobs beyond the owner-wide sidecar candidate cap can still be missing. WALM-451 tracks a `sourceCapped` field for that case ([WALM-451](https://linear.app/mysten-labs/issue/WALM-451)). Relayers older than WALM-319 omit `truncated`; SDKs default it to `false`.
 
 ### `POST /api/forget`
@@ -496,6 +501,45 @@ Delete every vector index row for one namespace. The Walrus blobs persist, so a 
 ```
 
 `deleted` is the number of index rows the relayer removed.
+
+### `POST /api/forget/blob`
+
+Retract a single memory by `blob_id`. This is the remediation path for a fact that should never have been stored — a leaked API key, a password, personal data captured by mistake — which the append-only write surface would otherwise return from every recall indefinitely.
+
+Distinct from `POST /api/forget`, which deletes a whole namespace and which `POST /api/restore` can undo. This route is blob-scoped and durable: the `blob_id` is recorded permanently, and `restore` consults that record, so the memory is not re-imported.
+
+**The Walrus blob is not deleted, and cannot be.** Walrus is immutable storage; the encrypted blob remains on chain as history. What this removes is the index entry, which is what every read path queries — `/api/recall`, `/api/recall/manual`, `/api/ask`, and the pre-extraction context in `/api/analyze` all stop returning it. If the retracted memory contained a live credential, rotate it: the ciphertext still exists, and anyone able to decrypt it still can.
+
+The relayer resolves the owner from the signed headers, so a caller can only retract their own memories. Retraction is namespace-scoped: the same blob can legitimately be indexed under two namespaces, and retracting it from one does not affect the other.
+
+**Request:**
+
+```json
+{
+  "blob_id": "0x...",
+  "namespace": "demo"
+}
+```
+
+`namespace` defaults to `"default"`. A `blob_id` that is empty, longer than 255 bytes, or contains a NUL byte is rejected with `400`.
+
+**Response:**
+
+```json
+{
+  "deleted": 1,
+  "forgotten": true,
+  "blob_id": "0x...",
+  "namespace": "demo",
+  "owner": "0x..."
+}
+```
+
+`deleted` is the number of index rows removed. `0` is a success, not a miss: the memory may already have been un-indexed (expiry, a Walrus-404 cleanup, an earlier namespace-wide forget) while its blob is still on chain and therefore still restorable — the retraction is recorded either way.
+
+`0` is also what you get while an asynchronous `POST /api/remember` for that blob is still finishing: the job records its `blob_id` — and `GET /api/remember/{job_id}` returns it — before the memory is indexed. Retracting inside that window is honoured. The job's own index write is re-checked against the retraction at the moment it runs and is suppressed, so the memory never becomes searchable; the job still reports `done`, because the blob was uploaded successfully and there is nothing left for it to retry. Where the two disagree, the retraction is authoritative.
+
+`forgotten` is `true` when this call created the retraction record and `false` when the blob had already been retracted. The endpoint is idempotent; `false` means "already done", not "failed".
 
 ### `POST /api/stats`
 
