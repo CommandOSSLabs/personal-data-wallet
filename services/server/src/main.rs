@@ -5,6 +5,7 @@ mod compatibility;
 mod engine;
 mod jobs;
 mod jobs_security_delete;
+mod lexical;
 mod mcp_proxy;
 mod oauth;
 mod observability;
@@ -960,7 +961,10 @@ async fn main() {
         tracing::warn!("⚠️  BENCHMARK_MODE=true — using PlaintextEngine.");
         tracing::warn!("⚠️  Memories will be stored UNENCRYPTED in Postgres.");
         tracing::warn!("⚠️  This is a benchmark-only mode. UNSAFE for production.");
-        Arc::new(PlaintextEngine::new(Arc::clone(&db)))
+        Arc::new(PlaintextEngine::new(
+            Arc::clone(&db),
+            config.lexical_index_pepper.clone(),
+        ))
     } else {
         tracing::info!("  storage: WalrusSealEngine (production)");
         Arc::new(WalrusSealEngine::new(

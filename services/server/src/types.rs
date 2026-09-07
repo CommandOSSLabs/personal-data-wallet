@@ -491,6 +491,11 @@ pub struct Config {
     /// Default 300; tunable via `AUTH_MAX_CLOCK_DRIFT_SECS`, capped at
     /// `MAX_AUTH_CLOCK_DRIFT_SECS`. Independent of nonce replay protection.
     pub auth_max_clock_drift_secs: i64,
+    /// HMAC pepper for `vector_entries.lexical_tokens` (WALM-444). Not
+    /// plaintext: remember-time identifier digests only. Changing this
+    /// invalidates existing lexical indexes until those rows are rewritten.
+    /// `LEXICAL_INDEX_PEPPER`, else `OWNER_TOKEN_SECRET`, else a dev default.
+    pub lexical_index_pepper: String,
 }
 
 impl Config {
@@ -678,6 +683,9 @@ impl Config {
             ),
             mcp_oauth: crate::oauth::McpOAuthConfig::from_env(),
             auth_max_clock_drift_secs: configured_auth_clock_drift_secs(),
+            lexical_index_pepper: nonempty_env("LEXICAL_INDEX_PEPPER")
+                .or_else(|| nonempty_env("OWNER_TOKEN_SECRET"))
+                .unwrap_or_else(|| "memwal-lexical-index-dev-pepper".into()),
         }
     }
 }
@@ -1379,6 +1387,28 @@ pub struct RecallRequest {
     /// behaviour. See [`RecallSort`].
     #[serde(default)]
     pub sort: RecallSort,
+    /// Candidate generator. Omitted → [`RecallSearchMode::Semantic`], today's
+    /// cosine-only path. See [`RecallSearchMode`].
+    #[serde(default)]
+    pub search_mode: RecallSearchMode,
+}
+
+/// How `/api/recall` builds the candidate set before `sort` / `scoring_weights`.
+///
+/// Distinct from [`RecallSort`]: `sort` only reorders (and for `recent`,
+/// over-fetches) the rows already retrieved. `search_mode` is what can surface
+/// a row cosine ANN never returned — exact identifiers that embedding blurs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecallSearchMode {
+    /// pgvector cosine ANN only. Default, so an omitted field leaves every
+    /// existing caller byte-identical.
+    #[default]
+    Semantic,
+    /// HMAC identifier overlap on `vector_entries.lexical_tokens`.
+    Lexical,
+    /// Reciprocal Rank Fusion of the semantic and lexical lists (`k = 60`).
+    Hybrid,
 }
 
 /// Result ordering mode for `/api/recall`.
@@ -1476,6 +1506,11 @@ pub struct RecallResult {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SearchHit {
+    /// `vector_entries.id`. Used to fuse hybrid lists; `blob_id` is not unique.
+    /// Skipped on the wire so `/api/recall/manual` JSON stays the same as
+    /// before WALM-444 (clients key on `blob_id`).
+    #[serde(skip)]
+    pub id: String,
     pub blob_id: String,
     pub distance: f64,
     /// Insertion timestamp from `vector_entries.created_at`. Used by the
@@ -1749,6 +1784,11 @@ pub struct RecallManualRequest {
     /// recall's "server returns blob ids + distances, client hydrates" contract.
     #[serde(default)]
     pub scoring_weights: Option<ScoringWeights>,
+    #[serde(default)]
+    pub search_mode: RecallSearchMode,
+    /// Required when `search_mode` is `lexical` or `hybrid`.
+    #[serde(default)]
+    pub query: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2303,6 +2343,7 @@ mod tests {
             sponsor_balance_low_threshold_sui: 5_000_000_000,
             mcp_oauth: None,
             auth_max_clock_drift_secs: DEFAULT_AUTH_CLOCK_DRIFT_SECS,
+            lexical_index_pepper: "memwal-lexical-index-dev-pepper".into(),
         }
     }
 

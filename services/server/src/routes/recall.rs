@@ -176,10 +176,6 @@ pub async fn recall(
         "recall request"
     );
 
-    let t0 = std::time::Instant::now();
-    let query_vector = generate_recall_embedding_cached(&state, &body.query).await?;
-    let embed_ms = t0.elapsed().as_millis();
-
     // Cap limit to prevent unbounded DB scans / memory use.
     // Without this, an attacker could send limit=999999 to scan the entire DB.
     let limit = body.limit.min(100);
@@ -188,12 +184,56 @@ pub async fn recall(
     // outside the cosine top-`limit` entirely. `Relevance` fetches exactly
     // `limit`, so the default path issues the identical query it always has.
     let candidate_limit = body.sort.candidate_limit(limit);
-    let t1 = std::time::Instant::now();
-    let hits = state
-        .db
-        .search_similar(&query_vector, owner, namespace, candidate_limit)
-        .await?;
-    let vsearch_ms = t1.elapsed().as_millis();
+    let (hits, embed_ms, vsearch_ms) = match body.search_mode {
+        crate::types::RecallSearchMode::Semantic => {
+            let t0 = std::time::Instant::now();
+            let query_vector = generate_recall_embedding_cached(&state, &body.query).await?;
+            let embed_ms = t0.elapsed().as_millis();
+            let t1 = std::time::Instant::now();
+            let hits = state
+                .db
+                .search_similar(&query_vector, owner, namespace, candidate_limit)
+                .await?;
+            (hits, embed_ms, t1.elapsed().as_millis())
+        }
+        crate::types::RecallSearchMode::Lexical => {
+            let t1 = std::time::Instant::now();
+            let tokens = crate::lexical::token_hmacs(
+                &state.config.lexical_index_pepper,
+                owner,
+                &body.query,
+            );
+            let hits = state
+                .db
+                .search_lexical(owner, namespace, &tokens, candidate_limit)
+                .await?;
+            (hits, 0, t1.elapsed().as_millis())
+        }
+        crate::types::RecallSearchMode::Hybrid => {
+            let t0 = std::time::Instant::now();
+            let query_vector = generate_recall_embedding_cached(&state, &body.query).await?;
+            let embed_ms = t0.elapsed().as_millis();
+            let t1 = std::time::Instant::now();
+            let tokens = crate::lexical::token_hmacs(
+                &state.config.lexical_index_pepper,
+                owner,
+                &body.query,
+            );
+            let (semantic, lexical) = tokio::try_join!(
+                state
+                    .db
+                    .search_similar(&query_vector, owner, namespace, candidate_limit),
+                state
+                    .db
+                    .search_lexical(owner, namespace, &tokens, candidate_limit),
+            )?;
+            (
+                crate::lexical::rrf_fuse(semantic, lexical, candidate_limit),
+                embed_ms,
+                t1.elapsed().as_millis(),
+            )
+        }
+    };
 
     // Order and truncate on the SearchHits, BEFORE hydration: ranking needs
     // only distance + created_at, both already on the row, so the over-fetch
@@ -350,10 +390,47 @@ pub async fn recall_manual(
     // Search Vector DB — blob IDs + distances (+ created_at + importance).
     // Cap limit on recall_manual as well.
     let limit = body.limit.min(100);
-    let hits = state
-        .db
-        .search_similar(&body.vector, owner, namespace, limit)
-        .await?;
+    if body.search_mode != crate::types::RecallSearchMode::Semantic {
+        let query = body.query.as_deref().map(str::trim).unwrap_or("");
+        if query.is_empty() {
+            return Err(AppError::BadRequest(
+                "query is required when search_mode is lexical or hybrid".into(),
+            ));
+        }
+    }
+    let hits = match body.search_mode {
+        crate::types::RecallSearchMode::Semantic => {
+            state
+                .db
+                .search_similar(&body.vector, owner, namespace, limit)
+                .await?
+        }
+        crate::types::RecallSearchMode::Lexical => {
+            let tokens = crate::lexical::token_hmacs(
+                &state.config.lexical_index_pepper,
+                owner,
+                body.query.as_deref().unwrap_or(""),
+            );
+            state
+                .db
+                .search_lexical(owner, namespace, &tokens, limit)
+                .await?
+        }
+        crate::types::RecallSearchMode::Hybrid => {
+            let tokens = crate::lexical::token_hmacs(
+                &state.config.lexical_index_pepper,
+                owner,
+                body.query.as_deref().unwrap_or(""),
+            );
+            let (semantic, lexical) = tokio::try_join!(
+                state
+                    .db
+                    .search_similar(&body.vector, owner, namespace, limit),
+                state.db.search_lexical(owner, namespace, &tokens, limit),
+            )?;
+            crate::lexical::rrf_fuse(semantic, lexical, limit)
+        }
+    };
 
     // Apply the shared CompositeRanker so manual ordering matches
     // `/api/recall` and `/api/ask`. `rank_search_hits` reuses the
@@ -439,6 +516,7 @@ mod tests {
 
     fn sh(blob_id: &str, distance: f64, age_days: i64, importance: f32) -> SearchHit {
         SearchHit {
+            id: blob_id.into(),
             blob_id: blob_id.into(),
             distance,
             created_at: t_now() - chrono::Duration::days(age_days),
@@ -752,5 +830,43 @@ mod tests {
 
         assert_eq!(manual_order, non_manual_order);
         assert_eq!(manual_order, vec!["newer", "older"]);
+    }
+
+    #[test]
+    fn omitted_search_mode_deserializes_as_semantic() {
+        let req: crate::types::RecallRequest = serde_json::from_str(
+            r#"{"query":"hello"}"#,
+        )
+        .unwrap();
+        assert_eq!(req.search_mode, crate::types::RecallSearchMode::Semantic);
+        assert_eq!(req.sort, crate::types::RecallSort::Relevance);
+    }
+
+    #[test]
+    fn search_mode_hybrid_deserializes() {
+        let req: crate::types::RecallRequest = serde_json::from_str(
+            r#"{"query":"0xabc","search_mode":"hybrid"}"#,
+        )
+        .unwrap();
+        assert_eq!(req.search_mode, crate::types::RecallSearchMode::Hybrid);
+    }
+
+    #[test]
+    fn search_hit_json_omits_internal_id() {
+        let hit = sh("blob-1", 0.1, 0, 0.5);
+        let json = serde_json::to_value(&hit).unwrap();
+        assert!(json.get("id").is_none());
+        assert_eq!(json["blob_id"], "blob-1");
+    }
+
+    #[test]
+    fn manual_hybrid_without_query_is_rejected_by_guard() {
+        let body: crate::types::RecallManualRequest = serde_json::from_str(
+            r#"{"vector":[0.1],"search_mode":"hybrid"}"#,
+        )
+        .unwrap();
+        assert_eq!(body.search_mode, crate::types::RecallSearchMode::Hybrid);
+        let query = body.query.as_deref().map(str::trim).unwrap_or("");
+        assert!(query.is_empty());
     }
 }

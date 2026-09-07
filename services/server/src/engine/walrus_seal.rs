@@ -239,6 +239,7 @@ impl MemoryEngine for WalrusSealEngine {
         vector: &[f32],
         importance: f32,
         agent_public_key: Option<&str>,
+        index_text: Option<&str>,
     ) -> Result<MemoryRef, AppError> {
         // Pick the next Sui key slot (round-robin) so concurrent stores
         // don't serialise on one signer.
@@ -284,6 +285,11 @@ impl MemoryEngine for WalrusSealEngine {
         // Index the row. Quota accounting uses the ciphertext byte length.
         let id = uuid::Uuid::new_v4().to_string();
         let blob_size = bytes.len() as i64;
+        let lexical_tokens = index_text
+            .map(|text| {
+                crate::lexical::token_hmacs(&self.config.lexical_index_pepper, owner, text)
+            })
+            .unwrap_or_default();
         self.db
             .insert_vector(
                 &id,
@@ -296,6 +302,7 @@ impl MemoryEngine for WalrusSealEngine {
                 agent_public_key,
                 Some(&self.config.package_id),
                 upload.end_epoch,
+                &lexical_tokens,
             )
             .await?;
 

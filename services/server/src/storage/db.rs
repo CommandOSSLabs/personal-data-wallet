@@ -34,7 +34,7 @@ mod tests {
         std::env::var("DATABASE_URL").ok()
     }
 
-    async fn test_db() -> Option<VectorDb> {
+    pub(super) async fn test_db() -> Option<VectorDb> {
         let database_url = test_database_url()?;
         let pool = PgPoolOptions::new()
             .max_connections(2)
@@ -85,6 +85,7 @@ mod tests {
             include_str!("../../migrations/018_memory_expiry_synced_at_index.sql"),
             include_str!("../../migrations/019_memory_read_api_updated_at_set_not_null.sql"),
             include_str!("../../migrations/020_read_api_followups.sql"),
+            include_str!("../../migrations/021_lexical_tokens.sql"),
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }
@@ -307,6 +308,7 @@ mod tests {
             None,
             None,
             None,
+            &[],
         )
         .await
         .unwrap();
@@ -321,6 +323,7 @@ mod tests {
             None,
             None,
             None,
+            &[],
         )
         .await
         .unwrap();
@@ -375,6 +378,7 @@ mod tests {
             Some("agent-abc"),
             Some("0xpkg-123"),
             None,
+            &[],
         )
         .await
         .unwrap();
@@ -414,6 +418,7 @@ mod tests {
             None,
             None,
             Some(457),
+            &[],
         )
         .await
         .unwrap();
@@ -457,6 +462,7 @@ mod tests {
             Some("agent-abc"),
             Some("0xpkg-123"),
             None,
+            &[],
         )
         .await
         .unwrap();
@@ -485,6 +491,7 @@ mod tests {
             Some("agent-abc"),
             Some("0xpkg-123"),
             None,
+            &[],
         )
         .await
         .unwrap();
@@ -530,6 +537,7 @@ mod tests {
             None,
             None,
             None,
+            &[],
         )
         .await
         .unwrap();
@@ -592,6 +600,7 @@ mod tests {
             None,
             None,
             None,
+            &[],
         )
         .await
         .unwrap();
@@ -661,6 +670,7 @@ mod tests {
             None,
             None,
             None,
+            &[],
         )
         .await
         .unwrap();
@@ -765,6 +775,7 @@ mod tests {
             None,
             None,
             Some(500),
+            &[],
         )
         .await
         .unwrap();
@@ -936,6 +947,7 @@ mod tests {
             None,
             None,
             None,
+            &[],
         )
         .await
         .unwrap();
@@ -950,6 +962,7 @@ mod tests {
             None,
             None,
             None,
+            &[],
         )
         .await
         .unwrap();
@@ -1012,6 +1025,7 @@ mod tests {
             None,
             None,
             None,
+            &[],
         )
         .await
         .unwrap();
@@ -1489,6 +1503,12 @@ impl VectorDb {
             .await
             .map_err(|e| AppError::Internal(format!("Failed to run migration 020: {}", e)))?;
 
+        let migration_021 = include_str!("../../migrations/021_lexical_tokens.sql");
+        sqlx::raw_sql(migration_021)
+            .execute(&pool)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to run migration 021: {}", e)))?;
+
         tracing::info!("database connected and migrations applied");
 
         Ok(Self { pool })
@@ -1521,6 +1541,7 @@ impl VectorDb {
         agent_id: Option<&str>,
         package_id: Option<&str>,
         end_epoch: Option<i32>,
+        lexical_tokens: &[String],
     ) -> Result<(), AppError> {
         let embedding = Vector::from(vector.to_vec());
 
@@ -1531,8 +1552,8 @@ impl VectorDb {
             .await
             .map_err(|e| AppError::Internal(format!("Failed to begin insert tx: {}", e)))?;
         let result = sqlx::query(
-            "INSERT INTO vector_entries (id, owner, namespace, blob_id, embedding, blob_size_bytes, importance, agent_id, package_id, end_epoch)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            "INSERT INTO vector_entries (id, owner, namespace, blob_id, embedding, blob_size_bytes, importance, agent_id, package_id, end_epoch, lexical_tokens)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
              ON CONFLICT (id) DO UPDATE SET
                 owner = EXCLUDED.owner,
                 namespace = EXCLUDED.namespace,
@@ -1543,6 +1564,7 @@ impl VectorDb {
                 agent_id = EXCLUDED.agent_id,
                 package_id = EXCLUDED.package_id,
                 end_epoch = EXCLUDED.end_epoch,
+                lexical_tokens = EXCLUDED.lexical_tokens,
                 updated_at = NOW()",
         )
         .bind(id)
@@ -1555,6 +1577,7 @@ impl VectorDb {
         .bind(agent_id)
         .bind(package_id)
         .bind(end_epoch)
+        .bind(lexical_tokens)
         .execute(&mut *tx)
         .await
         .map_err(|e| AppError::Internal(format!("Failed to insert vector: {}", e)));
@@ -1597,6 +1620,7 @@ impl VectorDb {
         plaintext: &str,
         blob_size_bytes: i64,
         importance: f32,
+        lexical_tokens: &[String],
     ) -> Result<(), AppError> {
         let embedding = Vector::from(vector.to_vec());
 
@@ -1605,8 +1629,8 @@ impl VectorDb {
             AppError::Internal(format!("Failed to begin plaintext insert tx: {}", e))
         })?;
         let result = sqlx::query(
-            "INSERT INTO vector_entries (id, owner, namespace, blob_id, embedding, blob_size_bytes, plaintext, importance)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "INSERT INTO vector_entries (id, owner, namespace, blob_id, embedding, blob_size_bytes, plaintext, importance, lexical_tokens)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              ON CONFLICT (id) DO UPDATE SET
                 owner = EXCLUDED.owner,
                 namespace = EXCLUDED.namespace,
@@ -1615,6 +1639,7 @@ impl VectorDb {
                 blob_size_bytes = EXCLUDED.blob_size_bytes,
                 plaintext = EXCLUDED.plaintext,
                 importance = EXCLUDED.importance,
+                lexical_tokens = EXCLUDED.lexical_tokens,
                 updated_at = NOW()",
         )
         .bind(id)
@@ -1625,6 +1650,7 @@ impl VectorDb {
         .bind(blob_size_bytes)
         .bind(plaintext)
         .bind(importance)
+        .bind(lexical_tokens)
         .execute(&mut *tx)
         .await
         .map_err(|e| AppError::Internal(format!("Failed to insert plaintext vector: {}", e)));
@@ -1711,10 +1737,10 @@ impl VectorDb {
         let started = std::time::Instant::now();
         #[allow(clippy::type_complexity)]
         let result: Result<
-            Vec<(String, f64, chrono::DateTime<chrono::Utc>, f32)>,
+            Vec<(String, String, f64, chrono::DateTime<chrono::Utc>, f32)>,
             AppError,
         > = sqlx::query_as(
-            "SELECT blob_id, (embedding <=> $1)::float8 AS distance, created_at, importance
+            "SELECT id, blob_id, (embedding <=> $1)::float8 AS distance, created_at, importance
              FROM vector_entries
              WHERE owner = $2 AND namespace = $3
              ORDER BY embedding <=> $1
@@ -1736,7 +1762,8 @@ impl VectorDb {
 
         let results = rows
             .into_iter()
-            .map(|(blob_id, distance, created_at, importance)| SearchHit {
+            .map(|(id, blob_id, distance, created_at, importance)| SearchHit {
+                id,
                 blob_id,
                 distance,
                 created_at,
@@ -1745,6 +1772,57 @@ impl VectorDb {
             .collect();
 
         Ok(results)
+    }
+
+    /// Identifier overlap search on HMAC tokens. Empty `tokens` returns no rows
+    /// (an empty `&&` query is not a table scan of the namespace).
+    pub async fn search_lexical(
+        &self,
+        owner: &str,
+        namespace: &str,
+        tokens: &[String],
+        limit: usize,
+    ) -> Result<Vec<SearchHit>, AppError> {
+        if tokens.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let started = std::time::Instant::now();
+        #[allow(clippy::type_complexity)]
+        let result: Result<
+            Vec<(String, String, chrono::DateTime<chrono::Utc>, f32, i32)>,
+            AppError,
+        > = sqlx::query_as(
+            "SELECT id, blob_id, created_at, importance,
+                    cardinality(lexical_tokens & $1::text[]) AS overlap
+             FROM vector_entries
+             WHERE owner = $2 AND namespace = $3
+               AND lexical_tokens && $1::text[]
+             ORDER BY overlap DESC, id ASC
+             LIMIT $4",
+        )
+        .bind(tokens)
+        .bind(owner)
+        .bind(namespace)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to search lexical tokens: {}", e)));
+        crate::observability::observe_db(
+            "vector.search_lexical",
+            db_status(&result),
+            started.elapsed(),
+        );
+        let rows = result?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, blob_id, created_at, importance, _overlap)| SearchHit {
+                id,
+                blob_id,
+                distance: crate::lexical::LEXICAL_ONLY_DISTANCE,
+                created_at,
+                importance,
+            })
+            .collect())
     }
 
     /// Get all blob_ids for a given owner + namespace (used by restore flow)
@@ -3225,6 +3303,7 @@ mod quota_admission_tests {
             None,
             None,
             None,
+            &[],
         )
         .await
         .expect("seed insert");
@@ -3298,6 +3377,7 @@ mod quota_admission_tests {
                     None,
                     None,
                     None,
+                    &[],
                 )
                 .await
                 .expect("insert");
@@ -3381,6 +3461,7 @@ mod quota_admission_tests {
                     None,
                     None,
                     None,
+                    &[],
                 )
                 .await
                 .expect("insert");
@@ -3589,5 +3670,99 @@ mod quota_admission_tests {
         );
 
         cleanup(&db, &owner).await;
+    }
+}
+
+#[cfg(test)]
+mod hybrid_identifier_tests {
+    use crate::lexical::{rrf_fuse, token_hmacs};
+
+    /// WALM-444 quality gate: an identifier fact whose embedding is far from
+    /// the query sits outside the cosine top-k, but hybrid/lexical recover it.
+    #[tokio::test]
+    async fn hybrid_recovers_identifier_missed_by_cosine() {
+        let Some(db) = super::tests::test_db().await else {
+            eprintln!("skipping DB integration test: DATABASE_URL is not configured");
+            return;
+        };
+        let suffix = uuid::Uuid::new_v4();
+        let owner = format!("0xhybrid-owner-{suffix}");
+        let ns = format!("hybrid-{suffix}");
+        let pepper = "memwal-lexical-index-dev-pepper";
+        let address = "2b84a32bcbe5f21c56d453dbe9f2c6a83b5f5a0c91d7e3f4a1b2c3d4e5f60708";
+        let query = format!("0x{address}");
+
+        let mut query_vec = vec![0.0_f32; 1536];
+        query_vec[0] = 1.0;
+        let mut close = vec![0.0_f32; 1536];
+        close[0] = 0.99;
+        let mut far = vec![0.0_f32; 1536];
+        far[1] = 1.0;
+
+        for i in 0..8 {
+            let id = format!("close-{i}-{suffix}");
+            db.insert_vector(
+                &id,
+                &owner,
+                &ns,
+                &format!("blob-close-{i}"),
+                &close,
+                1,
+                0.5,
+                None,
+                None,
+                None,
+                &[],
+            )
+            .await
+            .unwrap();
+        }
+
+        let target_id = format!("target-{suffix}");
+        let tokens = token_hmacs(pepper, &owner, &format!("call add_delegate_key on 0x{address}"));
+        db.insert_vector(
+            &target_id,
+            &owner,
+            &ns,
+            "blob-target",
+            &far,
+            1,
+            0.5,
+            None,
+            None,
+            None,
+            &tokens,
+        )
+        .await
+        .unwrap();
+
+        let semantic = db.search_similar(&query_vec, &owner, &ns, 5).await.unwrap();
+        assert!(
+            semantic.iter().all(|h| h.id != target_id),
+            "cosine top-5 should miss the far identifier row, got {:?}",
+            semantic.iter().map(|h| &h.id).collect::<Vec<_>>()
+        );
+
+        let query_tokens = token_hmacs(pepper, &owner, &query);
+        let lexical = db
+            .search_lexical(&owner, &ns, &query_tokens, 5)
+            .await
+            .unwrap();
+        assert!(
+            lexical.iter().any(|h| h.id == target_id),
+            "lexical search should recover the identifier row"
+        );
+
+        let fused = rrf_fuse(semantic, lexical, 5);
+        assert!(
+            fused.iter().any(|h| h.id == target_id),
+            "hybrid RRF should put the identifier into the window"
+        );
+
+        let hybrid_hit_at_5 = usize::from(fused.iter().any(|h| h.id == target_id));
+        eprintln!(
+            "WALM-444 identifier micro-benchmark: semantic_hit@5=0 hybrid_hit@5={hybrid_hit_at_5} owner={owner}"
+        );
+        assert_eq!(hybrid_hit_at_5, 1);
     }
 }

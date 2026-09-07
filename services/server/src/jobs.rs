@@ -72,6 +72,11 @@ pub enum WalletOperation {
         /// Storage epochs for Walrus upload.
         #[serde(default = "default_epochs")]
         epochs: u32,
+        /// HMAC identifier tokens computed from plaintext at prepare time.
+        /// Never the fact text. `#[serde(default)]` so in-flight jobs
+        /// enqueued before WALM-444 stay cosine-only.
+        #[serde(default)]
+        lexical_tokens: Vec<String>,
     },
     /// Legacy metadata+transfer operation for rows created before `/walrus/upload`
     /// started doing metadata+transfer atomically.
@@ -120,6 +125,8 @@ pub enum WalletOperation {
         /// behavior) rather than failing.
         #[serde(default)]
         end_epoch: Option<i32>,
+        #[serde(default)]
+        lexical_tokens: Vec<String>,
     },
     /// Finish a partially recovered upload after metadata+transfer has already
     /// succeeded. This keeps DB/vector retries from repeating an on-chain
@@ -153,6 +160,8 @@ pub enum WalletOperation {
         /// `None` rather than failing.
         #[serde(default)]
         end_epoch: Option<i32>,
+        #[serde(default)]
+        lexical_tokens: Vec<String>,
     },
 }
 
@@ -506,6 +515,7 @@ pub(crate) async fn execute_wallet_job(
             remember_job_id,
             prepare_claim_token,
             epochs,
+            lexical_tokens,
         } => {
             let wallet_index = match wallet_index_for_upload_attempt(
                 enqueued_wallet_index,
@@ -569,6 +579,7 @@ pub(crate) async fn execute_wallet_job(
                 remember_job_id,
                 prepare_claim_token,
                 epochs,
+                lexical_tokens,
                 congestion_requeues,
                 attempt_info,
             )
@@ -589,6 +600,7 @@ pub(crate) async fn execute_wallet_job(
             account_id,
             policy_package_id,
             end_epoch,
+            lexical_tokens,
         } => {
             let result = execute_set_metadata_and_transfer(
                 state,
@@ -620,6 +632,7 @@ pub(crate) async fn execute_wallet_job(
                             agent_id.as_deref(),
                             package_id.as_deref(),
                             end_epoch,
+                            &lexical_tokens,
                         )
                         .await
                         {
@@ -637,6 +650,7 @@ pub(crate) async fn execute_wallet_job(
                                 agent_id.clone(),
                                 package_id.clone(),
                                 end_epoch,
+                                lexical_tokens.clone(),
                             )
                             .await
                             {
@@ -715,6 +729,7 @@ pub(crate) async fn execute_wallet_job(
             agent_id,
             package_id,
             end_epoch,
+            lexical_tokens,
         } => {
             insert_vector_and_mark_remember_done(
                 state,
@@ -729,6 +744,7 @@ pub(crate) async fn execute_wallet_job(
                 agent_id.as_deref(),
                 package_id.as_deref(),
                 end_epoch,
+                &lexical_tokens,
             )
             .await
         }
@@ -851,6 +867,7 @@ async fn insert_vector_and_mark_remember_done(
     agent_id: Option<&str>,
     package_id: Option<&str>,
     end_epoch: Option<i32>,
+    lexical_tokens: &[String],
 ) -> Result<(), WalletJobError> {
     let vector_id = remember_job_id
         .map(str::to_owned)
@@ -869,6 +886,7 @@ async fn insert_vector_and_mark_remember_done(
             agent_id,
             package_id,
             end_epoch,
+            lexical_tokens,
         )
         .await
     {
@@ -927,6 +945,7 @@ async fn enqueue_finalize_uploaded_blob(
     agent_id: Option<String>,
     package_id: Option<String>,
     end_epoch: Option<i32>,
+    lexical_tokens: Vec<String>,
 ) -> Result<(), WalletJobError> {
     let mut storage = state.wallet_storage.clone();
     storage
@@ -944,6 +963,7 @@ async fn enqueue_finalize_uploaded_blob(
                 agent_id,
                 package_id,
                 end_epoch,
+                lexical_tokens,
             },
         }))
         .await
@@ -1244,6 +1264,7 @@ fn build_resume_transfer_job(
     blob_size_bytes: i64,
     importance: f32,
     seal_policy_package_id: &str,
+    lexical_tokens: Vec<String>,
 ) -> WalletJob {
     WalletJob {
         wallet_index,
@@ -1267,6 +1288,7 @@ fn build_resume_transfer_job(
             // re-verification sweep backfills it on its next pass, same as
             // any other row that starts out with an unknown expiry.
             end_epoch: None,
+            lexical_tokens,
         },
     }
 }
@@ -1292,6 +1314,7 @@ async fn resume_metadata_and_transfer(
     vector: &[f32],
     blob_size_bytes: i64,
     importance: f32,
+    lexical_tokens: Vec<String>,
 ) -> Result<(), WalletJobError> {
     let job = build_resume_transfer_job(
         wallet_index,
@@ -1308,6 +1331,7 @@ async fn resume_metadata_and_transfer(
         blob_size_bytes,
         importance,
         &state.config.seal_policy_package_id,
+        lexical_tokens,
     );
     let mut storage = state.wallet_storage.clone();
     if let Err(e) = storage.push_request(wallet_job_request(job)).await {
@@ -1361,6 +1385,7 @@ async fn execute_durable_upload(
     agent_public_key: Option<&str>,
     remember_job_id: &str,
     epochs: u32,
+    lexical_tokens: Vec<String>,
 ) -> Result<(), WalletJobError> {
     let mut journal =
         load_upload_journal(state.db.pool(), remember_job_id, fallback_wallet_index).await?;
@@ -1430,6 +1455,7 @@ async fn execute_durable_upload(
                     vector,
                     encrypted.len() as i64,
                     importance,
+                    lexical_tokens,
                 )
                 .await;
             }
@@ -1457,6 +1483,7 @@ async fn execute_upload_and_transfer(
     remember_job_id: Option<String>,
     prepare_claim_token: Option<String>,
     epochs: u32,
+    lexical_tokens: Vec<String>,
     congestion_requeues: u32,
     attempt_info: WalletJobAttemptInfo,
 ) -> Result<(), WalletJobError> {
@@ -1540,6 +1567,7 @@ async fn execute_upload_and_transfer(
         remember_job_id.clone(),
         prepare_claim_token,
         epochs,
+        lexical_tokens,
         congestion_requeues,
         attempt_info,
     )
@@ -1566,6 +1594,7 @@ async fn execute_upload_and_transfer_locked(
     remember_job_id: Option<String>,
     prepare_claim_token: Option<String>,
     epochs: u32,
+    lexical_tokens: Vec<String>,
     congestion_requeues: u32,
     attempt_info: WalletJobAttemptInfo,
 ) -> Result<(), WalletJobError> {
@@ -1623,6 +1652,7 @@ async fn execute_upload_and_transfer_locked(
                     &vector,
                     blob_size_bytes,
                     importance,
+                    lexical_tokens,
                 )
                 .await;
             }
@@ -1662,6 +1692,7 @@ async fn execute_upload_and_transfer_locked(
                     // pass, same as any other row that starts out with an
                     // unknown expiry.
                     None,
+                    &lexical_tokens,
                 )
                 .await;
             }
@@ -1734,6 +1765,7 @@ async fn execute_upload_and_transfer_locked(
             agent_public_key.as_deref(),
             jid,
             epochs,
+            lexical_tokens,
         )
         .await
         {
@@ -1830,6 +1862,7 @@ async fn execute_upload_and_transfer_locked(
                         account_id: Some(account_id.clone()),
                         policy_package_id: Some(state.config.seal_policy_package_id.clone()),
                         end_epoch,
+                        lexical_tokens: lexical_tokens.clone(),
                     },
                 }))
                 .await
@@ -1908,6 +1941,7 @@ async fn execute_upload_and_transfer_locked(
                                 remember_job_id,
                                 prepare_claim_token,
                                 epochs,
+                                lexical_tokens: lexical_tokens.clone(),
                             },
                         }),
                         run_at,
@@ -2038,6 +2072,7 @@ async fn execute_upload_and_transfer_locked(
         agent_public_key.as_deref(),
         Some(&package_id),
         upload.end_epoch,
+        &lexical_tokens,
     )
     .await
 }
@@ -2740,6 +2775,8 @@ pub struct BulkRememberItem {
     /// drain cleanly at the neutral default.
     #[serde(default = "default_importance")]
     pub importance: f32,
+    #[serde(default)]
+    pub lexical_tokens: Vec<String>,
 }
 
 /// Batch job payload — one BulkRememberJob per POST /api/remember/bulk call.
@@ -2827,6 +2864,7 @@ pub async fn execute_bulk_remember(
                     remember_job_id: Some(job_id.clone()),
                     prepare_claim_token: None,
                     epochs: job.epochs,
+                    lexical_tokens: item.lexical_tokens,
                 },
             }))
             .await
@@ -3073,6 +3111,7 @@ different transaction: TransactionDigest(8bjFgRyXRRYwrzQapgEjpHnGhdfNDY7d6xA82Bt
                 agent_id: None,
                 package_id: None,
                 end_epoch: None,
+                lexical_tokens: vec![],
             },
         };
         let mut value = serde_json::to_value(&job).expect("serialize");
@@ -3492,6 +3531,7 @@ different transaction: TransactionDigest(8bjFgRyXRRYwrzQapgEjpHnGhdfNDY7d6xA82Bt
                 agent_id: None,
                 package_id: None,
                 end_epoch: None,
+                lexical_tokens: vec![],
             },
         });
 
@@ -3995,6 +4035,7 @@ different transaction: TransactionDigest(8bjFgRyXRRYwrzQapgEjpHnGhdfNDY7d6xA82Bt
             123,
             0.5,
             "0xpolicy",
+            vec![],
         );
         match job.operation {
             WalletOperation::SetMetadataAndTransfer {

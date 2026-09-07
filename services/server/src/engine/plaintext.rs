@@ -27,11 +27,15 @@ use super::{FetchTimings, HydratedMemory, MemoryEngine, MemoryRef};
 /// no SEAL, no Sui keys; only the DB handle.
 pub struct PlaintextEngine {
     db: Arc<VectorDb>,
+    lexical_index_pepper: String,
 }
 
 impl PlaintextEngine {
-    pub fn new(db: Arc<VectorDb>) -> Self {
-        Self { db }
+    pub fn new(db: Arc<VectorDb>, lexical_index_pepper: String) -> Self {
+        Self {
+            db,
+            lexical_index_pepper,
+        }
     }
 
     /// Resolve a synthetic blob_id to its plaintext, wrapping it as a
@@ -91,6 +95,7 @@ impl MemoryEngine for PlaintextEngine {
         vector: &[f32],
         importance: f32,
         _agent_public_key: Option<&str>,
+        index_text: Option<&str>,
     ) -> Result<MemoryRef, AppError> {
         // In benchmark mode the "prepared bytes" are plaintext UTF-8 —
         // the handler/client skipped SEAL encrypt. Treat them as such.
@@ -106,10 +111,21 @@ impl MemoryEngine for PlaintextEngine {
         // Quota accounting uses the plaintext byte length (production
         // would use ciphertext bytes; benchmark mode has no ciphertext).
         let blob_size = bytes.len() as i64;
+        let source = index_text.unwrap_or(text.as_str());
+        let lexical_tokens =
+            crate::lexical::token_hmacs(&self.lexical_index_pepper, owner, source);
 
         self.db
             .insert_vector_plaintext(
-                &id, owner, namespace, &blob_id, vector, &text, blob_size, importance,
+                &id,
+                owner,
+                namespace,
+                &blob_id,
+                vector,
+                &text,
+                blob_size,
+                importance,
+                &lexical_tokens,
             )
             .await?;
 

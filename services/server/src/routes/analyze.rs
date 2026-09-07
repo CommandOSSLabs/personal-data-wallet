@@ -463,6 +463,7 @@ pub async fn analyze(
                             &vector,
                             fact.importance,
                             Some(&agent_pk),
+                            Some(fact.text.as_str()),
                         )
                         .await?;
                     Ok::<_, AppError>(AnalyzeAcceptedFact {
@@ -854,6 +855,11 @@ pub async fn analyze(
                 remember_job_id: Some(upload_job_id.clone()),
                 prepare_claim_token: None,
                 epochs: state.config.walrus_storage_epochs,
+                lexical_tokens: crate::lexical::token_hmacs(
+                    &state.config.lexical_index_pepper,
+                    owner,
+                    &fact_text,
+                ),
             },
         )
         .await

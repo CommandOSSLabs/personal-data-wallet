@@ -276,6 +276,11 @@ fn spawn_prepare_remember_job(
                         remember_job_id: Some(job_id.clone()),
                         prepare_claim_token: prepare_claim_token.clone(),
                         epochs: state.config.walrus_storage_epochs,
+                        lexical_tokens: crate::lexical::token_hmacs(
+                            &state.config.lexical_index_pepper,
+                            &owner,
+                            &text,
+                        ),
                     },
                 )
                 .await?;
@@ -374,6 +379,11 @@ fn spawn_prepare_bulk_remember_job(
                                 item.namespace,
                                 vector_result?,
                                 encrypted_result?,
+                                crate::lexical::token_hmacs(
+                                    &state.config.lexical_index_pepper,
+                                    &owner,
+                                    &item.text,
+                                ),
                             ))
                         }
                     })
@@ -382,13 +392,13 @@ fn spawn_prepare_bulk_remember_job(
                 let prep_results =
                     collect_bounded_results(prep_tasks, BULK_EMBED_CONCURRENCY).await;
 
-                let mut prepared: Vec<(String, String, Vec<f32>, Vec<u8>)> =
+                let mut prepared: Vec<(String, String, Vec<f32>, Vec<u8>, Vec<String>)> =
                     Vec::with_capacity(prep_results.len());
                 let mut total_encrypted_bytes: i64 = 0;
                 for result in prep_results {
-                    let (job_id, namespace, vector, encrypted) = result?;
+                    let (job_id, namespace, vector, encrypted, lexical_tokens) = result?;
                     total_encrypted_bytes += encrypted.len() as i64;
-                    prepared.push((job_id, namespace, vector, encrypted));
+                    prepared.push((job_id, namespace, vector, encrypted, lexical_tokens));
                 }
 
                 // One reservation per item, each keyed by the job id its
@@ -397,7 +407,7 @@ fn spawn_prepare_bulk_remember_job(
                 // batch, so an over-quota bulk request is rejected whole.
                 let reservations: Vec<crate::storage::db::StorageReservationRequest> = prepared
                     .iter()
-                    .map(|(job_id, _, _, encrypted)| {
+                    .map(|(job_id, _, _, encrypted, _)| {
                         crate::storage::db::StorageReservationRequest {
                             id: job_id.clone(),
                             bytes: encrypted.len() as i64,
@@ -407,7 +417,7 @@ fn spawn_prepare_bulk_remember_job(
                 rate_limit::reserve_storage_quota(&state, &owner, &reservations).await?;
 
                 let mut bulk_items: Vec<BulkRememberItem> = Vec::with_capacity(prepared.len());
-                for (job_id, namespace, vector, encrypted) in prepared {
+                for (job_id, namespace, vector, encrypted, lexical_tokens) in prepared {
                     let wallet_index = state
                         .key_pool
                         .next_index()
@@ -424,6 +434,7 @@ fn spawn_prepare_bulk_remember_job(
                         importance: crate::services::extractor::IMPORTANCE_STANDARD,
                         namespace,
                         wallet_index,
+                        lexical_tokens,
                     });
                 }
 
@@ -1058,6 +1069,7 @@ fn paid_recovery_operation(
         remember_job_id: Some(job_id.to_string()),
         prepare_claim_token: None,
         epochs,
+        lexical_tokens: Vec::new(),
     })
 }
 
@@ -1482,6 +1494,7 @@ pub async fn remember_manual(
             // average importance.
             crate::services::extractor::IMPORTANCE_STANDARD,
             Some(&auth.public_key),
+            None,
         )
         .await;
 
@@ -2126,6 +2139,7 @@ mod tests {
             sponsor_balance_low_threshold_sui: 5_000_000_000,
             mcp_oauth: None,
             auth_max_clock_drift_secs: crate::types::DEFAULT_AUTH_CLOCK_DRIFT_SECS,
+            lexical_index_pepper: "memwal-lexical-index-dev-pepper".into(),
         }
     }
 

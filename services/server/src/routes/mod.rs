@@ -340,6 +340,7 @@ mod recall_sort_tests {
     /// `distance` ascending is the order pgvector hands back.
     fn search_hit(blob_id: &str, distance: f64, created_at: &str) -> SearchHit {
         SearchHit {
+            id: blob_id.to_string(),
             blob_id: blob_id.to_string(),
             distance,
             created_at: ts(created_at),

@@ -125,6 +125,10 @@ pub trait MemoryEngine: Send + Sync {
     /// "standard" bucket default) when no LLM-assigned score is
     /// available (e.g. `remember_manual` legacy path that hasn't been
     /// updated to surface importance from the SDK yet).
+    ///
+    /// `index_text` is the plaintext fact used to HMAC identifier tokens
+    /// into `lexical_tokens`. `None` leaves the row cosine-only (manual
+    /// remember, restore). Never persist this string on the vector row.
     async fn store_blob(
         &self,
         owner: &str,
@@ -134,6 +138,7 @@ pub trait MemoryEngine: Send + Sync {
         vector: &[f32],
         importance: f32,
         agent_public_key: Option<&str>,
+        index_text: Option<&str>,
     ) -> Result<MemoryRef, AppError>;
 
     /// Resolve one search hit to its plaintext.
