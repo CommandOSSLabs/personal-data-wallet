@@ -6,10 +6,9 @@
 import { router, procedure, protectedProcedure } from "@/shared/lib/trpc/init";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { verifyPersonalMessageSignature } from "@mysten/sui/verify";
 import { normalizeSuiAddress } from "@mysten/sui/utils";
 import { uuidv7 } from "uuidv7";
-import { connectWalletInput } from "./input";
+import { connectWalletInput, suiAddressSchema } from "./input";
 import { AUTH_ERRORS } from "../constant";
 import { walletSessions } from "@/shared/db/schema";
 import * as authService from "../domain/service";
@@ -28,13 +27,6 @@ import {
   AuthRateLimitError,
   checkPublicAuthRateLimit,
 } from "../lib/auth-rate-limit";
-
-// Canonical Sui address: 0x + 64 hex. Reject malformed input at the boundary so
-// it never reaches normalizeSuiAddress (which would silently left-pad garbage
-// into a valid-looking-but-wrong address) or a DB lookup.
-const suiAddressSchema = z
-  .string()
-  .regex(/^0x[0-9a-f]{64}$/i, "Invalid Sui address");
 
 export const authRouter = router({
   /**
@@ -63,25 +55,75 @@ export const authRouter = router({
   }),
 
   /**
+   * Issue a single-use SIGN-IN challenge for the Sui-wallet flow. The client
+   * signs the returned `message` with its wallet and returns
+   * `{ challengeId, signature }` to connectWallet. Shares the challenge store
+   * with the Enoki flow and is likewise scoped to sign-in only — it cannot be
+   * used to authorize a delegate-key export.
+   */
+  issueWalletChallenge: procedure
+    .input(z.object({ address: suiAddressSchema }))
+    .mutation(async ({ input }) => {
+      try {
+        const { challengeId, message } = await issueEnokiChallengeToken(
+          input.address,
+          "signin"
+        );
+        return { challengeId, message };
+      } catch (error) {
+        if (error instanceof SharedRedisUnavailableError) {
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: "Authentication service temporarily unavailable",
+          });
+        }
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: error instanceof Error ? error.message : AUTH_ERRORS.NETWORK_ERROR,
+        });
+      }
+    }),
+
+  /**
    * Connect wallet - authenticate with Sui wallet (Slush, Sui Wallet)
-   * Verifies signature and creates session
+   * Every call must prove address ownership with a server-issued single-use
+   * challenge (issueWalletChallenge). The caller never chooses the signed
+   * message, and the challenge is consumed atomically, so a captured
+   * {challengeId, signature} pair cannot be replayed into a second session.
    */
   connectWallet: procedure
     .input(connectWalletInput)
     .mutation(async ({ ctx, input }) => {
-      const { walletType, address, signature, message } = input;
+      const { walletType, challengeId, signature } = input;
+      // Normalize once so the challenge check and every DB op key on the same
+      // canonical address (a non-canonical variant would otherwise verify but
+      // miss the stored row).
+      const address = normalizeSuiAddress(input.address);
 
       try {
-        // Verify the wallet signature before creating a session
-        const signerAddress = await verifyPersonalMessageSignature(
-          new TextEncoder().encode(message),
-          signature,
-        ).catch(() => {
-          throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid signature" });
-        });
-
-        if (signerAddress.toSuiAddress() !== address) {
-          throw new TRPCError({ code: "UNAUTHORIZED", message: "Signature does not match address" });
+        // Ownership gate — must pass BEFORE the user upsert or session insert.
+        let ownershipVerified: boolean;
+        try {
+          ownershipVerified = await verifyAndConsumeEnokiChallenge({
+            rawAddress: address,
+            challengeId,
+            signature,
+            purpose: "signin",
+          });
+        } catch (error) {
+          if (error instanceof SharedRedisUnavailableError) {
+            throw new TRPCError({
+              code: "SERVICE_UNAVAILABLE",
+              message: "Authentication service temporarily unavailable",
+            });
+          }
+          throw error;
+        }
+        if (!ownershipVerified) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Wallet ownership verification failed",
+          });
         }
 
         // Create or update user via service
@@ -100,7 +142,9 @@ export const authRouter = router({
           userId: user.id,
           walletAddress: address,
           walletType,
-          signedMessage: message,
+          // The consumed challenge is the credential of record. Record its id
+          // for audit rather than a message a caller could choose and replay.
+          signedMessage: `wallet-challenge:${challengeId}`,
           signature,
           signedAt: new Date(),
           expiresAt,
