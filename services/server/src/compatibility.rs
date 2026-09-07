@@ -7,7 +7,7 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-pub const RELAYER_API_VERSION: &str = "1.0.0";
+pub const RELAYER_API_VERSION: &str = "1.1.0";
 pub const MIN_TYPESCRIPT_SDK_VERSION: &str = "0.0.4";
 pub const MIN_PYTHON_SDK_VERSION: &str = "0.1.0";
 pub const MIN_MCP_PACKAGE_VERSION: &str = "0.0.1";
@@ -83,6 +83,8 @@ fn feature_flags() -> BTreeMap<String, bool> {
         ("auth.accountBoundNonce".to_string(), true),
         ("auth.sealSessionHeader".to_string(), true),
         ("config.publicDeploymentMetadata".to_string(), true),
+        // Per-blob retraction that survives /api/restore (WALM-392).
+        ("forget.blobTombstone".to_string(), true),
         ("remember.asyncJobs".to_string(), true),
         ("remember.bulk".to_string(), true),
         ("runtime.versionEndpoint".to_string(), true),

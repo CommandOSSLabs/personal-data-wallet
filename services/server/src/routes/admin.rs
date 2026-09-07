@@ -1,9 +1,12 @@
-//! Admin / utility handlers: `/api/embed`, `/api/ask`, `/api/forget`, `/api/stats`,
-//! `/api/restore`, `GET /health`, `GET /config`.
+//! Admin / utility handlers: `/api/embed`, `/api/ask`, `/api/forget`,
+//! `/api/forget/blob`, `/api/stats`, `/api/restore`, `GET /health`,
+//! `GET /config`.
 //!
 //! `ask` is the AI-with-memory demo (recall → inject memories into the LLM
 //! system prompt → answer). `forget`/`stats` are owner-scoped, mode-blind
-//! admin ops the benchmark harness uses for cleanup/verification. `restore`
+//! admin ops the benchmark harness uses for cleanup/verification.
+//! `forget_blob` is the per-memory retraction path (WALM-392): unlike
+//! `forget`, it is blob-scoped and durable against `restore`. `restore`
 //! rebuilds a namespace's vector index from the on-chain blobs (download →
 //! SEAL-decrypt → re-embed → insert missing rows). `/health` reports the
 //! deployment mode; `/config` exposes the public Sui/package metadata the
@@ -81,6 +84,71 @@ pub async fn forget(
 
     Ok(Json(ForgetResponse {
         deleted,
+        namespace: namespace.clone(),
+        owner: owner.clone(),
+    }))
+}
+
+/// POST /api/forget/blob
+///
+/// Retract ONE memory by `blob_id` (WALM-392). This is the remediation path
+/// for a secret written by mistake — an API key, a credential, personal data
+/// the user never meant to store — which the append-only write surface would
+/// otherwise return from every recall forever.
+///
+/// Deliberately a separate route from `POST /api/forget` rather than an
+/// overload of it. The two have opposite semantics: `forget` is a
+/// namespace-wide delete that `/api/restore` can undo, and the benchmark
+/// harness depends on exactly that for inter-run cleanup. This one is
+/// blob-scoped and durable — the blob_id is recorded in `forgotten_blobs`,
+/// which `restore` consults, so the memory does not come back.
+///
+/// The Walrus blob is NOT deleted and cannot be: Walrus has no delete, and
+/// keeping the immutable history is the product. The retraction is at the
+/// index level, which is what every read path actually queries.
+///
+/// Owner-scoped: the owner comes from the signed headers, never the body, so
+/// a caller can only retract their own memories.
+pub async fn forget_blob(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthInfo>,
+    Json(body): Json<ForgetBlobRequest>,
+) -> Result<Json<ForgetBlobResponse>, AppError> {
+    validate_namespace(&body.namespace)?;
+    // Rejected before touching the database, exactly as `validate_namespace`
+    // is and for the same reasons — this is the only route that binds a
+    // caller-supplied blob_id into a Postgres text column, and it lands in
+    // `forgotten_blobs`' (owner, namespace, blob_id) primary key. Empty,
+    // oversized and NUL-bearing values all fail *inside* Postgres, so without
+    // this they would surface as HTTP 500 on ordinary bad input rather than an
+    // actionable 400. See `validate_blob_id`.
+    validate_blob_id(&body.blob_id)?;
+
+    let owner = &auth.owner;
+    let namespace = &body.namespace;
+    let blob_id = &body.blob_id;
+    tracing::info!(
+        "forget blob: owner={} ns={} blob_id={}",
+        owner,
+        namespace,
+        blob_id
+    );
+
+    let (deleted, forgotten) = state.db.forget_blob(blob_id, owner, namespace).await?;
+
+    tracing::info!(
+        "forget blob complete: deleted {} entries for owner={} ns={} blob_id={} (newly_forgotten={})",
+        deleted,
+        owner,
+        namespace,
+        blob_id,
+        forgotten
+    );
+
+    Ok(Json(ForgetBlobResponse {
+        deleted,
+        forgotten,
+        blob_id: blob_id.clone(),
         namespace: namespace.clone(),
         owner: owner.clone(),
     }))
@@ -482,6 +550,45 @@ pub async fn ask(
 // /api/restore
 // ============================================================
 
+/// On-chain blobs that still need re-importing: everything in `all_blob_ids`
+/// that is not already accounted for locally.
+///
+/// Three exclusion sources, all meaning the same thing to `restore` — "do not
+/// download and re-index this blob for this owner in this namespace":
+///
+/// - `indexed` — a live `vector_entries` row already holds it.
+/// - `failed` — it permanently failed a previous restore (SEAL decrypt or
+///   UTF-8 validation), the WALM-299 / GH #501 negative cache.
+/// - `forgotten` — the owner retracted it via `POST /api/forget/blob`
+///   (WALM-392).
+///
+/// `forgotten` is the load-bearing one, and the reason this is a named
+/// function rather than an inline chain. Retracting a memory *deletes* its
+/// index row, and an absent row is precisely the signal this function uses to
+/// decide a blob is missing and must be re-imported. Drop `forgotten` here and
+/// every restore faithfully re-downloads the secret the user asked to forget —
+/// the retraction silently undoes itself, which is the exact failure WALM-392
+/// exists to close. Excluded blobs are reported as "skipped", same as any
+/// other locally-accounted-for blob.
+fn select_missing_blobs(
+    all_blob_ids: &[String],
+    indexed: &[String],
+    failed: &[String],
+    forgotten: &[String],
+) -> Vec<String> {
+    let accounted_for: std::collections::HashSet<&str> = indexed
+        .iter()
+        .map(|s| s.as_str())
+        .chain(failed.iter().map(|s| s.as_str()))
+        .chain(forgotten.iter().map(|s| s.as_str()))
+        .collect();
+    all_blob_ids
+        .iter()
+        .filter(|id| !accounted_for.contains(id.as_str()))
+        .cloned()
+        .collect()
+}
+
 /// Slice `all_missing` to at most `limit` entries, reporting whether more
 /// than `limit` were available. Kept as its own function (rather than a
 /// slice plus a separately-derived boolean inline in `restore()`) so the
@@ -663,18 +770,22 @@ async fn restore_unbounded(
     // validation for this owner+namespace is never re-downloaded and
     // re-decrypt-attempted on a later call; it's already correctly reported
     // as "skipped", same as any other missing-but-excluded blob.
+    // Blobs the owner explicitly retracted via `POST /api/forget/blob` are
+    // excluded here too (WALM-392). This is what makes a retraction durable
+    // rather than cosmetic: forgetting removes the index row, and a missing
+    // row is precisely the signal this step uses to decide a blob needs
+    // re-importing, so without `forgotten_blob_ids` the next restore would
+    // faithfully re-download and re-index the secret the user asked to
+    // forget. Reported as "skipped", same as any other excluded blob.
     let existing_blob_ids = state.db.get_blobs_by_namespace(owner, namespace).await?;
     let failed_blob_ids = state.db.get_failed_blob_ids(owner, namespace).await?;
-    let existing_set: std::collections::HashSet<&str> = existing_blob_ids
-        .iter()
-        .map(|s| s.as_str())
-        .chain(failed_blob_ids.iter().map(|s| s.as_str()))
-        .collect();
-    let all_missing: Vec<String> = all_blob_ids
-        .iter()
-        .filter(|id| !existing_set.contains(id.as_str()))
-        .cloned()
-        .collect();
+    let forgotten_blob_ids = state.db.get_forgotten_blob_ids(owner, namespace).await?;
+    let all_missing = select_missing_blobs(
+        &all_blob_ids,
+        &existing_blob_ids,
+        &failed_blob_ids,
+        &forgotten_blob_ids,
+    );
     // Apply limit — query-blobs' on-chain ordering is unspecified (the
     // gRPC `listOwnedObjects` path replaced the old, genuinely newest-first
     // `queryTransactionBlocks` scan; see walrus-query.ts's own doc-comment).
@@ -695,10 +806,11 @@ async fn restore_unbounded(
     );
     let skipped = total - missing_blob_ids.len();
     tracing::info!(
-        "restore: total={} on-chain, existing={}, negative-cached={}, missing={} (limited to {}, truncated={}, source_capped={}) for ns={}",
+        "restore: total={} on-chain, existing={}, negative-cached={}, forgotten={}, missing={} (limited to {}, truncated={}, source_capped={}) for ns={}",
         total,
         existing_blob_ids.len(),
         failed_blob_ids.len(),
+        forgotten_blob_ids.len(),
         missing_blob_ids.len(),
         limit,
         truncated,
@@ -978,7 +1090,9 @@ async fn restore_unbounded(
 #[cfg(test)]
 mod tests {
     use super::encode_untrusted_memory_context;
-    use crate::types::{RecallResult, RestoreResponse};
+    use crate::types::{
+        validate_blob_id, AppError, RecallResult, RestoreResponse, MAX_BLOB_ID_BYTES,
+    };
 
     // ── Memory context stays structured, untrusted JSON ──────────
 
@@ -1168,6 +1282,85 @@ mod tests {
         assert!(
             !non_empty.is_empty(),
             "non-empty namespace must pass the validation predicate"
+        );
+    }
+
+    // ── /api/forget/blob retraction survives restore (WALM-392) ─────────
+    //
+    // The headline claim of the per-blob retraction: a forgotten memory is
+    // never re-imported from Walrus. `forget_blob` deletes the index row, and
+    // restore treats "on chain but no local row" as "needs re-importing", so
+    // the ONLY thing standing between a retracted secret and a faithful
+    // re-import is `forgotten` being part of restore's exclusion set.
+    //
+    // Exercises the real production function rather than re-deriving the
+    // set-difference, so dropping the `forgotten` chain in `select_missing_blobs`
+    // fails CI instead of silently resurrecting the secret on the next restore.
+
+    #[test]
+    fn select_missing_blobs_excludes_forgotten_blobs() {
+        let on_chain: Vec<String> = ["live", "gone", "broken", "secret"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let indexed = vec!["live".to_string()];
+        let failed = vec!["broken".to_string()];
+        let forgotten = vec!["secret".to_string()];
+
+        let missing = super::select_missing_blobs(&on_chain, &indexed, &failed, &forgotten);
+
+        assert_eq!(
+            missing,
+            vec!["gone".to_string()],
+            "only the blob with no local row and no exclusion is restored"
+        );
+        assert!(
+            !missing.contains(&"secret".to_string()),
+            "a retracted blob must never be re-imported — this is the whole point of WALM-392"
+        );
+    }
+
+    #[test]
+    fn select_missing_blobs_keeps_retraction_namespace_scoped_to_its_inputs() {
+        // `get_forgotten_blob_ids` is already owner+namespace scoped, so an
+        // empty `forgotten` list must not accidentally exclude anything: a
+        // blob retracted in another namespace still restores here.
+        let on_chain = vec!["secret".to_string()];
+
+        let missing = super::select_missing_blobs(&on_chain, &[], &[], &[]);
+
+        assert_eq!(
+            missing,
+            vec!["secret".to_string()],
+            "no retraction for this owner+namespace means the blob still restores"
+        );
+    }
+
+    #[test]
+    fn forget_blob_rejects_unusable_blob_ids_with_400() {
+        // `forget_blob` runs the real validator before touching the database.
+        // Exercising `validate_blob_id` itself (rather than re-deriving
+        // `is_empty()`) is what makes this a test: each rejection below is a
+        // reproducible Postgres error on the `forgotten_blobs` primary key, so
+        // dropping the call would turn ordinary bad input into HTTP 500.
+        assert!(
+            matches!(validate_blob_id(""), Err(AppError::BadRequest(_))),
+            "empty blob_id can only ever match nothing"
+        );
+        assert!(
+            matches!(
+                validate_blob_id(&"b".repeat(MAX_BLOB_ID_BYTES + 1)),
+                Err(AppError::BadRequest(_))
+            ),
+            "oversized blob_id overflows the forgotten_blobs B-tree tuple"
+        );
+        assert!(
+            matches!(validate_blob_id("blob\0evil"), Err(AppError::BadRequest(_))),
+            "NUL in a text bind is rejected by Postgres (WALM-439)"
+        );
+        assert!(
+            validate_blob_id("Xk3rC9tVv0qLmNpQrStUvWxYz1234567890abcdEFGH").is_ok(),
+            "a real Walrus blob id must pass"
         );
     }
 }

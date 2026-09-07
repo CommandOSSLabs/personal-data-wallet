@@ -471,6 +471,33 @@ export interface RestoreResult {
     truncated: boolean;
 }
 
+/**
+ * Result from forget() — retraction of a single memory (WALM-392).
+ *
+ * Neither field is an error signal; both are success detail.
+ */
+export interface ForgetResult {
+    /**
+     * Index rows removed by this call.
+     *
+     * `0` is a success, not a miss. The memory may already have been
+     * un-indexed — expiry, a Walrus-404 cleanup, an earlier namespace-wide
+     * forget — while its blob is still on chain and therefore still
+     * restorable. The retraction is recorded either way, so a `0` here still
+     * means the memory cannot come back.
+     */
+    deleted: number;
+    /**
+     * `true` when this call created the retraction record, `false` when the
+     * blob was already retracted by an earlier call. Retraction is idempotent;
+     * `false` means "already done", not "failed".
+     */
+    forgotten: boolean;
+    blob_id: string;
+    namespace: string;
+    owner: string;
+}
+
 // ============================================================
 // Full Client-Side Manual Flow — MemWalManual class
 // ============================================================

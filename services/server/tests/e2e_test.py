@@ -386,6 +386,97 @@ def test_remember_recall_happy_path(signing_key: SigningKey, account_id: str | N
     print(f"[pass] POST /api/recall → {recall_result['total']} hits, top distance={top['distance']:.4f}")
 
 
+def test_forget_blob_survives_restore(signing_key: SigningKey, account_id: str | None) -> None:
+    """Signed /api/forget/blob retracts one memory, and /api/restore does NOT undo it.
+
+    This is the only layer that can prove WALM-392's headline claim. The unit
+    tests pin the exclusion predicate; only a live relayer can show that a
+    retracted blob stays retracted across a real restore, because restore
+    rediscovers blobs from on-chain ownership and re-indexes anything with no
+    local row — which is exactly what forgetting leaves behind.
+
+    Requires real Walrus + SEAL + Sui + funded server wallet + delegate key
+    registered on-chain in the Walrus Memory account identified by account_id.
+    """
+    namespace = "e2e-forget"
+    secret = "The staging API key is sk-e2e-forget-do-not-use."
+
+    accepted = make_signed_request(
+        "POST",
+        "/api/remember",
+        {"text": secret, "namespace": namespace},
+        signing_key,
+        account_id=account_id,
+    )
+    completed = wait_for_remember_job(signing_key, account_id, accepted["job_id"])
+    blob_id = completed["blob_id"]
+    print(f"[pass] stored sentinel for retraction → blob_id={blob_id}")
+
+    recall_body = {"query": "staging API key", "limit": 5, "namespace": namespace}
+    before = make_signed_request(
+        "POST", "/api/recall", recall_body, signing_key, account_id=account_id
+    )
+    assert before["total"] >= 1, f"Expected the sentinel to be recallable first, got {before}"
+    assert any(
+        r["blob_id"] == blob_id for r in before["results"]
+    ), f"Expected blob_id={blob_id} among recall hits, got {before['results']}"
+    print(f"[pass] POST /api/recall → sentinel present ({before['total']} hits)")
+
+    forgotten = make_signed_request(
+        "POST",
+        "/api/forget/blob",
+        {"blob_id": blob_id, "namespace": namespace},
+        signing_key,
+        account_id=account_id,
+    )
+    assert forgotten["forgotten"] is True, f"Expected a new retraction, got {forgotten}"
+    assert forgotten["deleted"] >= 1, f"Expected ≥1 index row removed, got {forgotten}"
+    print(
+        f"[pass] POST /api/forget/blob → deleted={forgotten['deleted']} forgotten={forgotten['forgotten']}"
+    )
+
+    after = make_signed_request(
+        "POST", "/api/recall", recall_body, signing_key, account_id=account_id
+    )
+    assert not any(
+        r["blob_id"] == blob_id for r in after["results"]
+    ), f"Retracted blob still returned by recall: {after['results']}"
+    print("[pass] POST /api/recall → sentinel gone")
+
+    # The assertion that distinguishes a retraction from a plain delete. A
+    # hard-deleted row is re-imported here, because restore treats "on chain,
+    # no local row" as "needs re-indexing".
+    restored = make_signed_request(
+        "POST",
+        "/api/restore",
+        {"namespace": namespace, "limit": 50},
+        signing_key,
+        account_id=account_id,
+    )
+    print(
+        f"[pass] POST /api/restore → restored={restored['restored']} skipped={restored['skipped']}"
+    )
+
+    final = make_signed_request(
+        "POST", "/api/recall", recall_body, signing_key, account_id=account_id
+    )
+    assert not any(
+        r["blob_id"] == blob_id for r in final["results"]
+    ), f"RESURRECTED: restore re-imported the retracted blob: {final['results']}"
+    print("[pass] POST /api/recall after restore → sentinel still gone (retraction is durable)")
+
+    # Idempotent: a second retraction reports forgotten=false, not an error.
+    repeat = make_signed_request(
+        "POST",
+        "/api/forget/blob",
+        {"blob_id": blob_id, "namespace": namespace},
+        signing_key,
+        account_id=account_id,
+    )
+    assert repeat["forgotten"] is False, f"Expected repeat retraction to be a no-op, got {repeat}"
+    print("[pass] POST /api/forget/blob (repeat) → forgotten=false, idempotent")
+
+
 MAX_REMEMBER_TEXT_BYTES = 1024 * 1024  # mirrors src/routes.rs constant
 # Largest plaintext we exercise in the e2e test. Smaller than the route
 # ceiling — bigger payloads work too (see scripts/bench-remember-sizes.ts)
@@ -529,6 +620,7 @@ def main() -> int:
         # missed. Share the same Walrus + SEAL prerequisites as the happy
         # path, so they run together.
         size_checks = (
+            ("forget_blob_survives_restore", test_forget_blob_survives_restore),
             ("size_64kb_summarized", test_remember_size_64kb_summarized),
             ("size_large_accepted", test_remember_size_large_accepted),
             ("size_over_limit_rejected", test_remember_size_over_limit_rejected),
@@ -541,6 +633,7 @@ def main() -> int:
                 print(f"[FAIL] {name}: {e}")
     else:
         print("[skip] remember_recall_happy_path (no TEST_DELEGATE_KEY)")
+        print("[skip] forget_blob_survives_restore (no TEST_DELEGATE_KEY)")
         print("[skip] size_*_test (no TEST_DELEGATE_KEY)")
 
     if owner_token_enabled:

@@ -66,7 +66,7 @@ Modern relayers expose compatibility metadata at `GET /version` and include the 
 ```json
 {
   "relayerVersion": "0.1.0",
-  "apiVersion": "1.0.0",
+  "apiVersion": "1.1.0",
   "minSupportedSdk": {
     "typescript": "0.0.4",
     "python": "0.1.0",
@@ -75,6 +75,7 @@ Modern relayers expose compatibility metadata at `GET /version` and include the 
   "featureFlags": {
     "auth.accountBoundNonce": true,
     "auth.sealSessionHeader": true,
+    "forget.blobTombstone": true,
     "runtime.versionEndpoint": true
   },
   "deprecations": [
@@ -93,6 +94,17 @@ Modern relayers expose compatibility metadata at `GET /version` and include the 
 ```
 
 `/health` keeps the legacy `version` field for older monitoring checks. New automation should prefer `relayerVersion`.
+
+## API Version History
+
+Current API version: `1.1.0`.
+
+| API version | Change | Type |
+| --- | --- | --- |
+| `1.1.0` | Added `POST /api/forget/blob` and the `forget.blobTombstone` feature flag: per-memory retraction that removes a blob from the search index permanently and is not undone by `POST /api/restore`. The Walrus blob itself is immutable and is not deleted. | Additive public surface (minor) |
+| `1.0.0` | Initial published contract: account-bound nonce, `x-seal-session` header, `/version` endpoint. | Baseline |
+
+Clients detect the retraction endpoint via `featureFlags["forget.blobTombstone"]` rather than by parsing `apiVersion`, so a client can support relayers on either side of this bump.
 
 ## Deprecation Process
 

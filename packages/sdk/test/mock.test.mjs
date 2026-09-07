@@ -154,8 +154,20 @@ test("MemWalMock supports job, bulk, analyze, forget, and clear flows", async ()
     assert.equal(analyzed.facts[0].text, "durable analyzed fact");
     assert.equal(analyzed.results[0].namespace, "analysis");
 
-    assert.equal(mock.forget("mock-blob-000001"), true);
-    assert.equal(mock.forget("missing"), false);
+    // forget() mirrors MemWal.forget(): async, ForgetResult-shaped, idempotent.
+    const retracted = await mock.forget("mock-blob-000001");
+    assert.equal(retracted.deleted, 1);
+    assert.equal(retracted.forgotten, true);
+
+    // Retracting a blob that holds no live record still records the
+    // retraction — deleted=0 is a success, not a miss.
+    const absent = await mock.forget("missing");
+    assert.equal(absent.deleted, 0);
+    assert.equal(absent.forgotten, true);
+
+    // Repeat retraction is a no-op, reported as forgotten=false rather than
+    // an error.
+    assert.equal((await mock.forget("mock-blob-000001")).forgotten, false);
     assert.equal(mock.clear("one"), 1);
     assert.equal(
         (await mock.recall({ query: "bulk", namespace: "one" })).total,

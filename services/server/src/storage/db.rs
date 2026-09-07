@@ -85,6 +85,7 @@ mod tests {
             include_str!("../../migrations/018_memory_expiry_synced_at_index.sql"),
             include_str!("../../migrations/019_memory_read_api_updated_at_set_not_null.sql"),
             include_str!("../../migrations/020_read_api_followups.sql"),
+            include_str!("../../migrations/021_forgotten_blobs.sql"),
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }
@@ -1489,6 +1490,14 @@ impl VectorDb {
             .await
             .map_err(|e| AppError::Internal(format!("Failed to run migration 020: {}", e)))?;
 
+        // Permanent per-blob retraction list backing `POST /api/forget/blob`
+        // (WALM-392). Deliberately NOT swept — see 021's header.
+        let migration_021 = include_str!("../../migrations/021_forgotten_blobs.sql");
+        sqlx::raw_sql(migration_021)
+            .execute(&pool)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to run migration 021: {}", e)))?;
+
         tracing::info!("database connected and migrations applied");
 
         Ok(Self { pool })
@@ -1960,6 +1969,159 @@ impl VectorDb {
             );
         }
         Ok(rows)
+    }
+
+    /// Retract one memory: durably record the blob as forgotten, then drop
+    /// its index rows. Reachable via `POST /api/forget/blob` — authed,
+    /// owner-scoped.
+    ///
+    /// Returns `(deleted, newly_forgotten)`: how many `vector_entries` rows
+    /// were removed, and whether this call created the retraction record
+    /// (`false` means the blob was already retracted — the call is
+    /// idempotent, not a no-op error).
+    ///
+    /// The Walrus blob is deliberately NOT deleted (Walrus has no delete,
+    /// and immutable history is the product): this removes the memory from
+    /// the *index*, which is what every read path consults. Because the row
+    /// is gone rather than flagged, recall, `/api/recall/manual`, `/api/ask`,
+    /// analyze's pre-extraction context and the owner-scoped read API all
+    /// stop returning it without needing a filter of their own — see
+    /// migration 021's header for why that is the chosen shape.
+    ///
+    /// Two writes, one transaction, in this order:
+    ///
+    /// 1. `forgotten_blobs` — the permanent retraction record. Written
+    ///    FIRST and unconditionally, including when the delete below matches
+    ///    nothing: a blob whose row was already reaped (Walrus-404 cleanup,
+    ///    expiry, an earlier namespace-wide forget) is still on chain and
+    ///    would still be re-imported by `restore`, so the caller's retraction
+    ///    must be recorded even though there is no row left to remove.
+    ///    `ON CONFLICT DO NOTHING` keeps a repeated call idempotent and
+    ///    preserves the original `forgotten_at`.
+    /// 2. The same delete-and-tombstone CTE `delete_by_blob_id` uses, so
+    ///    Console's incremental sync still sees the memory disappear.
+    ///
+    /// Ordering matters on failure: if the transaction aborts, neither write
+    /// lands and the caller gets an error. If it were split into two
+    /// statements and the second failed, recording the retraction first
+    /// leaves the memory suppressed from restore but still indexed — visibly
+    /// wrong and recoverable by retrying — rather than deleted from the index
+    /// but not suppressed, which silently resurrects on the next restore.
+    ///
+    /// Owner- and namespace-scoped for the same reason `delete_by_blob_id`
+    /// is: the same ciphertext can be indexed under more than one namespace,
+    /// and retracting it from one must not reach into another.
+    pub async fn forget_blob(
+        &self,
+        blob_id: &str,
+        owner: &str,
+        namespace: &str,
+    ) -> Result<(u64, bool), AppError> {
+        let started = std::time::Instant::now();
+        let mut tx =
+            self.pool.begin().await.map_err(|e| {
+                AppError::Internal(format!("Failed to begin forget-blob tx: {}", e))
+            })?;
+
+        let recorded = sqlx::query(
+            "INSERT INTO forgotten_blobs (owner, namespace, blob_id)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (owner, namespace, blob_id) DO NOTHING",
+        )
+        .bind(owner)
+        .bind(namespace)
+        .bind(blob_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to record forgotten blob: {}", e)));
+        let newly_forgotten = match recorded {
+            // `ON CONFLICT DO NOTHING` reports 0 rows when the retraction
+            // already existed, which is how a repeat call is distinguished
+            // from the first one.
+            Ok(recorded) => recorded.rows_affected() > 0,
+            Err(e) => {
+                crate::observability::observe_db("vector.forget_blob", "error", started.elapsed());
+                return Err(e);
+            }
+        };
+
+        let removed = sqlx::query(
+            "WITH removed AS (
+                DELETE FROM vector_entries
+                WHERE blob_id = $1 AND owner = $2 AND namespace = $3
+                RETURNING id, owner, namespace, blob_id
+             )
+             INSERT INTO memory_tombstones (memory_id, owner, namespace, blob_id)
+             SELECT id, owner, namespace, blob_id FROM removed
+             ON CONFLICT (memory_id) DO UPDATE SET deleted_at = NOW()",
+        )
+        .bind(blob_id)
+        .bind(owner)
+        .bind(namespace)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to delete forgotten blob: {}", e)));
+        let removed = match removed {
+            Ok(removed) => removed,
+            Err(e) => {
+                crate::observability::observe_db("vector.forget_blob", "error", started.elapsed());
+                return Err(e);
+            }
+        };
+
+        if let Err(e) = tx.commit().await {
+            crate::observability::observe_db("vector.forget_blob", "error", started.elapsed());
+            return Err(AppError::Internal(format!(
+                "Failed to commit forget-blob tx: {}",
+                e
+            )));
+        }
+        crate::observability::observe_db("vector.forget_blob", "ok", started.elapsed());
+
+        let rows = removed.rows_affected();
+        tracing::info!(
+            "forget blob: blob_id={}, owner={}, namespace={}, rows={}, newly_forgotten={}",
+            blob_id,
+            owner,
+            namespace,
+            rows,
+            newly_forgotten
+        );
+        Ok((rows, newly_forgotten))
+    }
+
+    /// Blob_ids the owner has explicitly retracted in this namespace
+    /// (WALM-392). Consulted by `restore()` alongside the live-row and
+    /// permanent-failure sets so a forgotten memory is never re-imported
+    /// from Walrus.
+    ///
+    /// This is the half of the retraction that makes it durable. Without it,
+    /// `restore` sees a blob that is on chain and has no local row — exactly
+    /// the shape of a memory that legitimately needs re-indexing — and
+    /// faithfully re-imports the secret the user asked to forget.
+    pub async fn get_forgotten_blob_ids(
+        &self,
+        owner: &str,
+        namespace: &str,
+    ) -> Result<Vec<String>, AppError> {
+        let started = std::time::Instant::now();
+        let result: Result<Vec<(String,)>, AppError> = sqlx::query_as(
+            "SELECT blob_id FROM forgotten_blobs
+             WHERE owner = $1 AND namespace = $2",
+        )
+        .bind(owner)
+        .bind(namespace)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to get forgotten blobs: {}", e)));
+        crate::observability::observe_db(
+            "vector.get_forgotten_blob_ids",
+            db_status(&result),
+            started.elapsed(),
+        );
+        let rows = result?;
+
+        Ok(rows.into_iter().map(|(blob_id,)| blob_id).collect())
     }
 
     /// Drop tombstones older than `TOMBSTONE_RETENTION`. Batched so a large

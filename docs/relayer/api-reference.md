@@ -93,7 +93,7 @@ Service liveness check. `status` is `"ok"` when the relayer process is up. HTTP 
   "status": "ok",
   "version": "0.1.0",
   "relayerVersion": "0.1.0",
-  "apiVersion": "1.0.0",
+  "apiVersion": "1.1.0",
   "minSupportedSdk": {
     "typescript": "0.0.4",
     "python": "0.1.0",
@@ -102,6 +102,7 @@ Service liveness check. `status` is `"ok"` when the relayer process is up. HTTP 
   "featureFlags": {
     "auth.accountBoundNonce": true,
     "auth.sealSessionHeader": true,
+    "forget.blobTombstone": true,
     "runtime.versionEndpoint": true
   },
   "deprecations": [],
@@ -496,6 +497,43 @@ Delete every vector index row for one namespace. The Walrus blobs persist, so a 
 ```
 
 `deleted` is the number of index rows the relayer removed.
+
+### `POST /api/forget/blob`
+
+Retract a single memory by `blob_id`. This is the remediation path for a fact that should never have been stored — a leaked API key, a password, personal data captured by mistake — which the append-only write surface would otherwise return from every recall indefinitely.
+
+Distinct from `POST /api/forget`, which deletes a whole namespace and which `POST /api/restore` can undo. This route is blob-scoped and durable: the `blob_id` is recorded permanently, and `restore` consults that record, so the memory is not re-imported.
+
+**The Walrus blob is not deleted, and cannot be.** Walrus is immutable storage; the encrypted blob remains on chain as history. What this removes is the index entry, which is what every read path queries — `/api/recall`, `/api/recall/manual`, `/api/ask`, and the pre-extraction context in `/api/analyze` all stop returning it. If the retracted memory contained a live credential, rotate it: the ciphertext still exists, and anyone able to decrypt it still can.
+
+The relayer resolves the owner from the signed headers, so a caller can only retract their own memories. Retraction is namespace-scoped: the same blob can legitimately be indexed under two namespaces, and retracting it from one does not affect the other.
+
+**Request:**
+
+```json
+{
+  "blob_id": "0x...",
+  "namespace": "demo"
+}
+```
+
+`namespace` defaults to `"default"`. A `blob_id` that is empty, longer than 255 bytes, or contains a NUL byte is rejected with `400`.
+
+**Response:**
+
+```json
+{
+  "deleted": 1,
+  "forgotten": true,
+  "blob_id": "0x...",
+  "namespace": "demo",
+  "owner": "0x..."
+}
+```
+
+`deleted` is the number of index rows removed. `0` is a success, not a miss: the memory may already have been un-indexed (expiry, a Walrus-404 cleanup, an earlier namespace-wide forget) while its blob is still on chain and therefore still restorable — the retraction is recorded either way.
+
+`forgotten` is `true` when this call created the retraction record and `false` when the blob had already been retracted. The endpoint is idempotent; `false` means "already done", not "failed".
 
 ### `POST /api/stats`
 
