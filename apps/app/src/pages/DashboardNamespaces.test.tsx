@@ -215,6 +215,28 @@ describe('Dashboard namespaces pagination', () => {
         expect(nsCalls().at(-1)).not.toContain('updated_after')
     })
 
+    it('keeps the page-size selector reachable after the list fits one page', async () => {
+        const user = userEvent.setup()
+        // 25 namespaces: two pages at 20, a single page at 50.
+        mocks.apiGet.mockImplementation(async (_k: string, _u: string, path: string) => {
+            if (!path.includes('/namespaces')) return {}
+            if (path.includes('limit=50')) return page('all', 25, false)
+            if (path.includes('updated_after=cursor-1')) return page('b', 5, false)
+            return page('a', 20, true, 'cursor-1')
+        })
+
+        const card = await namespacesCard()
+        await within(card).findByText('a-0')
+        await user.selectOptions(within(card).getByLabelText('Items per page'), '50')
+
+        await within(card).findByText('all-24')
+        // Everything now fits, but the selector must survive so 20 is reachable.
+        const select = within(card).getByLabelText('Items per page')
+        expect(select).toBeTruthy()
+        await user.selectOptions(select, '20')
+        await waitFor(() => expect(nsCalls().at(-1)).toContain('limit=20'))
+    })
+
     it('keeps the empty state', async () => {
         mocks.apiGet.mockImplementation(async (_k: string, _u: string, path: string) =>
             path.includes('/namespaces') ? page('a', 0, false) : {},

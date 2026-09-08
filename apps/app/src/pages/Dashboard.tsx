@@ -532,7 +532,12 @@ export default function Dashboard({
     const namespacesRangeStart = namespacesPage * namespacesPageSize + 1
     const namespacesRangeEnd = namespacesPage * namespacesPageSize + namespaces.length
     const namespacesPageMemories = namespaces.reduce((n, ns) => n + ns.memory_count, 0)
-    const namespacesIsPaginated = namespacesHasMore || namespacesPage > 0
+    // Hide the footer when everything fits on one page — but keep it once the
+    // user has picked a non-default page size, or raising the size to fit the
+    // whole list would remove the only control that can lower it again.
+    const namespacesIsPaginated = namespacesHasMore
+        || namespacesPage > 0
+        || namespacesPageSize !== NAMESPACE_DEFAULT_PAGE_SIZE
 
     // ============================================================
     // Generate + add a new delegate key (via SDK)
