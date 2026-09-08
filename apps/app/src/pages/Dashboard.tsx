@@ -28,7 +28,7 @@ import { SecretValueInput } from '../components/SecretValueInput'
 import { config } from '../config'
 import { getAnalyticsErrorType, trackEvent } from '../utils/analytics'
 import { apiGet } from '../utils/api'
-import { fetchAccountIdForOwner, fetchObjectJson, publicKeyToHex } from '../utils/suiClientCompat'
+import { fetchAccountIdForOwner, fetchObjectJson, isMissingObjectError, pollAccountIdForOwner, publicKeyToHex } from '../utils/suiClientCompat'
 
 function DelegateKeyCtaIcon(props: SVGProps<SVGSVGElement>) {
     return (
@@ -346,12 +346,16 @@ export default function Dashboard({
         setAccountLookupComplete(false)
         setLoadingAccount(true)
         try {
-            const accountId = await fetchAccountIdForOwner(suiClient, config.memwalRegistryId, address)
+            const accountId = await pollAccountIdForOwner(suiClient, config.memwalRegistryId, address, { attempts: 4 })
             if (accountId) {
                 setResolvedAccountObjectId(accountId)
             }
         } catch (err) {
-            console.error('Failed to fetch account object ID:', err)
+            if (isMissingObjectError(err)) {
+                console.warn('Account object not readable yet:', err)
+            } else {
+                console.error('Failed to fetch account object ID:', err)
+            }
             setResolvedAccountObjectId(null)
         } finally {
             setAccountLookupAddress(address)

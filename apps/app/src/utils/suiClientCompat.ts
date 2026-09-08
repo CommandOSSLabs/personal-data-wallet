@@ -46,22 +46,76 @@ function unwrapJsonRpcFields(value: unknown): unknown {
     return value
 }
 
+/** RPC 404 / NotExists — the object is not readable yet, not a fatal setup failure. */
+export function isMissingObjectError(error: unknown): boolean {
+    const status =
+        error && typeof error === 'object' && 'status' in error
+            ? Number((error as { status: unknown }).status)
+            : undefined
+    if (status === 404) return true
+    const message = error instanceof Error ? error.message : String(error)
+    return /unexpected status code:\s*404|status code:\s*404|notExists|not found/i.test(message)
+}
+
 /** Fetch a Move object's fields as a flat JS object, regardless of client transport. */
 export async function fetchObjectJson(suiClient: unknown, objectId: string): Promise<Record<string, unknown> | null> {
-    if (isGrpcClient(suiClient)) {
-        const res = await suiClient.getObject({ objectId, include: { json: true } })
-        return res.object.json ?? null
-    }
+    try {
+        if (isGrpcClient(suiClient)) {
+            const res = await suiClient.getObject({ objectId, include: { json: true } })
+            return res.object.json ?? null
+        }
 
-    const res = await (suiClient as JsonRpcClientLike).getObject({ id: objectId, options: { showContent: true } })
-    const content = res?.data?.content
-    if (!content?.fields) return null
-    return unwrapJsonRpcFields(content.fields) as Record<string, unknown>
+        const res = await (suiClient as JsonRpcClientLike).getObject({ id: objectId, options: { showContent: true } })
+        const content = res?.data?.content
+        if (!content?.fields) return null
+        return unwrapJsonRpcFields(content.fields) as Record<string, unknown>
+    } catch (error) {
+        if (isMissingObjectError(error)) return null
+        throw error
+    }
 }
 
 // The registry's inner Table object ID is an immutable on-chain constant —
 // cache it so repeat account lookups skip the registry round trip.
 const registryTableIdCache = new Map<string, string>()
+
+const ACCOUNT_LOOKUP_RETRY_MS = [200, 500, 1000, 2000, 2000]
+
+/** Test-only: drop the registry Table id cache. */
+export function resetRegistryTableIdCache(): void {
+    registryTableIdCache.clear()
+}
+
+function extractTableId(accounts: unknown): string | undefined {
+    const rawId = (accounts as { id?: string | { id?: string } } | undefined)?.id
+    return typeof rawId === 'string' ? rawId : rawId?.id
+}
+
+/** Extract the account created by create_account across JSON-RPC response variants. */
+export function findCreatedAccountId(transaction: {
+    objectChanges?: Array<Record<string, unknown>> | null
+    events?: Array<Record<string, unknown>> | null
+}): string | null {
+    const createdAccount = transaction.objectChanges?.find(
+        (change) =>
+            change.type === 'created' &&
+            typeof change.objectType === 'string' &&
+            change.objectType.includes('::account::MemWalAccount'),
+    )
+    if (typeof createdAccount?.objectId === 'string') return createdAccount.objectId
+
+    const accountCreatedEvent = transaction.events?.find(
+        (event) =>
+            typeof event.type === 'string' && event.type.endsWith('::account::AccountCreated'),
+    )
+    const parsedJson = accountCreatedEvent?.parsedJson
+    if (parsedJson && typeof parsedJson === 'object') {
+        const accountId = (parsedJson as { account_id?: unknown }).account_id
+        if (typeof accountId === 'string') return accountId
+    }
+
+    return null
+}
 
 /** Resolve a MemWalAccount object ID for `ownerAddress` via the registry's Table<address, ID>. */
 export async function fetchAccountIdForOwner(
@@ -69,35 +123,61 @@ export async function fetchAccountIdForOwner(
     registryId: string,
     ownerAddress: string,
 ): Promise<string | null> {
-    let tableId = registryTableIdCache.get(registryId)
-    if (!tableId) {
-        const registryJson = await fetchObjectJson(suiClient, registryId)
-        // gRPC json flattens the Table's UID to a plain string. Keep the nested
-        // form solely for the explicit local JSON-RPC browser suite.
-        const rawId = (registryJson?.accounts as { id?: string | { id?: string } } | undefined)?.id
-        tableId = typeof rawId === 'string' ? rawId : rawId?.id
-        if (!tableId) return null
-        registryTableIdCache.set(registryId, tableId)
-    }
+    try {
+        let tableId = registryTableIdCache.get(registryId)
+        if (!tableId) {
+            const registryJson = await fetchObjectJson(suiClient, registryId)
+            // gRPC json flattens the Table's UID to a plain string. Keep the nested
+            // form solely for the explicit local JSON-RPC browser suite.
+            tableId = extractTableId(registryJson?.accounts)
+            if (!tableId) return null
+            registryTableIdCache.set(registryId, tableId)
+        }
 
-    if (isGrpcClient(suiClient)) {
-        const dynFieldRes = await suiClient.getDynamicField({
+        if (isGrpcClient(suiClient)) {
+            const dynFieldRes = await suiClient.getDynamicField({
+                parentId: tableId,
+                name: { type: 'address', bcs: fromHex(normalizeSuiAddress(ownerAddress)) },
+            })
+            const valueBytes = dynFieldRes?.dynamicField?.value?.bcs
+            if (!valueBytes || valueBytes.length !== 32) return null
+            return '0x' + toHex(valueBytes)
+        }
+
+        const dynField = await (suiClient as JsonRpcClientLike).getDynamicFieldObject({
             parentId: tableId,
-            name: { type: 'address', bcs: fromHex(normalizeSuiAddress(ownerAddress)) },
+            name: { type: 'address', value: ownerAddress },
         })
-        const valueBytes = dynFieldRes?.dynamicField?.value?.bcs
-        if (!valueBytes || valueBytes.length !== 32) return null
-        return '0x' + toHex(valueBytes)
+        const content = dynField?.data?.content
+        if (!content?.fields || typeof content.fields !== 'object') return null
+        const value = (content.fields as Record<string, unknown>).value
+        return typeof value === 'string' ? value : null
+    } catch (error) {
+        if (isMissingObjectError(error)) return null
+        throw error
     }
+}
 
-    const dynField = await (suiClient as JsonRpcClientLike).getDynamicFieldObject({
-        parentId: tableId,
-        name: { type: 'address', value: ownerAddress },
-    })
-    const content = dynField?.data?.content
-    if (!content?.fields || typeof content.fields !== 'object') return null
-    const value = (content.fields as Record<string, unknown>).value
-    return typeof value === 'string' ? value : null
+/** Poll the registry until the account is readable, or the attempt budget is spent. */
+export async function pollAccountIdForOwner(
+    suiClient: unknown,
+    registryId: string,
+    ownerAddress: string,
+    options?: {
+        attempts?: number
+        sleep?: (ms: number) => Promise<void>
+    },
+): Promise<string | null> {
+    const attempts = options?.attempts ?? 6
+    const sleep = options?.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
+    for (let i = 0; i < attempts; i++) {
+        const accountId = await fetchAccountIdForOwner(suiClient, registryId, ownerAddress)
+        if (accountId) return accountId
+        if (i < attempts - 1) {
+            await sleep(ACCOUNT_LOOKUP_RETRY_MS[Math.min(i, ACCOUNT_LOOKUP_RETRY_MS.length - 1)])
+        }
+    }
+    return null
 }
 
 /** Normalize a delegate key's public_key field to hex — gRPC encodes it as base64, JSON-RPC as number[]. */
