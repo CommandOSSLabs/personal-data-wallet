@@ -502,8 +502,6 @@ pub struct WalletBalanceLowAlert {
 #[derive(Debug, Clone)]
 pub struct PostgresStorageExhaustedAlert {
     pub sui_network: String,
-    pub used_bytes: Option<i64>,
-    pub max_bytes: Option<i64>,
     pub error: String,
 }
 
@@ -906,13 +904,9 @@ If the wallet is being topped up, rotate or temporarily remove that key from poo
         let action = "*Action (ops):* raise the Neon project size limit or reclaim disk. \
 This is not a per-user storage quota and is not a Walrus/SUI/WAL funding issue."
             .to_string();
-        let used = optional_i64(alert.used_bytes);
-        let max = optional_i64(alert.max_bytes);
         let details = format!(
-            "*Network:* `{}`\n*Database used bytes:* `{}`\n*Project size cap bytes:* `{}`\n*Error:* ```{}```",
+            "*Network:* `{}`\n*Error:* ```{}```",
             alert.sui_network,
-            used,
-            max,
             truncate(&alert.error, MAX_SLACK_ERROR_LEN),
         );
 
@@ -989,12 +983,6 @@ fn format_wal_amount(mist: u64) -> String {
 
 /// Format a token amount (mist/frost) to human-readable form.
 /// Generic for any token that uses 9 decimal places (SUI, WAL, etc).
-fn optional_i64(value: Option<i64>) -> String {
-    value
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| "-".to_string())
-}
-
 fn format_token_amount(mist: u64) -> String {
     let integer = mist / 1_000_000_000;
     let mut fractional = format!("{:09}", mist % 1_000_000_000);
@@ -1448,8 +1436,6 @@ mod tests {
         let payload =
             SlackPayload::for_postgres_storage_exhausted(&PostgresStorageExhaustedAlert {
                 sui_network: "mainnet".into(),
-                used_bytes: Some(3_196_190_720),
-                max_bytes: Some(3_221_225_472),
                 error:
                     "could not extend file because project size limit (3072 MB) has been exceeded"
                         .into(),
@@ -1462,26 +1448,8 @@ mod tests {
         assert!(json.contains("write_ready"));
         assert!(json.contains("not a user quota"));
         assert!(json.contains("do not tell users to send SUI/WAL"));
-        assert!(json.contains("3196190720"));
-        assert!(json.contains("3221225472"));
         assert!(json.contains("project size limit (3072 MB)"));
         assert!(!json.to_lowercase().contains("exhausted retries"));
-    }
-
-    #[test]
-    fn postgres_storage_exhausted_payload_handles_missing_size_fields() {
-        let payload =
-            SlackPayload::for_postgres_storage_exhausted(&PostgresStorageExhaustedAlert {
-                sui_network: "testnet".into(),
-                used_bytes: None,
-                max_bytes: None,
-                error: "no space left on device".into(),
-            });
-
-        let json = serde_json::to_string(&payload).unwrap();
-        assert!(json.contains("testnet"));
-        assert!(json.contains("`-`"));
-        assert!(json.contains("no space left on device"));
     }
 
     #[test]

@@ -836,8 +836,6 @@ pub(crate) async fn maybe_alert_postgres_storage_exhausted(state: &AppState, err
     }
     let alert = PostgresStorageExhaustedAlert {
         sui_network: state.config.sui_network.clone(),
-        used_bytes: None,
-        max_bytes: None,
         error: err.to_string(),
     };
     if let Err(alert_err) = state.alerts.notify_postgres_storage_exhausted(alert).await {

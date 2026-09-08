@@ -229,55 +229,28 @@ async fn postgres_write_ready(state: &std::sync::Arc<AppState>) -> bool {
 }
 
 async fn probe_postgres_write_ready(pool: &sqlx::PgPool) -> Result<bool, sqlx::Error> {
-    let (max_setting, max_unit): (Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT (SELECT setting FROM pg_settings WHERE name = 'neon.max_cluster_size'),
-                (SELECT unit FROM pg_settings WHERE name = 'neon.max_cluster_size')",
-    )
-    .fetch_one(pool)
-    .await?;
+    let max_setting: Option<String> =
+        sqlx::query_scalar("SELECT setting FROM pg_settings WHERE name = 'neon.max_cluster_size'")
+            .fetch_optional(pool)
+            .await?;
 
-    let Some(max_bytes) = neon_max_cluster_size_bytes(max_setting.as_deref(), max_unit.as_deref())
-    else {
+    let Some(max_bytes) = neon_max_cluster_size_bytes(max_setting.as_deref()) else {
         return Ok(true);
     };
 
     // Neon gates smgrextend on cluster size (WAL/history/other DBs), not
-    // pg_database_size of this database. Missing pg_cluster_size() (self-host)
-    // fails open.
-    let used_bytes: Option<i64> = match sqlx::query_scalar("SELECT pg_cluster_size()::bigint")
+    // pg_database_size of this database. Missing `pg_cluster_size()` fails
+    // open in `postgres_write_ready` (non-storage errors).
+    let used_bytes: i64 = sqlx::query_scalar("SELECT pg_cluster_size()::bigint")
         .fetch_one(pool)
-        .await
-    {
-        Ok(used) => used,
-        Err(err) if is_undefined_function(&err) => return Ok(true),
-        Err(err) => return Err(err),
-    };
+        .await?;
 
-    Ok(postgres_write_ready_from_sizes(used_bytes, Some(max_bytes)))
-}
-
-fn is_undefined_function(err: &sqlx::Error) -> bool {
-    match err {
-        sqlx::Error::Database(db) => db.code().as_deref() == Some("42883"),
-        _ => false,
-    }
-}
-
-/// `max_bytes` None = no Neon cap. `used_cluster_bytes` None = GUC present
-/// but `pg_cluster_size()` missing/NULL — fail open.
-fn postgres_write_ready_from_sizes(
-    used_cluster_bytes: Option<i64>,
-    max_bytes: Option<i64>,
-) -> bool {
-    match (used_cluster_bytes, max_bytes) {
-        (_, None) => true,
-        (None, Some(_)) => true,
-        (Some(used), Some(max)) => postgres_can_accept_writes(used, Some(max)),
-    }
+    Ok(postgres_can_accept_writes(used_bytes, max_bytes))
 }
 
 /// `None` = no cap (self-host / unset / unparseable / unlimited `-1`).
-fn neon_max_cluster_size_bytes(setting: Option<&str>, unit: Option<&str>) -> Option<i64> {
+/// Neon `neon.max_cluster_size` is MB.
+fn neon_max_cluster_size_bytes(setting: Option<&str>) -> Option<i64> {
     let setting = setting?.trim();
     if setting.is_empty() {
         return None;
@@ -286,26 +259,11 @@ fn neon_max_cluster_size_bytes(setting: Option<&str>, unit: Option<&str>) -> Opt
     if n <= 0 {
         return None;
     }
-    // Neon GUC is MB (`GUC_UNIT_MB`); `pg_settings.unit` is `MB` when present.
-    n.checked_mul(memory_unit_bytes(unit.unwrap_or("MB")))
+    n.checked_mul(1024 * 1024)
 }
 
-fn memory_unit_bytes(unit: &str) -> i64 {
-    match unit {
-        "B" => 1,
-        "kB" => 1024,
-        "MB" => 1024 * 1024,
-        "GB" => 1024 * 1024 * 1024,
-        "TB" => 1024i64.pow(4),
-        _ => 1024 * 1024,
-    }
-}
-
-fn postgres_can_accept_writes(used_bytes: i64, max_bytes: Option<i64>) -> bool {
-    match max_bytes {
-        None => true,
-        Some(max) => used_bytes.saturating_add(POSTGRES_EXTEND_HEADROOM_BYTES) < max,
-    }
+fn postgres_can_accept_writes(used_bytes: i64, max_bytes: i64) -> bool {
+    used_bytes.saturating_add(POSTGRES_EXTEND_HEADROOM_BYTES) < max_bytes
 }
 
 static WRITE_READY_CACHE: std::sync::Mutex<Option<(std::time::Instant, bool)>> =
@@ -1161,49 +1119,27 @@ mod tests {
     // ── /health write_ready Postgres size cap (WALM-612) ──────────────
 
     #[test]
-    fn postgres_can_accept_writes_without_neon_cap() {
-        assert!(super::postgres_can_accept_writes(3_196_190_720, None));
-        assert!(super::neon_max_cluster_size_bytes(None, None).is_none());
-        assert!(super::neon_max_cluster_size_bytes(Some("-1"), Some("MB")).is_none());
-        assert!(super::neon_max_cluster_size_bytes(Some("0"), Some("MB")).is_none());
-    }
-
-    #[test]
-    fn neon_max_cluster_size_bytes_uses_mb_unit() {
-        let max = super::neon_max_cluster_size_bytes(Some("3072"), Some("MB")).unwrap();
-        assert_eq!(max, 3072 * 1024 * 1024);
-        // Missing unit: Neon GUC is still MB.
+    fn neon_max_cluster_size_bytes_parses_mb_and_unlimited() {
+        assert!(super::neon_max_cluster_size_bytes(None).is_none());
+        assert!(super::neon_max_cluster_size_bytes(Some("-1")).is_none());
+        assert!(super::neon_max_cluster_size_bytes(Some("0")).is_none());
         assert_eq!(
-            super::neon_max_cluster_size_bytes(Some("3072"), None).unwrap(),
-            3072 * 1024 * 1024
+            super::neon_max_cluster_size_bytes(Some("3072")),
+            Some(3072 * 1024 * 1024)
         );
     }
 
     #[test]
     fn postgres_can_accept_writes_false_at_or_within_1mb_of_cap() {
         let max = 3072 * 1024 * 1024;
-        assert!(!super::postgres_can_accept_writes(max, Some(max)));
+        assert!(!super::postgres_can_accept_writes(max, max));
         assert!(!super::postgres_can_accept_writes(
             max - super::POSTGRES_EXTEND_HEADROOM_BYTES,
-            Some(max)
+            max
         ));
         assert!(super::postgres_can_accept_writes(
             max - super::POSTGRES_EXTEND_HEADROOM_BYTES - 1,
-            Some(max)
-        ));
-    }
-
-    #[test]
-    fn postgres_write_ready_from_sizes_uses_cluster_size_only_with_guc() {
-        let max = 3072 * 1024 * 1024;
-        // No Neon cap → sidecar-only, even if cluster is huge.
-        assert!(super::postgres_write_ready_from_sizes(Some(max), None));
-        // GUC present but pg_cluster_size() missing/NULL → fail open.
-        assert!(super::postgres_write_ready_from_sizes(None, Some(max)));
-        // Neon gate: cluster size at the cap is not writable.
-        assert!(!super::postgres_write_ready_from_sizes(
-            Some(max),
-            Some(max)
+            max
         ));
     }
 
