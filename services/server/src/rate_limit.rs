@@ -11,6 +11,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use crate::{
+    alerts::{is_postgres_storage_exhausted, PostgresStorageExhaustedAlert},
     client_ip::canonical_client_ip,
     storage::db::{StorageAdmission, StorageReservationRequest},
     types::{AppError, AppState, AuthInfo},
@@ -781,7 +782,7 @@ pub async fn reserve_storage_quota(
     let lock_key = stable_hash_i64(owner);
     let requested: i64 = reservations.iter().map(|r| r.bytes).sum();
 
-    let admission = state
+    let admission = match state
         .db
         .admit_storage_reservations(
             owner,
@@ -790,7 +791,14 @@ pub async fn reserve_storage_quota(
             reservations,
             STORAGE_RESERVATION_TTL,
         )
-        .await?;
+        .await
+    {
+        Ok(admission) => admission,
+        Err(e) => {
+            maybe_alert_postgres_storage_exhausted(state, &e).await;
+            return Err(e);
+        }
+    };
 
     match admission {
         StorageAdmission::Admitted => Ok(()),
@@ -820,6 +828,24 @@ pub async fn reserve_storage_quota_one(
     bytes: i64,
 ) -> Result<(), AppError> {
     reserve_storage_quota(state, owner, &[StorageReservationRequest { id, bytes }]).await
+}
+
+async fn maybe_alert_postgres_storage_exhausted(state: &AppState, err: &AppError) {
+    if !is_postgres_storage_exhausted(&err.to_string()) {
+        return;
+    }
+    let alert = PostgresStorageExhaustedAlert {
+        sui_network: state.config.sui_network.clone(),
+        used_bytes: None,
+        max_bytes: None,
+        error: err.to_string(),
+    };
+    if let Err(alert_err) = state.alerts.notify_postgres_storage_exhausted(alert).await {
+        tracing::warn!(
+            "failed to send Slack alert for Postgres storage exhaustion: {}",
+            alert_err
+        );
+    }
 }
 
 /// Release reservations after the bytes are committed as rows, or after the

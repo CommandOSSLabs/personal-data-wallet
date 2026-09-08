@@ -19,6 +19,8 @@ const WALRUS_QUEUE_SATURATION_ALERT_DEDUP_SECS_ENV: &str =
 const WALRUS_QUEUE_SATURATION_ALERT_DEDUP_DEFAULT: Duration = Duration::from_secs(1800);
 const WALLET_BALANCE_LOW_ALERT_DEDUP_SECS_ENV: &str = "WALLET_BALANCE_LOW_ALERT_DEDUP_SECS";
 const WALLET_BALANCE_LOW_ALERT_DEDUP_DEFAULT: Duration = Duration::from_secs(43200);
+const POSTGRES_STORAGE_ALERT_DEDUP_SECS_ENV: &str = "POSTGRES_STORAGE_ALERT_DEDUP_SECS";
+const POSTGRES_STORAGE_ALERT_DEDUP_DEFAULT: Duration = Duration::from_secs(1800);
 
 /// Mirrors the `@mysten/walrus` dep version in
 /// `services/server/scripts/package.json`. Bump this constant in lockstep
@@ -97,6 +99,9 @@ pub struct AlertManager {
     /// Suppresses wallet balance low spam. Keyed by `(wallet_type:token, address)`
     /// so WAL and SUI can each alert once for the same wallet per dedup window.
     wallet_balance_low_dedup: AlertDedup,
+    /// Suppresses Postgres disk / Neon project-size-cap spam. The failure is
+    /// cluster-wide, so one notification per network per window — not per job.
+    postgres_storage_dedup: AlertDedup,
 }
 
 impl AlertManager {
@@ -130,6 +135,10 @@ impl AlertManager {
             wallet_balance_low_dedup: AlertDedup::new(dedup_window_from_env(
                 WALLET_BALANCE_LOW_ALERT_DEDUP_SECS_ENV,
                 WALLET_BALANCE_LOW_ALERT_DEDUP_DEFAULT,
+            )),
+            postgres_storage_dedup: AlertDedup::new(dedup_window_from_env(
+                POSTGRES_STORAGE_ALERT_DEDUP_SECS_ENV,
+                POSTGRES_STORAGE_ALERT_DEDUP_DEFAULT,
             )),
         }
     }
@@ -265,9 +274,30 @@ impl AlertManager {
         slack.send_payload(&payload).await
     }
 
+    pub async fn notify_postgres_storage_exhausted(
+        &self,
+        alert: PostgresStorageExhaustedAlert,
+    ) -> Result<(), AlertError> {
+        let Some(slack) = &self.slack else {
+            return Ok(());
+        };
+        // Cluster-wide cap: one notification per network per window. Concurrent
+        // remember/analyze jobs all hit the same Neon/Postgres size limit.
+        if self.should_suppress_postgres_storage(&alert.sui_network) {
+            return Ok(());
+        }
+        let payload = SlackPayload::for_postgres_storage_exhausted(&alert);
+        slack.send_payload(&payload).await
+    }
+
     fn should_suppress_wallet_balance_low(&self, alert: &WalletBalanceLowAlert) -> bool {
         self.wallet_balance_low_dedup
             .should_suppress(wallet_balance_low_dedup_key(alert))
+    }
+
+    fn should_suppress_postgres_storage(&self, sui_network: &str) -> bool {
+        self.postgres_storage_dedup
+            .should_suppress(postgres_storage_dedup_key(sui_network))
     }
 }
 
@@ -279,6 +309,22 @@ fn wallet_balance_low_dedup_key(alert: &WalletBalanceLowAlert) -> (String, Strin
         ),
         alert.address.clone(),
     )
+}
+
+fn postgres_storage_dedup_key(sui_network: &str) -> (String, String) {
+    (sui_network.to_string(), "postgres-storage".to_string())
+}
+
+/// True when Postgres (or Neon) refused a write because the disk / project
+/// size cap is exhausted. Matches the prod Neon message
+/// `could not extend file because project size limit (3072 MB) has been exceeded`
+/// plus vanilla `no space left on device` and SQLSTATE `53100` (disk_full).
+pub fn is_postgres_storage_exhausted(msg: &str) -> bool {
+    let lower = msg.to_ascii_lowercase();
+    lower.contains("could not extend file")
+        || lower.contains("project size limit")
+        || lower.contains("53100")
+        || lower.contains("no space left on device")
 }
 
 /// Read a dedup window (seconds) from `env_var`, falling back to `default`
@@ -448,6 +494,17 @@ pub struct WalletBalanceLowAlert {
     pub token: String,
     pub sui_network: String,
     pub wallet_index: Option<usize>,
+}
+
+/// Fired when Postgres cannot extend a file — Neon `project size limit`
+/// / SQLSTATE `53100` / `no space left on device`. Cluster-wide, not a
+/// per-user storage quota.
+#[derive(Debug, Clone)]
+pub struct PostgresStorageExhaustedAlert {
+    pub sui_network: String,
+    pub used_bytes: Option<i64>,
+    pub max_bytes: Option<i64>,
+    pub error: String,
 }
 
 #[derive(Debug)]
@@ -837,6 +894,46 @@ If the wallet is being topped up, rotate or temporarily remove that key from poo
             ],
         }
     }
+
+    fn for_postgres_storage_exhausted(alert: &PostgresStorageExhaustedAlert) -> Self {
+        let title = "MemWal Postgres storage exhausted".to_string();
+        let summary = format!(
+            "Postgres cannot accept writes on {}: the database disk/project size cap has been reached. \
+             Writes (remember/analyze) are failing. GET /health write_ready will be false. \
+             This is the database disk/project size cap, not a user quota; do not tell users to send SUI/WAL.",
+            alert.sui_network,
+        );
+        let action = "*Action (ops):* raise the Neon project size limit or reclaim disk. \
+This is not a per-user storage quota and is not a Walrus/SUI/WAL funding issue."
+            .to_string();
+        let used = optional_i64(alert.used_bytes);
+        let max = optional_i64(alert.max_bytes);
+        let details = format!(
+            "*Network:* `{}`\n*Database used bytes:* `{}`\n*Project size cap bytes:* `{}`\n*Error:* ```{}```",
+            alert.sui_network,
+            used,
+            max,
+            truncate(&alert.error, MAX_SLACK_ERROR_LEN),
+        );
+
+        Self {
+            text: summary.clone(),
+            blocks: vec![
+                SlackBlock::Header {
+                    text: plain_text(title),
+                },
+                SlackBlock::Section {
+                    text: mrkdwn(summary),
+                },
+                SlackBlock::Section {
+                    text: mrkdwn(action),
+                },
+                SlackBlock::Section {
+                    text: mrkdwn(details),
+                },
+            ],
+        }
+    }
 }
 
 fn plain_text(text: String) -> SlackText {
@@ -892,6 +989,12 @@ fn format_wal_amount(mist: u64) -> String {
 
 /// Format a token amount (mist/frost) to human-readable form.
 /// Generic for any token that uses 9 decimal places (SUI, WAL, etc).
+fn optional_i64(value: Option<i64>) -> String {
+    value
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "-".to_string())
+}
+
 fn format_token_amount(mist: u64) -> String {
     let integer = mist / 1_000_000_000;
     let mut fractional = format!("{:09}", mist % 1_000_000_000);
@@ -1320,5 +1423,77 @@ mod tests {
     fn format_token_amount_strips_trailing_zeros() {
         let amount = format_token_amount(1_100_000_000);
         assert_eq!(amount, "1.1");
+    }
+
+    #[test]
+    fn is_postgres_storage_exhausted_matches_prod_neon_message() {
+        let prod = "could not extend file because project size limit (3072 MB) has been exceeded";
+        assert!(is_postgres_storage_exhausted(prod));
+        assert!(is_postgres_storage_exhausted(&prod.to_ascii_uppercase()));
+        assert!(is_postgres_storage_exhausted(&format!(
+            "Internal Error: Failed to insert reservation: error returned from database: {prod}"
+        )));
+        assert!(is_postgres_storage_exhausted(
+            "ERROR: could not extend file \"base/16384/12345\": No space left on device"
+        ));
+        assert!(is_postgres_storage_exhausted("sqlstate 53100 disk_full"));
+        assert!(!is_postgres_storage_exhausted(
+            "duplicate key value violates unique constraint"
+        ));
+        assert!(!is_postgres_storage_exhausted("Storage quota exceeded"));
+    }
+
+    #[test]
+    fn postgres_storage_exhausted_payload_names_write_outage_not_user_quota() {
+        let payload =
+            SlackPayload::for_postgres_storage_exhausted(&PostgresStorageExhaustedAlert {
+                sui_network: "mainnet".into(),
+                used_bytes: Some(3_196_190_720),
+                max_bytes: Some(3_221_225_472),
+                error:
+                    "could not extend file because project size limit (3072 MB) has been exceeded"
+                        .into(),
+            });
+
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("MemWal Postgres storage exhausted"));
+        assert!(json.contains("mainnet"));
+        assert!(json.contains("remember/analyze"));
+        assert!(json.contains("write_ready"));
+        assert!(json.contains("not a user quota"));
+        assert!(json.contains("do not tell users to send SUI/WAL"));
+        assert!(json.contains("3196190720"));
+        assert!(json.contains("3221225472"));
+        assert!(json.contains("project size limit (3072 MB)"));
+        assert!(!json.to_lowercase().contains("exhausted retries"));
+    }
+
+    #[test]
+    fn postgres_storage_exhausted_payload_handles_missing_size_fields() {
+        let payload =
+            SlackPayload::for_postgres_storage_exhausted(&PostgresStorageExhaustedAlert {
+                sui_network: "testnet".into(),
+                used_bytes: None,
+                max_bytes: None,
+                error: "no space left on device".into(),
+            });
+
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("testnet"));
+        assert!(json.contains("`-`"));
+        assert!(json.contains("no space left on device"));
+    }
+
+    #[test]
+    fn postgres_storage_dedup_is_per_network_not_per_job() {
+        assert_eq!(
+            postgres_storage_dedup_key("mainnet"),
+            ("mainnet".to_string(), "postgres-storage".to_string())
+        );
+
+        let manager = AlertManager::from_env(reqwest::Client::new());
+        assert!(!manager.should_suppress_postgres_storage("mainnet"));
+        assert!(manager.should_suppress_postgres_storage("mainnet"));
+        assert!(!manager.should_suppress_postgres_storage("testnet"));
     }
 }

@@ -149,28 +149,44 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> 
             extract: crate::services::extractor::FACT_EXTRACTION_PROMPT_VERSION.to_string(),
             ask: ASK_SYSTEM_PROMPT_VERSION.to_string(),
         },
-        write_ready: sidecar_write_ready(&state).await,
+        write_ready: write_ready(&state).await,
         writes: writes_health_status(state.config.writes_paused),
     })
 }
 
-async fn sidecar_write_ready(state: &std::sync::Arc<AppState>) -> bool {
-    // Reuse a short TTL so unsigned /health probes do not fan out to the
-    // sidecar on every load-balancer tick.
+const WRITE_READY_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+const WRITE_READY_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(300);
+/// Neon refuses `smgrextend` once cluster size is at the cap; treat less
+/// than 1MB remaining as not writable so `/health` trips before the next
+/// page allocation fails.
+const POSTGRES_EXTEND_HEADROOM_BYTES: i64 = 1024 * 1024;
+
+/// Sidecar liveness AND Postgres can accept writes. Cached together so
+/// unsigned `/health` probes do not fan out on every load-balancer tick.
+async fn write_ready(state: &std::sync::Arc<AppState>) -> bool {
     {
         let cache = WRITE_READY_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((at, ready)) = *cache {
-            if at.elapsed() < std::time::Duration::from_secs(2) {
+            if at.elapsed() < WRITE_READY_CACHE_TTL {
                 return ready;
             }
         }
     }
 
+    let (sidecar, postgres) = tokio::join!(sidecar_write_ready(state), postgres_write_ready(state));
+    let ready = sidecar && postgres;
+    if let Ok(mut cache) = WRITE_READY_CACHE.lock() {
+        *cache = Some((std::time::Instant::now(), ready));
+    }
+    ready
+}
+
+async fn sidecar_write_ready(state: &std::sync::Arc<AppState>) -> bool {
     let url = format!("{}/health", state.config.sidecar_url.trim_end_matches('/'));
-    let ready = match state
+    match state
         .http_client
         .get(&url)
-        .timeout(std::time::Duration::from_millis(300))
+        .timeout(WRITE_READY_PROBE_TIMEOUT)
         .send()
         .await
     {
@@ -179,11 +195,85 @@ async fn sidecar_write_ready(state: &std::sync::Arc<AppState>) -> bool {
             tracing::debug!(error = %err, "sidecar health probe failed");
             false
         }
-    };
-    if let Ok(mut cache) = WRITE_READY_CACHE.lock() {
-        *cache = Some((std::time::Instant::now(), ready));
     }
-    ready
+}
+
+/// Self-hosted Postgres without `neon.max_cluster_size` stays ready (sidecar
+/// still applies). Probe errors other than storage-exhausted fail open so a
+/// slow/timeout query does not flip `/health` into a false write outage.
+async fn postgres_write_ready(state: &std::sync::Arc<AppState>) -> bool {
+    match tokio::time::timeout(
+        WRITE_READY_PROBE_TIMEOUT,
+        probe_postgres_write_ready(state.db.pool()),
+    )
+    .await
+    {
+        Ok(Ok(ready)) => ready,
+        Ok(Err(err)) => {
+            if crate::alerts::is_postgres_storage_exhausted(&err.to_string()) {
+                tracing::warn!(
+                    error = %err,
+                    "postgres write-ready probe: storage exhausted"
+                );
+                false
+            } else {
+                tracing::debug!(error = %err, "postgres write-ready probe failed");
+                true
+            }
+        }
+        Err(_) => {
+            tracing::debug!("postgres write-ready probe timed out");
+            true
+        }
+    }
+}
+
+async fn probe_postgres_write_ready(pool: &sqlx::PgPool) -> Result<bool, sqlx::Error> {
+    let (used_bytes, max_setting, max_unit): (i64, Option<String>, Option<String>) =
+        sqlx::query_as(
+            "SELECT pg_database_size(current_database())::bigint,
+                    (SELECT setting FROM pg_settings WHERE name = 'neon.max_cluster_size'),
+                    (SELECT unit FROM pg_settings WHERE name = 'neon.max_cluster_size')",
+        )
+        .fetch_one(pool)
+        .await?;
+
+    Ok(postgres_can_accept_writes(
+        used_bytes,
+        neon_max_cluster_size_bytes(max_setting.as_deref(), max_unit.as_deref()),
+    ))
+}
+
+/// `None` = no cap (self-host / unset / unparseable / unlimited `-1`).
+fn neon_max_cluster_size_bytes(setting: Option<&str>, unit: Option<&str>) -> Option<i64> {
+    let setting = setting?.trim();
+    if setting.is_empty() {
+        return None;
+    }
+    let n = setting.parse::<i64>().ok()?;
+    if n <= 0 {
+        return None;
+    }
+    // Neon GUC is MB (`GUC_UNIT_MB`); `pg_settings.unit` is `MB` when present.
+    n.checked_mul(memory_unit_bytes(unit.unwrap_or("MB")))
+}
+
+fn memory_unit_bytes(unit: &str) -> i64 {
+    match unit {
+        "B" => 1,
+        "kB" => 1024,
+        "MB" => 1024 * 1024,
+        "GB" => 1024 * 1024 * 1024,
+        "TB" => 1024i64.pow(4),
+        _ => 1024 * 1024,
+    }
+}
+
+fn postgres_can_accept_writes(used_bytes: i64, max_bytes: Option<i64>) -> bool {
+    match max_bytes {
+        None => true,
+        Some(max) => used_bytes.saturating_add(POSTGRES_EXTEND_HEADROOM_BYTES) < max,
+    }
 }
 
 static WRITE_READY_CACHE: std::sync::Mutex<Option<(std::time::Instant, bool)>> =
@@ -1034,6 +1124,41 @@ mod tests {
                 input, expected, clamped
             );
         }
+    }
+
+    // ── /health write_ready Postgres size cap (WALM-612) ──────────────
+
+    #[test]
+    fn postgres_can_accept_writes_without_neon_cap() {
+        assert!(super::postgres_can_accept_writes(3_196_190_720, None));
+        assert!(super::neon_max_cluster_size_bytes(None, None).is_none());
+        assert!(super::neon_max_cluster_size_bytes(Some("-1"), Some("MB")).is_none());
+        assert!(super::neon_max_cluster_size_bytes(Some("0"), Some("MB")).is_none());
+    }
+
+    #[test]
+    fn neon_max_cluster_size_bytes_uses_mb_unit() {
+        let max = super::neon_max_cluster_size_bytes(Some("3072"), Some("MB")).unwrap();
+        assert_eq!(max, 3072 * 1024 * 1024);
+        // Missing unit: Neon GUC is still MB.
+        assert_eq!(
+            super::neon_max_cluster_size_bytes(Some("3072"), None).unwrap(),
+            3072 * 1024 * 1024
+        );
+    }
+
+    #[test]
+    fn postgres_can_accept_writes_false_at_or_within_1mb_of_cap() {
+        let max = 3072 * 1024 * 1024;
+        assert!(!super::postgres_can_accept_writes(max, Some(max)));
+        assert!(!super::postgres_can_accept_writes(
+            max - super::POSTGRES_EXTEND_HEADROOM_BYTES,
+            Some(max)
+        ));
+        assert!(super::postgres_can_accept_writes(
+            max - super::POSTGRES_EXTEND_HEADROOM_BYTES - 1,
+            Some(max)
+        ));
     }
 
     // ── /api/restore body.limit cap (GH #501 / WALM-299) ────────────────
