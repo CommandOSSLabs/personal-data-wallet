@@ -229,19 +229,51 @@ async fn postgres_write_ready(state: &std::sync::Arc<AppState>) -> bool {
 }
 
 async fn probe_postgres_write_ready(pool: &sqlx::PgPool) -> Result<bool, sqlx::Error> {
-    let (used_bytes, max_setting, max_unit): (i64, Option<String>, Option<String>) =
-        sqlx::query_as(
-            "SELECT pg_database_size(current_database())::bigint,
-                    (SELECT setting FROM pg_settings WHERE name = 'neon.max_cluster_size'),
-                    (SELECT unit FROM pg_settings WHERE name = 'neon.max_cluster_size')",
-        )
-        .fetch_one(pool)
-        .await?;
+    let (max_setting, max_unit): (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT (SELECT setting FROM pg_settings WHERE name = 'neon.max_cluster_size'),
+                (SELECT unit FROM pg_settings WHERE name = 'neon.max_cluster_size')",
+    )
+    .fetch_one(pool)
+    .await?;
 
-    Ok(postgres_can_accept_writes(
-        used_bytes,
-        neon_max_cluster_size_bytes(max_setting.as_deref(), max_unit.as_deref()),
-    ))
+    let Some(max_bytes) = neon_max_cluster_size_bytes(max_setting.as_deref(), max_unit.as_deref())
+    else {
+        return Ok(true);
+    };
+
+    // Neon gates smgrextend on cluster size (WAL/history/other DBs), not
+    // pg_database_size of this database. Missing pg_cluster_size() (self-host)
+    // fails open.
+    let used_bytes: Option<i64> = match sqlx::query_scalar("SELECT pg_cluster_size()::bigint")
+        .fetch_one(pool)
+        .await
+    {
+        Ok(used) => used,
+        Err(err) if is_undefined_function(&err) => return Ok(true),
+        Err(err) => return Err(err),
+    };
+
+    Ok(postgres_write_ready_from_sizes(used_bytes, Some(max_bytes)))
+}
+
+fn is_undefined_function(err: &sqlx::Error) -> bool {
+    match err {
+        sqlx::Error::Database(db) => db.code().as_deref() == Some("42883"),
+        _ => false,
+    }
+}
+
+/// `max_bytes` None = no Neon cap. `used_cluster_bytes` None = GUC present
+/// but `pg_cluster_size()` missing/NULL — fail open.
+fn postgres_write_ready_from_sizes(
+    used_cluster_bytes: Option<i64>,
+    max_bytes: Option<i64>,
+) -> bool {
+    match (used_cluster_bytes, max_bytes) {
+        (_, None) => true,
+        (None, Some(_)) => true,
+        (Some(used), Some(max)) => postgres_can_accept_writes(used, Some(max)),
+    }
 }
 
 /// `None` = no cap (self-host / unset / unparseable / unlimited `-1`).
@@ -1157,6 +1189,20 @@ mod tests {
         ));
         assert!(super::postgres_can_accept_writes(
             max - super::POSTGRES_EXTEND_HEADROOM_BYTES - 1,
+            Some(max)
+        ));
+    }
+
+    #[test]
+    fn postgres_write_ready_from_sizes_uses_cluster_size_only_with_guc() {
+        let max = 3072 * 1024 * 1024;
+        // No Neon cap → sidecar-only, even if cluster is huge.
+        assert!(super::postgres_write_ready_from_sizes(Some(max), None));
+        // GUC present but pg_cluster_size() missing/NULL → fail open.
+        assert!(super::postgres_write_ready_from_sizes(None, Some(max)));
+        // Neon gate: cluster size at the cap is not writable.
+        assert!(!super::postgres_write_ready_from_sizes(
+            Some(max),
             Some(max)
         ));
     }

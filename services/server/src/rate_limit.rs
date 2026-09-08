@@ -830,7 +830,7 @@ pub async fn reserve_storage_quota_one(
     reserve_storage_quota(state, owner, &[StorageReservationRequest { id, bytes }]).await
 }
 
-async fn maybe_alert_postgres_storage_exhausted(state: &AppState, err: &AppError) {
+pub(crate) async fn maybe_alert_postgres_storage_exhausted(state: &AppState, err: &AppError) {
     if !is_postgres_storage_exhausted(&err.to_string()) {
         return;
     }

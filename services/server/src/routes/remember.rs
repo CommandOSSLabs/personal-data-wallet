@@ -903,7 +903,9 @@ pub async fn remember(
     // stays `pending` → the guard takes the plain Upload path, no on-chain
     // reconcile round-trip on the happy path. (The 202 response is still
     // "running" for API compatibility — see below.)
-    let inserted = sqlx::query(
+    // First write on this path (quota reservation is later). At the Neon
+    // project size cap this INSERT is the smgrextend that fails.
+    let inserted = match sqlx::query(
         "INSERT INTO remember_jobs (id, owner, namespace, status, idempotency_key, request_fingerprint) VALUES ($1, $2, $3, 'pending', $4, $5)
          ON CONFLICT (owner, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING",
     )
@@ -914,7 +916,14 @@ pub async fn remember(
     .bind(body.idempotency_key.as_ref().map(|_| fingerprint.as_str()))
     .execute(state.db.pool())
     .await
-    .map_err(|e| AppError::Internal(format!("Failed to create job row: {}", e)))?;
+    {
+        Ok(inserted) => inserted,
+        Err(e) => {
+            let err = AppError::Internal(format!("Failed to create job row: {}", e));
+            rate_limit::maybe_alert_postgres_storage_exhausted(&state, &err).await;
+            return Err(err);
+        }
+    };
 
     // Lost the race against a concurrent same-key request — return the winner's
     // job rather than spawning a duplicate write.
@@ -1295,7 +1304,8 @@ pub async fn remember_bulk(
     for item in body.items {
         let job_id = uuid::Uuid::new_v4().to_string();
 
-        sqlx::query(
+        // Same first-write as single remember: quota reservation has not run yet.
+        if let Err(e) = sqlx::query(
             // `pending` (not `running`) so a fresh job takes the plain Upload
             // path; only a retry of an in-flight job (worker-set `running`)
             // triggers the crash-window reconcile. See the single-remember insert.
@@ -1306,7 +1316,11 @@ pub async fn remember_bulk(
         .bind(&item.namespace)
         .execute(state.db.pool())
         .await
-        .map_err(|e| AppError::Internal(format!("Failed to create bulk job row: {}", e)))?;
+        {
+            let err = AppError::Internal(format!("Failed to create bulk job row: {}", e));
+            rate_limit::maybe_alert_postgres_storage_exhausted(&state, &err).await;
+            return Err(err);
+        }
 
         pending_items.push(PendingBulkRememberItem {
             job_id: job_id.clone(),
