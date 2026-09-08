@@ -20,6 +20,18 @@ use crate::types::{AppState, AuthInfo};
 /// Today the bulk-remember route is the largest at 2 MiB.
 pub(crate) const PROTECTED_BODY_LIMIT_BYTES: usize = 2 * 1024 * 1024;
 
+/// POST /api/artifacts carries base64 file bytes (8 MiB decoded ≈ 11 MiB JSON).
+pub(crate) const ARTIFACT_BODY_LIMIT_BYTES: usize = 12 * 1024 * 1024;
+
+pub(crate) fn signed_body_limit(method: &str, path: &str) -> usize {
+    let path_only = path.split('?').next().unwrap_or(path);
+    if method.eq_ignore_ascii_case("POST") && path_only == "/api/artifacts" {
+        ARTIFACT_BODY_LIMIT_BYTES
+    } else {
+        PROTECTED_BODY_LIMIT_BYTES
+    }
+}
+
 /// Ed25519 signature verification + onchain delegate key verification middleware
 ///
 /// Expects these headers:
@@ -178,7 +190,7 @@ pub async fn verify_signature(
     // Split request to consume body
     let (mut parts, body) = request.into_parts();
 
-    let body_bytes = axum::body::to_bytes(body, PROTECTED_BODY_LIMIT_BYTES)
+    let body_bytes = axum::body::to_bytes(body, signed_body_limit(&method, &path))
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
@@ -552,6 +564,22 @@ mod tests {
 
         assert!(body.len() > 1024 * 1024);
         assert!(body.len() <= PROTECTED_BODY_LIMIT_BYTES);
+    }
+
+    #[test]
+    fn artifact_post_uses_larger_signed_body_limit() {
+        assert_eq!(
+            signed_body_limit("POST", "/api/artifacts"),
+            ARTIFACT_BODY_LIMIT_BYTES
+        );
+        assert_eq!(
+            signed_body_limit("GET", "/api/artifacts/abc"),
+            PROTECTED_BODY_LIMIT_BYTES
+        );
+        assert_eq!(
+            signed_body_limit("POST", "/api/remember"),
+            PROTECTED_BODY_LIMIT_BYTES
+        );
     }
 
     // ── Nonce must be valid UUID v4 ──────────────────────────────

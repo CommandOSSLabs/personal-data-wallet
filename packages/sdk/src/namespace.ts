@@ -17,6 +17,7 @@ import type {
     GrantAccessOpts,
     RevokeAccessOpts,
     RotateKeyOpts,
+    CryptoShredKeyVersionOpts,
     CancelUninitializedNamespaceOpts,
 } from "./types.js";
 import { bytesToHex, namespaceSealKeyId } from "./utils.js";
@@ -480,6 +481,40 @@ export async function rotateKey(
         ],
     );
     return { digest };
+}
+
+/**
+ * Permanently deny Seal unwraps for one historical key version.
+ * The current version must be rotated first.
+ */
+export async function cryptoShredKeyVersion(
+    opts: CryptoShredKeyVersionOpts,
+): Promise<{ digest: string }> {
+    const keyVersion = toKeyVersion(opts.keyVersion);
+    const { digest } = await executeMoveCall(
+        opts,
+        "crypto_shred_key_version",
+        (tx) => [
+            ...namespaceCoreArgs(tx, opts),
+            tx.object(opts.namespaceId),
+            tx.pure("u64", keyVersion),
+            tx.object(SUI_CLOCK),
+        ],
+    );
+    return { digest };
+}
+
+function toKeyVersion(value: bigint | number): bigint {
+    if (typeof value === "bigint") {
+        if (value < 0n || value > 0xffff_ffff_ffff_ffffn) {
+            throw new Error(`cryptoShredKeyVersion: keyVersion ${value} is out of u64 range`);
+        }
+        return value;
+    }
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+        throw new Error(`cryptoShredKeyVersion: keyVersion ${value} is not a u64`);
+    }
+    return BigInt(value);
 }
 
 /**

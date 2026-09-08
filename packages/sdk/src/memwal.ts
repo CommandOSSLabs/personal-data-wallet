@@ -55,11 +55,19 @@ import type {
     RememberBulkStatusItem,
     RememberBulkItemResult,
     RelayerVersionMetadata,
+    RememberOptions,
+    StoreArtifactInput,
+    ArtifactAcceptedResult,
+    ArtifactRecord,
+    ListArtifactsResult,
 } from "./types.js";
 import {
     sha256hex,
     hexToBytes,
     bytesToHex,
+    bytesToBase64,
+    base64ToBytes,
+    artifactBytesToUint8Array,
     normalizeServerUrl,
     sanitizeServerError,
     scoringWeightsToWire,
@@ -138,6 +146,21 @@ function normalizeAnalyzeOptions(
     if (namespaceOrOptions == null) return {};
     if (typeof namespaceOrOptions === "string") return { namespace: namespaceOrOptions };
     return namespaceOrOptions;
+}
+
+function normalizeRememberOptions(
+    namespaceOrOptions?: string | RememberOptions,
+): RememberOptions {
+    if (namespaceOrOptions == null) return {};
+    if (typeof namespaceOrOptions === "string") return { namespace: namespaceOrOptions };
+    return namespaceOrOptions;
+}
+
+function hydrateArtifact(record: ArtifactRecord): ArtifactRecord {
+    if (typeof record.bytes_b64 === "string" && record.bytes_b64.length > 0) {
+        return { ...record, bytes: base64ToBytes(record.bytes_b64) };
+    }
+    return record;
 }
 
 /**
@@ -236,11 +259,20 @@ export class MemWal {
     /**
      * Submit a remember request and return as soon as the server accepts the job.
      */
-    async rememberAsync(text: string, namespace?: string): Promise<RememberAcceptedResult> {
+    async rememberAsync(
+        text: string,
+        namespaceOrOptions?: string | RememberOptions,
+    ): Promise<RememberAcceptedResult> {
+        const options = normalizeRememberOptions(namespaceOrOptions);
+        const body: Record<string, unknown> = {
+            text,
+            namespace: options.namespace ?? this.namespace,
+        };
+        if (options.sourceArtifactId) body.source_artifact_id = options.sourceArtifactId;
         return this.signedRequest<RememberAcceptedResult>(
             "POST",
             "/api/remember",
-            { text, namespace: namespace ?? this.namespace },
+            body,
             [200, 202],
         );
     }
@@ -339,10 +371,10 @@ export class MemWal {
      */
     async rememberAndWait(
         text: string,
-        namespace?: string,
+        namespaceOrOptions?: string | RememberOptions,
         opts: { pollIntervalMs?: number; timeoutMs?: number } = {},
     ): Promise<RememberResult> {
-        const accepted = await this.rememberAsync(text, namespace);
+        const accepted = await this.rememberAsync(text, namespaceOrOptions);
         return this.waitForRememberJob(accepted.job_id, opts);
     }
 
@@ -355,8 +387,146 @@ export class MemWal {
      * @param text - The text to remember
      * @param namespace - Optional namespace override
      */
-    async remember(text: string, namespace?: string): Promise<RememberAcceptedResult> {
-        return this.rememberAsync(text, namespace);
+    async remember(
+        text: string,
+        namespaceOrOptions?: string | RememberOptions,
+    ): Promise<RememberAcceptedResult> {
+        return this.rememberAsync(text, namespaceOrOptions);
+    }
+
+    /**
+     * Store a file/artifact in the namespace. Encrypted like a memory; not embedded.
+     * Poll with getArtifact() or use storeArtifactAndWait().
+     */
+    async storeArtifact(input: StoreArtifactInput): Promise<ArtifactAcceptedResult> {
+        const bytes = artifactBytesToUint8Array(input.bytes);
+        if (bytes.byteLength === 0) {
+            throw new TypeError("storeArtifact: bytes cannot be empty");
+        }
+        if (!input.filename?.trim()) {
+            throw new TypeError("storeArtifact: filename is required");
+        }
+        return this.signedRequest<ArtifactAcceptedResult>(
+            "POST",
+            "/api/artifacts",
+            {
+                filename: input.filename,
+                mime_type: input.mimeType,
+                bytes_b64: bytesToBase64(bytes),
+                source: input.source ?? "upload",
+                namespace: input.namespace ?? this.namespace,
+            },
+            [200, 202],
+        );
+    }
+
+    async getArtifact(artifactId: string): Promise<ArtifactRecord> {
+        const record = await this.signedRequest<ArtifactRecord>(
+            "GET",
+            `/api/artifacts/${artifactId}`,
+            {},
+            [200, 404],
+        );
+        if (!record || !("artifact_id" in record) || !record.artifact_id) {
+            return {
+                artifact_id: artifactId,
+                status: "not_found",
+                owner: "",
+                namespace: this.namespace,
+                filename: "",
+                mime_type: "",
+                source: "",
+                byte_size: 0,
+                error: "artifact not found",
+            };
+        }
+        return hydrateArtifact(record);
+    }
+
+    async listArtifacts(namespace?: string): Promise<ListArtifactsResult> {
+        const result = await this.signedRequest<ListArtifactsResult>(
+            "POST",
+            "/api/artifacts/list",
+            { namespace: namespace ?? this.namespace },
+        );
+        return {
+            artifacts: (result.artifacts ?? []).map((row) => hydrateArtifact(row)),
+        };
+    }
+
+    async waitForArtifact(
+        artifactId: string,
+        opts: { pollIntervalMs?: number; timeoutMs?: number } = {},
+    ): Promise<ArtifactRecord> {
+        const { pollIntervalMs = 1500, timeoutMs = 90_000 } = opts;
+        const deadline = Date.now() + timeoutMs;
+        let attempt = 0;
+        while (Date.now() < deadline) {
+            const current = await this.getArtifact(artifactId);
+            if (current.status === "done" || current.status === "failed" || current.status === "not_found") {
+                return current;
+            }
+            await sleep(pollingDelayMs(pollIntervalMs, attempt++));
+        }
+        throw Object.assign(
+            new Error(`artifact timed out after ${timeoutMs}ms (artifact_id=${artifactId})`),
+            { artifactId },
+        );
+    }
+
+    async storeArtifactAndWait(
+        input: StoreArtifactInput,
+        opts: { pollIntervalMs?: number; timeoutMs?: number } = {},
+    ): Promise<ArtifactRecord> {
+        const accepted = await this.storeArtifact(input);
+        const terminal = await this.waitForArtifact(accepted.artifact_id, opts);
+        if (terminal.status === "failed") {
+            throw Object.assign(
+                new Error(`artifact failed: ${terminal.error ?? "unknown error"}`),
+                { artifactId: accepted.artifact_id },
+            );
+        }
+        if (terminal.status === "not_found") {
+            throw Object.assign(
+                new Error(`artifact not_found (artifact_id=${accepted.artifact_id})`),
+                { artifactId: accepted.artifact_id },
+            );
+        }
+        return terminal;
+    }
+
+    /** Browser helper: intercept a File attachment and store it. */
+    async captureAttachment(
+        file: File,
+        opts: { namespace?: string; source?: string } = {},
+    ): Promise<ArtifactAcceptedResult> {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        return this.storeArtifact({
+            filename: file.name,
+            mimeType: file.type || undefined,
+            bytes,
+            source: opts.source ?? "attachment",
+            namespace: opts.namespace,
+        });
+    }
+
+    /** Archive a framework run output (LangGraph / CrewAI / etc.) as an artifact. */
+    async archiveFrameworkOutput(input: {
+        framework: string;
+        filename: string;
+        bytes: Uint8Array | ArrayBuffer | string;
+        mimeType?: string;
+        namespace?: string;
+    }): Promise<ArtifactAcceptedResult> {
+        const framework = input.framework.trim();
+        if (!framework) throw new TypeError("archiveFrameworkOutput: framework is required");
+        return this.storeArtifact({
+            filename: input.filename,
+            bytes: input.bytes,
+            mimeType: input.mimeType ?? "application/json",
+            source: `framework:${framework}`,
+            namespace: input.namespace,
+        });
     }
 
     /**
@@ -594,7 +764,8 @@ export class MemWal {
         const resolvedNamespace = options.namespace ?? this.namespace;
 
         const ac = new AbortController();
-        const tid = setTimeout(() => ac.abort(), 15000);
+        // Seal unwrap on testnet can exceed 15s (key-server + namespace::seal_approve).
+        const tid = setTimeout(() => ac.abort(), 60_000);
         try {
             const result = await this.signedRequest<RecallResult>("POST", "/api/recall", {
                 query,
@@ -738,6 +909,7 @@ export class MemWal {
         };
         const wireOccurredAt = occurredAtToWire(options.occurredAt);
         if (wireOccurredAt !== undefined) body.occurred_at = wireOccurredAt;
+        if (options.sourceArtifactId) body.source_artifact_id = options.sourceArtifactId;
         return this.signedRequest<AnalyzeResult>("POST", "/api/analyze", body, [200, 202]);
     }
 

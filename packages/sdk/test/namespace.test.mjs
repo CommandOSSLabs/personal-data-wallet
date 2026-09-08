@@ -13,6 +13,7 @@ import {
     initializeKey,
     grantAccess,
     cancelUninitializedNamespace,
+    cryptoShredKeyVersion,
     permissionBits,
 } from "../dist/namespace.js";
 
@@ -354,4 +355,48 @@ test("cancelUninitializedNamespace calls the public fun via moveCall", async () 
     } finally {
         Transaction.prototype.moveCall = original;
     }
+});
+
+test("cryptoShredKeyVersion PTB target and u64 key version", async () => {
+    const success = {
+        $kind: "Transaction",
+        Transaction: {
+            digest: "shred-digest",
+            status: { success: true, error: null },
+        },
+    };
+    const moveCalls = [];
+    const original = Transaction.prototype.moveCall;
+    Transaction.prototype.moveCall = function moveCallSpy(input) {
+        moveCalls.push(input);
+        return original.call(this, input);
+    };
+
+    try {
+        const { walletSigner: _ignored, ...opts } = namespaceOpts();
+        const result = await cryptoShredKeyVersion({
+            ...opts,
+            keyVersion: 0,
+            suiClient: {
+                signAndExecuteTransaction: async () => success,
+                waitForTransaction: async () => success,
+            },
+            suiPrivateKey: Ed25519Keypair.generate().getSecretKey(),
+        });
+        assert.equal(result.digest, "shred-digest");
+        assert.equal(
+            moveCalls[0].target,
+            "0xpkg::namespace::crypto_shred_key_version",
+        );
+        assert.equal(moveCalls[0].arguments.length, 6);
+    } finally {
+        Transaction.prototype.moveCall = original;
+    }
+});
+
+test("cryptoShredKeyVersion rejects a non-u64 keyVersion before send", async () => {
+    await assert.rejects(
+        cryptoShredKeyVersion({ ...namespaceOpts(), keyVersion: -1 }),
+        /not a u64/,
+    );
 });

@@ -180,9 +180,62 @@ fn sponsor_authorization_message(
     )
 }
 
+fn parse_package_id(package_id: &str) -> Result<sui_sdk_types::Address, AppError> {
+    package_id
+        .parse::<sui_sdk_types::Address>()
+        .map_err(|_| AppError::Internal("Invalid configured MemWal package ID".into()))
+}
+
+fn v1_account_sponsor_fn(function: &str) -> bool {
+    matches!(
+        function,
+        "create_account" | "add_delegate_key" | "remove_delegate_key"
+    )
+}
+
+fn v2_namespace_sponsor_fn(function: &str) -> bool {
+    matches!(
+        function,
+        "create_namespace"
+            | "initialize_key"
+            | "grant_access"
+            | "revoke_access"
+            | "rotate_key"
+            | "crypto_shred_key_version"
+            | "crypto_shred_namespace"
+            | "cancel_uninitialized_namespace"
+            | "deactivate_namespace"
+            | "reactivate_namespace"
+    )
+}
+
+fn sponsor_move_call_permitted(
+    call: &sui_sdk_types::MoveCall,
+    v1_package: sui_sdk_types::Address,
+    v2_package: Option<sui_sdk_types::Address>,
+) -> bool {
+    if !call.type_arguments.is_empty() {
+        return false;
+    }
+    let module = call.module.as_str();
+    let function = call.function.as_str();
+    if call.package == v1_package && module == "account" && v1_account_sponsor_fn(function) {
+        return true;
+    }
+    let Some(v2_package) = v2_package else {
+        return false;
+    };
+    if call.package != v2_package {
+        return false;
+    }
+    (module == "account" && v1_account_sponsor_fn(function))
+        || (module == "namespace" && v2_namespace_sponsor_fn(function))
+}
+
 fn validate_sponsor_transaction_kind(
     transaction_kind_bytes: &[u8],
     package_id: &str,
+    v2_package_id: Option<&str>,
 ) -> Result<(), AppError> {
     let kind: TransactionKind = bcs::from_bytes(transaction_kind_bytes)
         .map_err(|_| AppError::BadRequest("Invalid transaction kind".into()))?;
@@ -191,23 +244,17 @@ fn validate_sponsor_transaction_kind(
             "Transaction kind is not permitted for sponsorship".into(),
         ));
     };
-    let package = package_id
-        .parse::<sui_sdk_types::Address>()
-        .map_err(|_| AppError::Internal("Invalid configured MemWal package ID".into()))?;
-
-    let permitted = programmable.commands.len() == 1
-        && programmable.commands.iter().all(|command| match command {
-            Command::MoveCall(call) => {
-                call.package == package
-                    && call.module.as_str() == "account"
-                    && matches!(
-                        call.function.as_str(),
-                        "create_account" | "add_delegate_key" | "remove_delegate_key"
-                    )
-                    && call.type_arguments.is_empty()
-            }
-            _ => false,
-        });
+    let v1_package = parse_package_id(package_id)?;
+    let v2_package = v2_package_id.map(parse_package_id).transpose()?;
+    if programmable.commands.is_empty() || programmable.commands.len() > 20 {
+        return Err(AppError::BadRequest(
+            "Transaction kind is not permitted for sponsorship".into(),
+        ));
+    }
+    let permitted = programmable.commands.iter().all(|command| match command {
+        Command::MoveCall(call) => sponsor_move_call_permitted(call, v1_package, v2_package),
+        _ => false,
+    });
     if !permitted {
         return Err(AppError::BadRequest(
             "Transaction kind is not permitted for sponsorship".into(),
@@ -402,7 +449,11 @@ pub async fn sponsor_proxy(
     body: axum::body::Bytes,
 ) -> Result<Response<Body>, AppError> {
     let (req, transaction_kind_bytes) = parse_sponsor_request(&body)?;
-    validate_sponsor_transaction_kind(&transaction_kind_bytes, &state.config.package_id)?;
+    validate_sponsor_transaction_kind(
+        &transaction_kind_bytes,
+        &state.config.package_id,
+        state.config.memwal_v2_package_id.as_deref(),
+    )?;
     authenticate_sponsor_request(&state, &req, &transaction_kind_bytes).await?;
 
     forward_sponsor(&state, &req).await
@@ -502,18 +553,35 @@ nonce: 00000000-0000-4000-8000-000000000000"
         let package = format!("0x{}", "a".repeat(64));
         for function in ["create_account", "add_delegate_key", "remove_delegate_key"] {
             let bytes = move_call_kind(&package, "account", function);
-            validate_sponsor_transaction_kind(&bytes, &package).unwrap();
+            validate_sponsor_transaction_kind(&bytes, &package, None).unwrap();
         }
 
         let foreign_package = format!("0x{}", "b".repeat(64));
         let foreign = move_call_kind(&foreign_package, "account", "create_account");
-        assert!(validate_sponsor_transaction_kind(&foreign, &package).is_err());
+        assert!(validate_sponsor_transaction_kind(&foreign, &package, None).is_err());
 
         let wrong_function = move_call_kind(&package, "account", "arbitrary_call");
-        assert!(validate_sponsor_transaction_kind(&wrong_function, &package).is_err());
+        assert!(validate_sponsor_transaction_kind(&wrong_function, &package, None).is_err());
 
         let wrong_module = move_call_kind(&package, "coin", "transfer");
-        assert!(validate_sponsor_transaction_kind(&wrong_module, &package).is_err());
+        assert!(validate_sponsor_transaction_kind(&wrong_module, &package, None).is_err());
+    }
+
+    #[test]
+    fn sponsor_allowlist_accepts_v2_namespace_and_rejects_write_fence() {
+        let v1 = format!("0x{}", "a".repeat(64));
+        let v2 = format!("0x{}", "c".repeat(64));
+        let create = move_call_kind(&v2, "namespace", "create_namespace");
+        validate_sponsor_transaction_kind(&create, &v1, Some(&v2)).unwrap();
+
+        let grant = move_call_kind(&v2, "namespace", "grant_access");
+        validate_sponsor_transaction_kind(&grant, &v1, Some(&v2)).unwrap();
+
+        let fence = move_call_kind(&v2, "namespace", "write_fence");
+        assert!(validate_sponsor_transaction_kind(&fence, &v1, Some(&v2)).is_err());
+
+        let v1_ns = move_call_kind(&v1, "namespace", "create_namespace");
+        assert!(validate_sponsor_transaction_kind(&v1_ns, &v1, Some(&v2)).is_err());
     }
 
     // ---- validate_sui_address ----

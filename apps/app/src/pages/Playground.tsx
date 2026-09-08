@@ -5,13 +5,9 @@
  * that executes the call against a live server using the real SDK.
  */
 
-import { useState, useCallback, useMemo, type ReactNode } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { LayoutDashboard, LogOut } from 'lucide-react'
-import { Light as SyntaxHighlighter } from 'react-syntax-highlighter'
-import js from 'react-syntax-highlighter/dist/esm/languages/hljs/javascript'
-
-SyntaxHighlighter.registerLanguage('javascript', js)
 import {
     useCurrentAccount,
     useDisconnectWallet,
@@ -23,69 +19,11 @@ import { MemWal } from '@mysten-incubation/memwal'
 import type { RememberJobStatus } from '@mysten-incubation/memwal'
 import { MemWalManual } from '@mysten-incubation/memwal/manual'
 import { useDelegateKey } from '../App'
-import { Card } from '../components/Card'
+import { PlaygroundStep } from '../components/PlaygroundStep'
 import { config } from '../config'
 import { useV2Namespaces } from '../hooks/useV2Namespaces'
 import { getAnalyticsErrorType, trackEvent } from '../utils/analytics'
 import { playgroundMemwalAccountId, playgroundNamespaceOptions } from '../utils/v2Namespace'
-
-const walrusCodeTheme = {
-    hljs: {
-        color: '#faf8f5',
-        background: '#050505',
-    },
-    'hljs-keyword': {
-        color: '#cab1ff',
-    },
-    'hljs-built_in': {
-        color: '#faf8f5',
-    },
-    'hljs-title': {
-        color: '#faf8f5',
-    },
-    'hljs-attr': {
-        color: '#e8ff75',
-    },
-    'hljs-property': {
-        color: '#e8ff75',
-    },
-    'hljs-variable': {
-        color: '#faf8f5',
-    },
-    'hljs-string': {
-        color: '#e8ff75',
-    },
-    'hljs-comment': {
-        color: '#8f9294',
-    },
-    'hljs-number': {
-        color: '#e8ff75',
-    },
-    'hljs-literal': {
-        color: '#e8ff75',
-    },
-    'hljs-params': {
-        color: '#faf8f5',
-    },
-}
-
-// ============================================================
-// Demo Step — reusable step card
-// ============================================================
-
-interface DemoStepProps {
-    number: number
-    title: string
-    description: string
-    code: string
-    onRun: () => Promise<void>
-    result: string | null
-    resultLabel?: string
-    error: string | null
-    loading: boolean
-    highlight?: boolean
-    children?: ReactNode
-}
 
 function trackPlaygroundOperation(
     operation: string,
@@ -96,76 +34,6 @@ function trackPlaygroundOperation(
         operation,
         ...params,
     })
-}
-
-function DemoStep({
-    number,
-    title,
-    description,
-    code,
-    onRun,
-    result,
-    resultLabel = 'response',
-    error,
-    loading,
-    highlight,
-    children,
-}: DemoStepProps) {
-    const hasOutput = result || error
-    return (
-        <Card
-            className="demo-step"
-            leading={<div className={`demo-step-badge${highlight ? ' demo-step-badge--highlight' : ''}`}>{number}</div>}
-            leadingRowClassName="demo-step-header-row"
-            title={title}
-            subtitle={description}
-            action={
-                <button
-                    className={`btn btn-primary btn-sm${loading ? ' demo-run-button--loading' : ''}`}
-                    onClick={onRun}
-                    disabled={loading}
-                >
-                    {loading ? (
-                        <span className="spinner demo-button-spinner" />
-                    ) : (
-                        'Run'
-                    )}
-                </button>
-            }
-        >
-
-            {/* Optional inputs (injected via children) */}
-            {children}
-
-            {/* Code block */}
-            <div className={hasOutput ? 'demo-code-block--spaced' : ''}>
-                <SyntaxHighlighter
-                    language="javascript"
-                    style={walrusCodeTheme}
-                    className="demo-code-block"
-                    customStyle={{ margin: 0 }}
-                >
-                    {code}
-                </SyntaxHighlighter>
-            </div>
-
-            {/* Success result */}
-            {result && (
-                <div className="demo-result-panel">
-                    <div className="demo-result-label">{resultLabel}</div>
-                    <pre className="demo-result-pre">{result}</pre>
-                </div>
-            )}
-
-            {/* Error */}
-            {error && (
-                <div className="demo-error-panel">
-                    <div className="demo-error-label">error</div>
-                    <pre className="demo-error-pre">{error}</pre>
-                </div>
-            )}
-        </Card>
-    )
 }
 
 // ============================================================
@@ -203,6 +71,14 @@ export default function Playground() {
         [v2NamespaceLabels, namespace],
     )
     const showV2NamespaceSelect = config.v2NamespacesEnabled && v2NamespaceLabels.length > 0
+    const autoSelectedV2Namespace = useRef(false)
+    useEffect(() => {
+        if (autoSelectedV2Namespace.current) return
+        const first = v2NamespaceLabels[0]
+        if (!first) return
+        autoSelectedV2Namespace.current = true
+        setNamespace(first)
+    }, [v2NamespaceLabels])
     const memwalAccountId = playgroundMemwalAccountId({
         namespace,
         v2Namespaces,
@@ -226,12 +102,35 @@ export default function Playground() {
     const [healthError, setHealthError] = useState<string | null>(null)
     const [healthLoading, setHealthLoading] = useState(false)
 
+    const [openStep, setOpenStep] = useState<string | null>('remember')
+    const toggleStep = useCallback((id: string) => {
+        setOpenStep((current) => (current === id ? null : id))
+    }, [])
+
     const [rememberText, setRememberText] = useState(
         "I'm a software engineer living in Ho Chi Minh City. I love Vietnamese coffee and coding in Rust.",
     )
+    const [rememberPinArtifactId, setRememberPinArtifactId] = useState('')
     const [rememberResult, setRememberResult] = useState<string | null>(null)
     const [rememberError, setRememberError] = useState<string | null>(null)
     const [rememberLoading, setRememberLoading] = useState(false)
+
+    const [artifactFile, setArtifactFile] = useState<File | null>(null)
+    const [artifactResult, setArtifactResult] = useState<string | null>(null)
+    const [artifactError, setArtifactError] = useState<string | null>(null)
+    const [artifactLoading, setArtifactLoading] = useState(false)
+    const [lastArtifactId, setLastArtifactId] = useState('')
+
+    const [artifactListResult, setArtifactListResult] = useState<string | null>(null)
+    const [artifactListError, setArtifactListError] = useState<string | null>(null)
+    const [artifactListLoading, setArtifactListLoading] = useState(false)
+
+    const [getArtifactId, setGetArtifactId] = useState('')
+    const [getArtifactResult, setGetArtifactResult] = useState<string | null>(null)
+    const [getArtifactError, setGetArtifactError] = useState<string | null>(null)
+    const [getArtifactLoading, setGetArtifactLoading] = useState(false)
+    const [downloadedArtifactUrl, setDownloadedArtifactUrl] = useState<string | null>(null)
+    const [downloadedArtifactName, setDownloadedArtifactName] = useState('artifact.bin')
 
     const [recallQuery, setRecallQuery] = useState('Where does the user live?')
     const [recallResult, setRecallResult] = useState<string | null>(null)
@@ -301,6 +200,14 @@ export default function Playground() {
 
     const runRemember = useCallback(async () => {
         if (!memwal) return
+        if (config.v2NamespacesEnabled && (namespace === 'default' || v2NamespaceLabels.length === 0)) {
+            setRememberError(
+                v2NamespaceLabels.length === 0
+                    ? 'V2 is on: create a namespace on the dashboard first (Namespaces → Create), then pick it here. `default` is the old V1 Walrus path.'
+                    : 'V2 is on: pick a V2 namespace in the dropdown. `default` uploads to Walrus, not Oyster.',
+            )
+            return
+        }
         trackPlaygroundOperation('remember', 'start')
         setRememberLoading(true)
         setRememberResult(null)
@@ -313,7 +220,9 @@ export default function Playground() {
             // {job_id, status: "running"} as soon as the work is enqueued.
             // Show this immediately so the user can see the async-job
             // pattern (the playground's whole value prop).
-            const accepted = await memwal.rememberAsync(rememberText)
+            const accepted = await memwal.rememberAsync(rememberText, {
+                sourceArtifactId: rememberPinArtifactId.trim() || undefined,
+            })
             const acceptedBlock =
                 `// 1. accepted (HTTP 202) at T+${elapsed()}s\n` +
                 JSON.stringify(accepted, null, 2)
@@ -324,8 +233,8 @@ export default function Playground() {
             // surfaces to the UI as it happens, not just the final
             // value. Server-side state machine: routes.rs writes
             // status='running' on accept, jobs.rs flips to 'uploaded'
-            // after the walrus write certifies, then 'done' once the
-            // meta-transfer + blob_id is committed.
+            // after the store write (Oyster for V2, Walrus for V1),
+            // then 'done' once the fence + blob_id is committed.
             const TIMEOUT_MS = 90_000
             const POLL_MS = 1500
             const deadline = Date.now() + TIMEOUT_MS
@@ -434,7 +343,115 @@ export default function Playground() {
         } finally {
             setRememberLoading(false)
         }
-    }, [memwal, rememberText])
+    }, [memwal, rememberText, rememberPinArtifactId, namespace, v2NamespaceLabels.length])
+
+    const requireV2Namespace = useCallback(() => {
+        if (config.v2NamespacesEnabled && (namespace === 'default' || v2NamespaceLabels.length === 0)) {
+            return v2NamespaceLabels.length === 0
+                ? 'V2 is on: create a namespace on the dashboard first, then pick it here.'
+                : 'V2 is on: pick a V2 namespace. Artifacts are not stored on `default`.'
+        }
+        return null
+    }, [namespace, v2NamespaceLabels.length])
+
+    const runStoreArtifact = useCallback(async () => {
+        if (!memwal) return
+        const v2Error = requireV2Namespace()
+        if (v2Error) {
+            setArtifactError(v2Error)
+            return
+        }
+        if (!artifactFile) {
+            setArtifactError('Choose a file first.')
+            return
+        }
+        trackPlaygroundOperation('store_artifact', 'start')
+        setArtifactLoading(true)
+        setArtifactResult(null)
+        setArtifactError(null)
+        try {
+            const accepted = await memwal.captureAttachment(artifactFile)
+            const terminal = await memwal.waitForArtifact(accepted.artifact_id)
+            if (terminal.status !== 'done') {
+                throw new Error(terminal.error ?? `artifact ${terminal.status}`)
+            }
+            setLastArtifactId(terminal.artifact_id)
+            setGetArtifactId(terminal.artifact_id)
+            setRememberPinArtifactId(terminal.artifact_id)
+            setArtifactResult(JSON.stringify({
+                accepted,
+                stored: {
+                    artifact_id: terminal.artifact_id,
+                    filename: terminal.filename,
+                    mime_type: terminal.mime_type,
+                    byte_size: terminal.byte_size,
+                    blob_id: terminal.blob_id,
+                    storage_mode: terminal.storage_mode,
+                    source: terminal.source,
+                    status: terminal.status,
+                },
+            }, null, 2))
+            trackPlaygroundOperation('store_artifact', 'complete')
+        } catch (err: unknown) {
+            setArtifactError(err instanceof Error ? err.message : String(err))
+            trackPlaygroundOperation('store_artifact', 'failed', { error_type: getAnalyticsErrorType(err) })
+        } finally {
+            setArtifactLoading(false)
+        }
+    }, [memwal, artifactFile, requireV2Namespace])
+
+    const runListArtifacts = useCallback(async () => {
+        if (!memwal) return
+        trackPlaygroundOperation('list_artifacts', 'start')
+        setArtifactListLoading(true)
+        setArtifactListResult(null)
+        setArtifactListError(null)
+        try {
+            const data = await memwal.listArtifacts()
+            setArtifactListResult(JSON.stringify(data, null, 2))
+            trackPlaygroundOperation('list_artifacts', 'complete')
+        } catch (err: unknown) {
+            setArtifactListError(err instanceof Error ? err.message : String(err))
+            trackPlaygroundOperation('list_artifacts', 'failed', { error_type: getAnalyticsErrorType(err) })
+        } finally {
+            setArtifactListLoading(false)
+        }
+    }, [memwal])
+
+    const runGetArtifact = useCallback(async () => {
+        if (!memwal) return
+        const id = getArtifactId.trim()
+        if (!id) {
+            setGetArtifactError('Paste an artifact id from store or list.')
+            return
+        }
+        trackPlaygroundOperation('get_artifact', 'start')
+        setGetArtifactLoading(true)
+        setGetArtifactResult(null)
+        setGetArtifactError(null)
+        if (downloadedArtifactUrl) URL.revokeObjectURL(downloadedArtifactUrl)
+        setDownloadedArtifactUrl(null)
+        try {
+            const data = await memwal.getArtifact(id)
+            const { bytes, bytes_b64, ...meta } = data
+            setGetArtifactResult(JSON.stringify({
+                ...meta,
+                bytes_b64: bytes_b64 ? `<${bytes_b64.length} chars>` : undefined,
+                bytes: bytes ? `<${bytes.byteLength} bytes>` : undefined,
+            }, null, 2))
+            if (bytes && bytes.byteLength > 0) {
+                const blob = new Blob([new Uint8Array(bytes)], { type: data.mime_type || 'application/octet-stream' })
+                setDownloadedArtifactUrl(URL.createObjectURL(blob))
+                setDownloadedArtifactName(data.filename || 'artifact.bin')
+            }
+            trackPlaygroundOperation('get_artifact', 'complete')
+        } catch (err: unknown) {
+            setGetArtifactError(err instanceof Error ? err.message : String(err))
+            trackPlaygroundOperation('get_artifact', 'failed', { error_type: getAnalyticsErrorType(err) })
+        } finally {
+            setGetArtifactLoading(false)
+        }
+    }, [memwal, getArtifactId, downloadedArtifactUrl])
 
     const runRecall = useCallback(async () => {
         if (!memwal) return
@@ -682,7 +699,7 @@ export default function Playground() {
                     <h2>Developer Playground</h2>
                     <p>
                         Test Walrus Memory SDK operations with your current server and credentials.
-                        Run steps against your server using <code>@mysten-incubation/memwal</code>.
+                        Click a row to expand it. Run steps against your server using <code>@mysten-incubation/memwal</code>.
                         {config.docsUrl && (
                             <> See the <a className="demo-doc-link" href={config.docsUrl} target="_blank" rel="noopener noreferrer" onClick={() => trackEvent('outbound_link_click', { link: 'docs', location: 'playground' })}>documentation</a> for full API reference.</>
                         )}
@@ -727,8 +744,10 @@ export default function Playground() {
                     </div>
                 </div>
 
-                {/* Step 1: Health */}
-                <DemoStep
+                <PlaygroundStep
+                    id="health"
+                    openId={openStep}
+                    onToggle={toggleStep}
                     number={1}
                     title="health check"
                     description="verify the Walrus Memory server is running"
@@ -749,27 +768,15 @@ const data = await memwal.health()
                     loading={healthLoading}
                 />
 
-                {/* Step 2: Remember */}
-                <DemoStep
+                <PlaygroundStep
+                    id="remember"
+                    openId={openStep}
+                    onToggle={toggleStep}
                     number={2}
                     title="remember"
-                    description="accept a memory job → embed → encrypt → Walrus"
-                    code={`// 1. enqueue — returns 202 with { job_id, status: "running" }
-const accepted = await memwal.rememberAsync(
-  "${rememberText.slice(0, 60)}..."
-)
-// namespace: "${namespace || 'default'}"
-
-// 2. poll signed GET /api/remember/{job_id} every 1.5s.
-// Each call surfaces the current state (pending →
-// running → uploaded → done). Use waitForRememberJob
-// instead if you only need the terminal result.
-while (true) {
-  const s = await memwal.getRememberStatus(accepted.job_id)
-  if (s.status === "done")   { return s }
-  if (s.status === "failed") { throw new Error(s.error) }
-  await sleep(1500)
-}`}
+                    description="accept a memory job → embed → encrypt → store. optionally pin to an artifact."
+                    code={`const accepted = await memwal.rememberAsync(text${rememberPinArtifactId.trim() ? `, { sourceArtifactId: "${rememberPinArtifactId.trim()}" }` : ''})
+// poll GET /api/remember/{job_id} until done`}
                     onRun={runRemember}
                     result={rememberResult}
                     resultLabel="memory saved (accepted → terminal)"
@@ -785,17 +792,26 @@ while (true) {
                             onChange={(e) => setRememberText(e.target.value)}
                         />
                     </div>
-                </DemoStep>
+                    <div className="input-group">
+                        <label>pin to artifact id (optional):</label>
+                        <input
+                            className="input"
+                            value={rememberPinArtifactId}
+                            onChange={(e) => setRememberPinArtifactId(e.target.value)}
+                            placeholder="from store artifact"
+                        />
+                    </div>
+                </PlaygroundStep>
 
-                {/* Step 3: Recall */}
-                <DemoStep
+                <PlaygroundStep
+                    id="recall"
+                    openId={openStep}
+                    onToggle={toggleStep}
                     number={3}
                     title="recall"
-                    description="semantic search → download → decrypt"
+                    description="semantic search over text memories only — artifacts are not embedded"
                     code={`const result = await memwal.recall("${recallQuery}", 5)
-// Server: embed query → cosine search → download → decrypt
-// namespace: "${namespace || 'default'}" — only searches within this namespace
-// → { results: [{ text, blob_id, distance }], total }`}
+// namespace: "${namespace || 'default'}"`}
                     onRun={runRecall}
                     result={recallResult}
                     resultLabel="memories found (decrypted)"
@@ -810,18 +826,97 @@ while (true) {
                             onChange={(e) => setRecallQuery(e.target.value)}
                         />
                     </div>
-                </DemoStep>
+                </PlaygroundStep>
 
-                {/* Step 4: Analyze */}
-                <DemoStep
+                <PlaygroundStep
+                    id="store-artifact"
+                    openId={openStep}
+                    onToggle={toggleStep}
                     number={4}
+                    title="store artifact"
+                    description="encrypt a file into the namespace. no embedding — get it back by id."
+                    code={`const accepted = await memwal.captureAttachment(file)
+const stored = await memwal.waitForArtifact(accepted.artifact_id)
+// → { artifact_id, filename, mime_type, blob_id, storage_mode }`}
+                    onRun={runStoreArtifact}
+                    result={artifactResult}
+                    resultLabel="artifact stored"
+                    error={artifactError}
+                    loading={artifactLoading}
+                    highlight
+                >
+                    <div className="input-group">
+                        <label>file:</label>
+                        <input
+                            className="demo-file-input"
+                            type="file"
+                            onChange={(e) => setArtifactFile(e.target.files?.[0] ?? null)}
+                        />
+                        {artifactFile && (
+                            <div className="demo-file-meta">
+                                {artifactFile.name} · {artifactFile.type || 'application/octet-stream'} · {artifactFile.size} bytes
+                            </div>
+                        )}
+                    </div>
+                </PlaygroundStep>
+
+                <PlaygroundStep
+                    id="list-artifacts"
+                    openId={openStep}
+                    onToggle={toggleStep}
+                    number={5}
+                    title="list artifacts"
+                    description="metadata only — filenames, mime, size, status"
+                    code={`const result = await memwal.listArtifacts()
+// → { artifacts: [{ artifact_id, filename, mime_type, byte_size, status }] }`}
+                    onRun={runListArtifacts}
+                    result={artifactListResult}
+                    resultLabel="artifacts"
+                    error={artifactListError}
+                    loading={artifactListLoading}
+                />
+
+                <PlaygroundStep
+                    id="get-artifact"
+                    openId={openStep}
+                    onToggle={toggleStep}
+                    number={6}
+                    title="get artifact"
+                    description="decrypt and download the original file"
+                    code={`const artifact = await memwal.getArtifact("${getArtifactId || 'artifact-id'}")
+// artifact.bytes is a Uint8Array when status is done`}
+                    onRun={runGetArtifact}
+                    result={getArtifactResult}
+                    resultLabel="artifact"
+                    error={getArtifactError}
+                    loading={getArtifactLoading}
+                >
+                    <div className="input-group">
+                        <label>artifact id:</label>
+                        <input
+                            className="input"
+                            value={getArtifactId}
+                            onChange={(e) => setGetArtifactId(e.target.value)}
+                            placeholder={lastArtifactId || 'uuid from store / list'}
+                        />
+                    </div>
+                    {downloadedArtifactUrl && (
+                        <a className="btn btn-primary btn-sm" href={downloadedArtifactUrl} download={downloadedArtifactName}>
+                            Download {downloadedArtifactName}
+                        </a>
+                    )}
+                </PlaygroundStep>
+
+                <PlaygroundStep
+                    id="analyze"
+                    openId={openStep}
+                    onToggle={toggleStep}
+                    number={7}
                     title="analyze"
-                    description="LLM extracts facts → accepts memory jobs"
+                    description="LLM extracts facts → memory jobs. V2 namespaces still reject this path."
                     code={`const result = await memwal.analyze(
-  "${analyzeText.slice(0, 50)}..."
-)
-// Server: LLM extracts facts → async memory jobs
-// → { job_ids, facts, fact_count, status, owner }`}
+  "${analyzeText.slice(0, 50)}..."${rememberPinArtifactId.trim() ? `, { sourceArtifactId: "${rememberPinArtifactId.trim()}" }` : ''}
+)`}
                     onRun={runAnalyze}
                     result={analyzeResult}
                     resultLabel="fact jobs accepted"
@@ -837,18 +932,20 @@ while (true) {
                             onChange={(e) => setAnalyzeText(e.target.value)}
                         />
                     </div>
-                </DemoStep>
+                </PlaygroundStep>
 
-                {/* Step 5: Restore */}
-                <DemoStep
-                    number={5}
+                <PlaygroundStep
+                    id="restore"
+                    openId={openStep}
+                    onToggle={toggleStep}
+                    number={8}
                     title="restore"
-                    description="re-index all memories from Walrus → rebuild local DB (supports zero-state restore from chain)"
-                    code={`// Restore from Walrus: download → decrypt → re-embed → re-index
-// If DB is empty, queries Sui chain for user's Walrus Blob objects
-// with memwal_namespace metadata → zero-state restore!
-const result = await memwal.restore("${namespace || 'default'}")
-// → { restored: N, namespace, owner }`}
+                    description={config.v2NamespacesEnabled
+                        ? "re-index memories from Oyster (V2) or Walrus (V1) → rebuild local DB"
+                        : "re-index all memories from Walrus → rebuild local DB"}
+                    code={config.v2NamespacesEnabled
+                        ? `const result = await memwal.restore("${namespace || 'memories'}")`
+                        : `const result = await memwal.restore("${namespace || 'default'}")`}
                     onRun={runRestore}
                     result={restoreResult}
                     resultLabel="restore result"
@@ -857,22 +954,17 @@ const result = await memwal.restore("${namespace || 'default'}")
                     highlight
                 />
 
-                {/* Step 5: Configure LLM API Key */}
-                <Card
-                    className="demo-step"
-                    leading={<div className={`demo-step-badge${askLlmKey.trim() ? ' demo-step-badge--highlight' : ''}`}>6</div>}
-                    leadingRowClassName="demo-step-header-row"
+                <PlaygroundStep
+                    id="llm"
+                    openId={openStep}
+                    onToggle={toggleStep}
+                    number={9}
                     title="configure your LLM"
-                    subtitle="Walrus Memory is just the memory layer — you bring your own LLM"
-                    action={
-                        askLlmKey.trim() && (
-                            <span className="demo-ready-pill">
-                                Ready
-                            </span>
-                        )
-                    }
+                    description="Walrus Memory is just the memory layer — you bring your own LLM"
+                    hideRun
+                    highlight={Boolean(askLlmKey.trim())}
+                    code={`// your key stays in this tab — never sent to Walrus Memory.`}
                 >
-
                     <div className="demo-info-panel">
                         <div className="demo-info-label">
                             your LLM API key (not stored, client-side only)
@@ -894,44 +986,23 @@ const result = await memwal.restore("${namespace || 'default'}")
                                 placeholder={askLlmProvider === 'openai' ? 'sk-...' : 'sk-or-v1-...'}
                             />
                         </div>
-                        <div className="demo-field-note">
-                            required for steps 7–9. your key stays in this browser tab — never sent to Walrus Memory.
-                        </div>
                     </div>
+                </PlaygroundStep>
 
-                    <SyntaxHighlighter language="javascript" style={walrusCodeTheme} className="demo-code-block" customStyle={{ margin: 0 }}>
-{`// Walrus Memory doesn't include an LLM — you choose your own.
-// steps 7–9 use this key for:
-//   • ask AI: recalls memories → injects into your LLM prompt
-//   • full client-side: embeds text via your OpenAI / OpenRouter key
-//
-// your key is never sent to Walrus Memory servers.`}
-                    </SyntaxHighlighter>
-                </Card>
-
-                {/* Step 6: Ask AI — true middleware pattern */}
-                <Card
-                    className="demo-step"
-                    style={{ opacity: askLlmKey.trim() ? 1 : 0.72, pointerEvents: askLlmKey.trim() ? 'auto' : 'none' }}
-                    leading={<div className="demo-step-badge demo-step-badge--highlight">7</div>}
-                    leadingRowClassName="demo-step-header-row"
+                <PlaygroundStep
+                    id="ask"
+                    openId={openStep}
+                    onToggle={toggleStep}
+                    number={10}
                     title="ask AI (with memory)"
-                    subtitle="your LLM key + Walrus Memory layer — like Supermemory"
-                    action={
-                        <button
-                            className={`btn btn-primary btn-sm${askLoading ? ' demo-run-button--loading' : ''}`}
-                            onClick={runAsk}
-                            disabled={askLoading || !askLlmKey.trim()}
-                        >
-                            {askLoading ? (
-                                <span className="spinner demo-button-spinner" />
-                            ) : (
-                                'Ask'
-                            )}
-                        </button>
-                    }
+                    description="your LLM key + Walrus Memory layer"
+                    onRun={runAsk}
+                    runLabel="Ask"
+                    loading={askLoading}
+                    error={askError}
+                    highlight
+                    code={`const model = withMemWal(openai("gpt-4o-mini"), { key, accountId, serverUrl: "${serverUrl}" })`}
                 >
-
                     <div className="input-group">
                         <label>your question:</label>
                         <input
@@ -941,115 +1012,51 @@ const result = await memwal.restore("${namespace || 'default'}")
                             placeholder="ask anything about this user..."
                         />
                     </div>
-
-                    <div className={askResult || askError || askPhase ? 'demo-code-block--spaced' : ''}>
-                        <SyntaxHighlighter language="javascript" style={walrusCodeTheme} className="demo-code-block" customStyle={{ margin: 0 }}>
-{`import { withMemWal } from "@mysten-incubation/memwal/ai"
-import { openai } from "@ai-sdk/openai"
-import { generateText } from "ai"
-
-// wrap your model with Walrus Memory — that's it
-const model = withMemWal(openai("gpt-4o-mini"), {
-  key: delegateKeyHex,
-  accountId: "0x...",
-  serverUrl: "${serverUrl}"
-})
-
-// use as normal — Walrus Memory handles memory automatically
-const { text } = await generateText({
-  model,
-  prompt: "${askQuestion.slice(0, 50)}"
-})
-// → AI answers using your encrypted memories as context`}
-                        </SyntaxHighlighter>
-                    </div>
-
-                    {/* Loading phase */}
                     {askPhase && (
                         <div className="demo-phase-indicator">
                             <span className="spinner demo-button-spinner" />
                             {askPhase}
                         </div>
                     )}
-
                     {askResult && (
                         <>
-                            {/* AI Answer */}
                             <div className="demo-ai-panel">
-                                <div className="demo-info-label">
-                                    AI response (your LLM + Walrus Memory)
-                                </div>
-                                <div className="demo-ai-answer">
-                                    {askResult.answer}
-                                </div>
+                                <div className="demo-info-label">AI response (your LLM + Walrus Memory)</div>
+                                <div className="demo-ai-answer">{askResult.answer}</div>
                             </div>
-
-                            {/* Memories Used */}
                             <div className="demo-result-panel">
-                                <div className="demo-result-label">
-                                    {askResult.memories.length} memories injected as context
-                                </div>
+                                <div className="demo-result-label">{askResult.memories.length} memories injected as context</div>
                                 {askResult.memories.map((m, i) => (
                                     <div key={i} className="demo-memory-item">
-                                        <span className="demo-memory-score">
-                                            {((1 - m.distance) * 100).toFixed(0)}%
-                                        </span>
-                                        <span>
-                                            {m.text}
-                                        </span>
+                                        <span className="demo-memory-score">{((1 - m.distance) * 100).toFixed(0)}%</span>
+                                        <span>{m.text}</span>
                                     </div>
                                 ))}
                             </div>
-
-                            {/* System Prompt Preview */}
-                            <details>
-                                <summary className="demo-details-summary">
-                                    view system prompt sent to LLM
-                                </summary>
-                                <pre className="demo-code-block demo-system-prompt">
-                                    {askResult.systemPrompt}
-                                </pre>
-                            </details>
                         </>
                     )}
-                    {askError && (
-                        <div className="demo-error-panel">
-                            <div className="demo-error-label">error</div>
-                            <pre className="demo-error-pre">{askError}</pre>
-                        </div>
-                    )}
-                </Card>
+                </PlaygroundStep>
 
-                {/* Manual / Hybrid mode */}
                 <div className="demo-mode-divider">
                     manual mode — client handles embedding & encryption, server handles storage.
                     <br />
-                    your data never leaves your browser unencrypted. requires an LLM API key (step 6).
+                    your data never leaves your browser unencrypted. requires an LLM API key.
                 </div>
 
-                {/* Step 8: Remember (hybrid) */}
-                <Card
-                    className="demo-step"
-                    style={{ opacity: askLlmKey.trim() ? 1 : 0.72, pointerEvents: askLlmKey.trim() ? 'auto' : 'none' }}
-                    leading={<div className="demo-step-badge demo-step-badge--highlight">8</div>}
-                    leadingRowClassName="demo-step-header-row"
+                <PlaygroundStep
+                    id="manual-remember"
+                    openId={openStep}
+                    onToggle={toggleStep}
+                    number={11}
                     title="remember (hybrid)"
-                    subtitle="client: embed → SEAL encrypt → send to server → server uploads Walrus"
-                    action={
-                        <button
-                            className={`btn btn-primary btn-sm${fullRememberLoading ? ' demo-run-button--loading' : ''}`}
-                            onClick={runFullRemember}
-                            disabled={fullRememberLoading || !memwalManual}
-                        >
-                            {fullRememberLoading ? (
-                                <span className="spinner demo-button-spinner" />
-                            ) : (
-                                'Run'
-                            )}
-                        </button>
-                    }
+                    description="client: embed → SEAL encrypt → server uploads Walrus"
+                    onRun={runFullRemember}
+                    loading={fullRememberLoading}
+                    result={fullRememberResult}
+                    error={fullRememberError}
+                    highlight
+                    code={`await memwal.rememberManual("${fullRememberText.slice(0, 40)}...")`}
                 >
-
                     <div className="input-group">
                         <label>memory text:</label>
                         <textarea
@@ -1059,79 +1066,28 @@ const { text } = await generateText({
                             onChange={(e) => setFullRememberText(e.target.value)}
                         />
                     </div>
-
-                    <div className={fullRememberResult || fullRememberError || fullRememberPhase ? 'demo-code-block--spaced' : ''}>
-                        <SyntaxHighlighter language="javascript" style={walrusCodeTheme} className="demo-code-block" customStyle={{ margin: 0 }}>
-{`import { MemWalManual } from "@mysten-incubation/memwal/manual"
-
-const memwal = MemWalManual.create({
-  key: delegateKeyHex,
-  walletSigner: {           // uses connected wallet!
-    address,                // from useCurrentAccount()
-    signAndExecuteTransaction,
-    signPersonalMessage,
-  },
-  embeddingApiKey: "sk-or-v1-...",
-  embeddingApiBase: "https://openrouter.ai/api/v1",
-  packageId: "${config.memwalPackageId.slice(0, 10)}...",
-  accountId: "${(accountObjectId || '').slice(0, 10)}...",
-  registryId: "${config.memwalRegistryId.slice(0, 10)}...",
-})
-
-// client does:
-// 1. embed text (via your OpenAI / OpenRouter key)
-// 2. SEAL encrypt (wallet signs)
-// server then:
-// 3. upload encrypted bytes to Walrus (server pays gas)
-// 4. store vector + blob_id in DB
-await memwal.rememberManual("${fullRememberText.slice(0, 40)}...")`}
-                        </SyntaxHighlighter>
-                    </div>
-
                     {fullRememberPhase && (
                         <div className="demo-phase-indicator">
                             <span className="spinner demo-button-spinner" />
                             {fullRememberPhase}
                         </div>
                     )}
+                </PlaygroundStep>
 
-                    {fullRememberResult && (
-                        <div className="demo-result-panel">
-                            <div className="demo-result-label">stored — encrypted by client, uploaded to Walrus by server</div>
-                            <pre className="demo-result-pre">{fullRememberResult}</pre>
-                        </div>
-                    )}
-                    {fullRememberError && (
-                        <div className="demo-error-panel">
-                            <div className="demo-error-label">error</div>
-                            <pre className="demo-error-pre">{fullRememberError}</pre>
-                        </div>
-                    )}
-                </Card>
-
-                {/* Step 9: Recall (full client-side) */}
-                <Card
-                    className="demo-step"
-                    style={{ opacity: askLlmKey.trim() ? 1 : 0.72, pointerEvents: askLlmKey.trim() ? 'auto' : 'none' }}
-                    leading={<div className="demo-step-badge demo-step-badge--highlight">9</div>}
-                    leadingRowClassName="demo-step-header-row"
+                <PlaygroundStep
+                    id="manual-recall"
+                    openId={openStep}
+                    onToggle={toggleStep}
+                    number={12}
                     title="recall (full client-side)"
-                    subtitle="SDK: embed query → search → Walrus download → SEAL decrypt"
-                    action={
-                        <button
-                            className={`btn btn-primary btn-sm${fullRecallLoading ? ' demo-run-button--loading' : ''}`}
-                            onClick={runFullRecall}
-                            disabled={fullRecallLoading || !memwalManual}
-                        >
-                            {fullRecallLoading ? (
-                                <span className="spinner demo-button-spinner" />
-                            ) : (
-                                'Run'
-                            )}
-                        </button>
-                    }
+                    description="SDK: embed query → search → Walrus download → SEAL decrypt"
+                    onRun={runFullRecall}
+                    loading={fullRecallLoading}
+                    result={fullRecallResult}
+                    error={fullRecallError}
+                    highlight
+                    code={`const result = await memwal.recallManual("${fullRecallQuery}", 5)`}
                 >
-
                     <div className="input-group">
                         <label>search query:</label>
                         <input
@@ -1140,42 +1096,13 @@ await memwal.rememberManual("${fullRememberText.slice(0, 40)}...")`}
                             onChange={(e) => setFullRecallQuery(e.target.value)}
                         />
                     </div>
-
-                    <div className={fullRecallResult || fullRecallError || fullRecallPhase ? 'demo-code-block--spaced' : ''}>
-                        <SyntaxHighlighter language="javascript" style={walrusCodeTheme} className="demo-code-block" customStyle={{ margin: 0 }}>
-{`// client does:
-//   1. embed query via OpenAI
-//   2. SEAL decrypt each result (wallet popup)
-// server then:
-//   3. cosine search for matching vectors
-//   4. download encrypted blobs from Walrus
-//   5. return encrypted results to client
-const result = await memwal.recallManual("${fullRecallQuery}", 5)
-// → { results: [{ blob_id, text, distance }], total }`}
-                        </SyntaxHighlighter>
-                    </div>
-
                     {fullRecallPhase && (
                         <div className="demo-phase-indicator">
                             <span className="spinner demo-button-spinner" />
                             {fullRecallPhase}
                         </div>
                     )}
-
-                    {fullRecallResult && (
-                        <div className="demo-result-panel">
-                            <div className="demo-result-label">memories found (downloaded + decrypted client-side)</div>
-                            <pre className="demo-result-pre">{fullRecallResult}</pre>
-                        </div>
-                    )}
-                    {fullRecallError && (
-                        <div className="demo-error-panel">
-                            <div className="demo-error-label">error</div>
-                            <pre className="demo-error-pre">{fullRecallError}</pre>
-                        </div>
-                    )}
-                </Card>
-
+                </PlaygroundStep>
 
             </div>
         </>

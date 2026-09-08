@@ -19,6 +19,7 @@
 mod accounts;
 mod admin;
 mod analyze;
+mod artifacts;
 mod recall;
 mod remember;
 pub mod security_delete;
@@ -29,6 +30,7 @@ mod sponsor;
 pub use accounts::account_exists;
 pub use admin::{ask, forget, get_config, health, restore, stats, version};
 pub use analyze::analyze;
+pub use artifacts::{get_artifact, list_artifacts, store_artifact};
 pub use recall::{recall, recall_manual};
 pub use remember::{
     remember, remember_bulk, remember_bulk_status, remember_manual, remember_status,

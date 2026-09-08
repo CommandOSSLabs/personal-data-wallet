@@ -544,6 +544,11 @@ export function registerSealRoutes(app: Express, policy = DEFAULT_SEAL_ROUTE_POL
             }
             phase = "parse";
             const encryptedData = new Uint8Array(Buffer.from(wrappedDek, "base64"));
+            if (encryptedData.length < 80) {
+                return res.status(400).json({
+                    error: `wrappedDek is ${encryptedData.length} bytes; expected a Seal encrypted object. This namespace was initialized with a dummy/raw DEK — create a new namespace (or rotate the key) instead of reusing it.`,
+                });
+            }
             const parsed = EncryptedObject.parse(encryptedData);
             if (normalizeSuiAddress(parsed.packageId) !== normalizeSuiAddress(packageId)) {
                 return res.status(400).json({ error: "Ciphertext packageId does not match request packageId" });

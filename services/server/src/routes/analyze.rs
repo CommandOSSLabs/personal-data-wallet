@@ -80,6 +80,12 @@ pub async fn analyze(
         )));
     }
     validate_namespace(&body.namespace)?;
+    if let Some(ref source_artifact_id) = body.source_artifact_id {
+        if source_artifact_id.is_empty() {
+            return Err(AppError::BadRequest("source_artifact_id cannot be empty".into()));
+        }
+        tracing::info!(source_artifact_id = %source_artifact_id, "analyze source pin");
+    }
     if crate::storage::v2::gate_v2_label(&state, &auth, &body.namespace)
         .await?
         .is_some()

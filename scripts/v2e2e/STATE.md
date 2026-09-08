@@ -61,6 +61,34 @@ Implemented: SDK namespace PTBs + real Seal wrap DEK; relayer dual auth, Oyster 
 
 Still out: indexer hash chain, Console decrypt/ACL GET, analyze fence (WALM-403), Python/MCP, production merge.
 
+## On-chain core live (PRD P0 grant / revoke / rotate / shred / unauthorized)
+
+Namespace `e2e-live-1788574260720` `0x27f64ce284f7687f954c1b5e5b495311ccde2bcf49457177556df7b9f1222ec2`.
+Stranger (never a delegate): `0x745558104be83dff9d68a3b0635a48cb7b795945b0d677560969fb1519818114`.
+
+| Step | Result | Digest / note |
+|---|---|---|
+| add_delegate_key | pass | `4vhqd5yYiABNiTFyVtTtA5Jx6TNXsJYBDHzzUpHZkxLt` |
+| create_namespace | pass | `ExY6StxMMALRj2oisDe36sGPj5kfp4iNevXnG7gzTMax` |
+| initialize_key (Seal wrap) | pass | `5jziRRCWaWMhncGkEHh15rYUA2CBcSrZyidBTdTeBYqd` |
+| grant_access agent WRITE | pass | `2fkj2Uy1DRkc6nkSNzFvib7fBfVJRExC4cQVpTtgvfX9` |
+| grant_access wallet B READ | pass | `9nuip8zrQTcRBV8dVdKUbN6CPVw4rMrgzjc96sYMoLtH` |
+| remember v0 + recall plaintext | pass | blob `d424366b51c07863140efee1086284c960a8f5b4c6ac59259c8a5a4e315f2874` |
+| unauthorized `seal_approve` | **MoveAbort 16** (`ENoReadAccess`) | live |
+| unauthorized `write_fence` | **MoveAbort 17** (`ENoWriteAccess`) | live |
+| rotate_key v0→v1 | pass | `CoUfRMT5sJgLDDNgcc43a3trwjDwqntXuTHP9wJ2unC6` |
+| recall v0 after rotate | pass | historical ciphertext still decrypts |
+| remember + recall v1 | pass | job `c17ad32a-7dec-4f70-9fd6-b853666ecfd6` |
+| grant stranger READ + `seal_approve` | pass | `DLJyAQ2FyoexreAmPxnpfDQLyXahxdsR1dZMk2kTFLxA` / `8sWxNpWNzFaBFYRbfvB1zRoCUskwCi7YM1y7EHXX1JsJ` |
+| revoke_access (rotates to v2) | pass | `Dfhh83rSjDJViepgnkEDTzRFATD3jApXF7hmzHgg9jKU` |
+| revoked `seal_approve` | **MoveAbort 16** | live |
+| recall v0 after revoke | pass | remaining READ principal still decrypts |
+| crypto_shred_key_version v0 | pass | `2QP7kY1EYzhv1XhkjaZVYiAAbooeb5cQXNYbVWyZvAb9` |
+| shredded `seal_approve` v0 | **MoveAbort 25** (`EKeyVersionShredded`) | live |
+| recall after shred | pass | v0 plaintext absent; v1 still decrypts |
+
+Re-run ACL/rotate/shred only: `pnpm exec tsx scripts/v2e2e/run-e2e.ts --acl`.
+
 ## Original object-only spike leftovers
 
 The first spike `initialize_key` used dummy wrapped bytes. The product path now Seal-wraps a 32-byte AES DEK. Console UI is still Phase 1 (list/identity only).

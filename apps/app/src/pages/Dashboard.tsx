@@ -24,11 +24,19 @@ SyntaxHighlighter.registerLanguage('python', python)
 import { useDelegateKey } from '../App'
 import { Card } from '../components/Card'
 import NamespacesSection from '../components/NamespacesSection'
+import { PermissionCheck } from '../components/PermissionCheck'
 import SecurityDeleteSection from '../components/SecurityDeleteSection'
 import { SecretValueInput } from '../components/SecretValueInput'
 import { config } from '../config'
 import { getAnalyticsErrorType, trackEvent } from '../utils/analytics'
 import { fetchAccountIdForOwner, fetchObjectJson, publicKeyToHex } from '../utils/suiClientCompat'
+import { useV2Namespaces } from '../hooks/useV2Namespaces'
+import {
+    grantV2NamespaceAccess,
+    lookupNamespacePermissions,
+    suiAddressFromEd25519PublicKeyHex,
+    type GrantBits,
+} from '../utils/v2Namespace'
 
 function DelegateKeyCtaIcon(props: SVGProps<SVGSVGElement>) {
     return (
@@ -117,6 +125,12 @@ interface OnChainDelegateKey {
     createdAt: number
 }
 
+type KeyNamespaceAccess = {
+    namespaceId: string
+    label: string
+    bits: GrantBits | null
+}
+
 const MAX_DELEGATE_KEYS = 20
 const MAX_DELEGATE_KEYS_MESSAGE = 'This wallet already has 20 delegate keys. Remove an old key before creating a new delegate key.'
 const PRIVATE_KEY_ENV = 'MEMWAL_PRIVATE_KEY'
@@ -162,16 +176,78 @@ function compactPublicKey(publicKey: string): string {
     return `${normalized.slice(0, 12)}...${normalized.slice(-8)}`
 }
 
+function principalForDelegateKey(key: OnChainDelegateKey): string {
+    if (key.suiAddress) return key.suiAddress
+    try {
+        return suiAddressFromEd25519PublicKeyHex(key.publicKey)
+    } catch {
+        return ''
+    }
+}
+
+function hasGrantedBits(bits: GrantBits | null): bits is GrantBits {
+    return Boolean(bits && (bits.canRead || bits.canWrite || bits.canShare))
+}
+
+function grantLabel(bits: GrantBits): string {
+    const parts: string[] = []
+    if (bits.canRead) parts.push('Read')
+    if (bits.canWrite) parts.push('Write')
+    if (bits.canShare) parts.push('Share')
+    return parts.join(' · ')
+}
+
+function accessTooltip(rows: KeyNamespaceAccess[]): string {
+    if (rows.length === 0) return 'No namespace access'
+    return rows.map((row) => (
+        `${row.label}: ${hasGrantedBits(row.bits) ? grantLabel(row.bits) : 'None'}`
+    )).join('\n')
+}
+
+function KeyAccessCell({
+    rows,
+    loading,
+    error,
+}: {
+    rows: KeyNamespaceAccess[]
+    loading: boolean
+    error: boolean
+}) {
+    if (loading) {
+        return <span className="dashboard-key-perms-empty">Checking…</span>
+    }
+    if (error) {
+        return <span className="dashboard-key-perms-empty">Can't load</span>
+    }
+    const granted = rows.filter((row) => hasGrantedBits(row.bits))
+    const title = accessTooltip(rows)
+    if (granted.length === 0) {
+        return <span className="dashboard-key-perms-empty" title={title}>None</span>
+    }
+    return (
+        <div className="dashboard-key-perms" title={title}>
+            {granted.map((row) => (
+                <div key={row.namespaceId} className="dashboard-key-perm-row">
+                    <span className="dashboard-key-perm-ns">{row.label}</span>
+                    <span className="dashboard-key-perm-bits">{grantLabel(row.bits)}</span>
+                </div>
+            ))}
+        </div>
+    )
+}
+
 function DelegateKeySkeletonList() {
+    const showAccess = config.v2NamespacesEnabled
     return (
         <div className="dashboard-key-table-wrap dashboard-key-list--skeleton" aria-hidden="true">
             <table className="dashboard-key-table">
                 <thead>
                     <tr>
                         <th scope="col" className="dashboard-key-table-select">Select</th>
-                        <th scope="col">Key name</th>
+                        <th scope="col" className="dashboard-key-table-name">Key name</th>
+                        {showAccess && <th scope="col" className="dashboard-key-table-access">Access</th>}
                         <th scope="col">Public key</th>
-                        <th scope="col">Created</th>
+                        <th scope="col" className="dashboard-key-table-created">Created</th>
                         <th scope="col" className="dashboard-key-table-actions">Actions</th>
                     </tr>
                 </thead>
@@ -180,6 +256,7 @@ function DelegateKeySkeletonList() {
                         <tr key={index}>
                             <td><span className="dashboard-key-skeleton-line dashboard-key-skeleton-line--check" /></td>
                             <td><span className="dashboard-key-skeleton-line dashboard-key-skeleton-line--label" /></td>
+                            {showAccess && <td><span className="dashboard-key-skeleton-line dashboard-key-skeleton-line--value" /></td>}
                             <td><span className="dashboard-key-skeleton-line dashboard-key-skeleton-line--value" /></td>
                             <td><span className="dashboard-key-skeleton-line dashboard-key-skeleton-line--date" /></td>
                             <td><span className="dashboard-key-skeleton-line dashboard-key-skeleton-line--actions" /></td>
@@ -214,6 +291,18 @@ export default function Dashboard({
         previewMode
             ? '0x7f33c06e6d144bc3c24aaef7c8f7421c1287df6ce9c5ab74ac729b13f4194'
             : ''
+    )
+    const {
+        namespaces: v2Namespaces,
+        v2AccountId,
+        error: v2NamespaceError,
+        loading: v2NamespacesLoading,
+    } = useV2Namespaces(
+        config.v2NamespacesEnabled && !previewMode ? address : '',
+    )
+    const grantableNamespaces = useMemo(
+        () => v2Namespaces.filter((row) => row.active && row.keyInitialized),
+        [v2Namespaces],
     )
     const previewReady = previewMode && previewState === 'ready'
     const previewAccountObjectId = previewReady
@@ -259,9 +348,19 @@ export default function Dashboard({
     const [showAddForm, setShowAddForm] = useState(false)
     const [addKeyFormClosing, setAddKeyFormClosing] = useState(false)
     const [newKeyLabel, setNewKeyLabel] = useState('New key')
+    const [newKeyNamespaceId, setNewKeyNamespaceId] = useState('')
+    const [newKeyCanRead, setNewKeyCanRead] = useState(true)
+    const [newKeyCanWrite, setNewKeyCanWrite] = useState(true)
     const [keyError, setKeyError] = useState('')
     const [newPrivateKey, setNewPrivateKey] = useState<string | null>(null)
+    const [keyAccess, setKeyAccess] = useState<Record<string, KeyNamespaceAccess[]>>({})
+    const [keyAccessReady, setKeyAccessReady] = useState(false)
     const addKeyFormCloseTimerRef = useRef<number | null>(null)
+    useEffect(() => {
+        if (newKeyNamespaceId) return
+        const first = grantableNamespaces[0]
+        if (first) setNewKeyNamespaceId(first.id)
+    }, [grantableNamespaces, newKeyNamespaceId])
 
     // WalletSigner adapter — wraps dapp-kit hooks into SDK's WalletSigner interface
     const walletSigner = useMemo<WalletSigner | null>(() => {
@@ -341,7 +440,7 @@ export default function Dashboard({
         setAccountLookupComplete(false)
         setLoadingAccount(true)
         try {
-            const accountId = await fetchAccountIdForOwner(suiClient, config.memwalRegistryId, address)
+            const accountId = await fetchAccountIdForOwner(suiClient, config.accountRegistryId, address)
             if (accountId) {
                 setResolvedAccountObjectId(accountId)
             }
@@ -413,6 +512,62 @@ export default function Dashboard({
             return next.length === prev.length ? prev : next
         })
     }, [selectableKeyPublicKeys])
+
+    useEffect(() => {
+        if (!config.v2NamespacesEnabled || previewMode || !address || onChainKeys.length === 0) {
+            setKeyAccess({})
+            setKeyAccessReady(true)
+            return
+        }
+        if (grantableNamespaces.length === 0) {
+            setKeyAccess({})
+            setKeyAccessReady(true)
+            return
+        }
+
+        let cancelled = false
+        setKeyAccessReady(false)
+        const namespaces = grantableNamespaces.map((row) => ({
+            id: row.id,
+            label: row.label || row.id.slice(0, 10),
+        }))
+
+        void (async () => {
+            const next: Record<string, KeyNamespaceAccess[]> = {}
+            await Promise.all(onChainKeys.map(async (key) => {
+                const principal = principalForDelegateKey(key)
+                if (!principal) {
+                    next[key.publicKey] = namespaces.map((ns) => ({
+                        namespaceId: ns.id,
+                        label: ns.label,
+                        bits: null,
+                    }))
+                    return
+                }
+                next[key.publicKey] = await Promise.all(namespaces.map(async (ns) => {
+                    try {
+                        const bits = await lookupNamespacePermissions(
+                            suiClient,
+                            ns.id,
+                            principal,
+                            address,
+                        )
+                        return { namespaceId: ns.id, label: ns.label, bits }
+                    } catch {
+                        return { namespaceId: ns.id, label: ns.label, bits: null }
+                    }
+                }))
+            }))
+            if (!cancelled) {
+                setKeyAccess(next)
+                setKeyAccessReady(true)
+            }
+        })()
+
+        return () => {
+            cancelled = true
+        }
+    }, [address, grantableNamespaces, onChainKeys, previewMode, suiClient])
 
     // ============================================================
     // Fetch on-chain delegate keys
@@ -490,10 +645,10 @@ export default function Dashboard({
             // Register on-chain (v1_new ABI: address derived on-chain, not passed)
             const tx = new Transaction()
             tx.moveCall({
-                target: `${config.memwalPackageId}::account::add_delegate_key`,
+                target: `${config.accountPackageId}::account::add_delegate_key`,
                 arguments: [
                     tx.object(effectiveAccountObjectId!),
-                    tx.object(config.memwalRegistryId),
+                    tx.object(config.accountRegistryId),
                     tx.pure('vector<u8>', Array.from(delegate.publicKey)),
                     tx.pure('string', trimmedLabel),
                     tx.object('0x6'),
@@ -501,6 +656,27 @@ export default function Dashboard({
             })
             const result = await signAndExecuteTx({ transaction: tx })
             await suiClient.waitForTransaction({ digest: result.digest })
+
+            if (
+                config.v2NamespacesEnabled
+                && v2AccountId
+                && walletSigner
+                && newKeyNamespaceId
+                && (newKeyCanRead || newKeyCanWrite)
+            ) {
+                await grantV2NamespaceAccess({
+                    suiClient,
+                    walletSigner,
+                    accountId: v2AccountId,
+                    namespaceId: newKeyNamespaceId,
+                    principal: delegate.suiAddress,
+                    bits: {
+                        canRead: newKeyCanRead || newKeyCanWrite,
+                        canWrite: newKeyCanWrite,
+                        canShare: false,
+                    },
+                })
+            }
 
             const delegatePublicKeyHex = bytesToHex(delegate.publicKey)
             setNewPrivateKey(delegate.privateKey)
@@ -528,6 +704,10 @@ export default function Dashboard({
         fetchOnChainKeys,
         setDelegateKeys,
         closeAddKeyForm,
+        v2AccountId,
+        newKeyNamespaceId,
+        newKeyCanRead,
+        newKeyCanWrite,
     ])
 
     // ============================================================
@@ -540,10 +720,10 @@ export default function Dashboard({
         const tx = new Transaction()
         for (const publicKeyHex of publicKeyHexes) {
             tx.moveCall({
-                target: `${config.memwalPackageId}::account::remove_delegate_key`,
+                target: `${config.accountPackageId}::account::remove_delegate_key`,
                 arguments: [
                     tx.object(effectiveAccountObjectId),
-                    tx.object(config.memwalRegistryId),
+                    tx.object(config.accountRegistryId),
                     tx.pure('vector<u8>', hexToByteArray(publicKeyHex)),
                 ],
             })
@@ -1121,9 +1301,51 @@ const result = await generateText({
                                     placeholder="New key"
                                 />
                             </div>
+                            {config.v2NamespacesEnabled && (
+                                <>
+                                    <div className="dashboard-add-key-field">
+                                        <label className="dashboard-add-key-label">Namespace</label>
+                                        <select
+                                            className="dashboard-add-key-input"
+                                            value={newKeyNamespaceId}
+                                            onChange={(event) => setNewKeyNamespaceId(event.target.value)}
+                                            disabled={grantableNamespaces.length === 0}
+                                        >
+                                            {grantableNamespaces.length === 0 ? (
+                                                <option value="">Create a namespace first</option>
+                                            ) : (
+                                                grantableNamespaces.map((row) => (
+                                                    <option key={row.id} value={row.id}>
+                                                        {row.label || row.id.slice(0, 10)}
+                                                    </option>
+                                                ))
+                                            )}
+                                        </select>
+                                    </div>
+                                    <div className="dashboard-add-key-perms">
+                                        <PermissionCheck
+                                            checked={newKeyCanRead || newKeyCanWrite}
+                                            label="Read"
+                                            hint="Recall memories in this namespace."
+                                            onChange={(next) => {
+                                                setNewKeyCanRead(next)
+                                                if (!next) setNewKeyCanWrite(false)
+                                            }}
+                                        />
+                                        <PermissionCheck
+                                            checked={newKeyCanWrite}
+                                            label="Write"
+                                            hint="Remember new memories in this namespace."
+                                            onChange={(next) => {
+                                                setNewKeyCanWrite(next)
+                                                if (next) setNewKeyCanRead(true)
+                                            }}
+                                        />
+                                    </div>
+                                </>
+                            )}
                             <p className="dashboard-add-key-note">
-                                A new keypair will be created, and the private key will be copied to your clipboard.
-                                Save it somewhere secure — it can't be shown again.
+                                Private key is copied once. Save it — it can't be shown again.
                             </p>
                             <div className="dashboard-add-key-actions">
                                 <button
@@ -1193,9 +1415,10 @@ const result = await generateText({
                                 <thead>
                                     <tr>
                                         <th scope="col" className="dashboard-key-table-select">Select</th>
-                                        <th scope="col">Key name</th>
+                                        <th scope="col" className="dashboard-key-table-name">Key name</th>
+                                        {config.v2NamespacesEnabled && <th scope="col" className="dashboard-key-table-access">Access</th>}
                                         <th scope="col">Public key</th>
-                                        <th scope="col">Created</th>
+                                        <th scope="col" className="dashboard-key-table-created">Created</th>
                                         <th scope="col" className="dashboard-key-table-actions">Actions</th>
                                     </tr>
                                 </thead>
@@ -1227,6 +1450,18 @@ const result = await generateText({
                                                         {isCurrentKey && <span className="dashboard-key-current-badge">current</span>}
                                                     </div>
                                                 </td>
+                                                {config.v2NamespacesEnabled && (
+                                                    <td data-label="Access">
+                                                        <KeyAccessCell
+                                                            rows={keyAccess[k.publicKey] ?? []}
+                                                            loading={
+                                                                (v2NamespacesLoading && grantableNamespaces.length === 0)
+                                                                || (grantableNamespaces.length > 0 && !keyAccessReady)
+                                                            }
+                                                            error={Boolean(v2NamespaceError) && grantableNamespaces.length === 0}
+                                                        />
+                                                    </td>
+                                                )}
                                                 <td data-label="Public key">
                                                     <code className="dashboard-key-public" title={k.publicKey}>
                                                         {compactPublicKey(k.publicKey)}

@@ -13,7 +13,6 @@ import {
 import type { WalletSigner } from '@mysten-incubation/memwal/manual'
 import { Ed25519PublicKey } from '@mysten/sui/keypairs/ed25519'
 import { getJsonRpcFullnodeUrl, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
-import { Transaction } from '@mysten/sui/transactions'
 import {
     fromHex,
     isValidSuiAddress,
@@ -21,7 +20,12 @@ import {
     toHex,
 } from '@mysten/sui/utils'
 import { config } from '../config'
-import { fetchAccountIdForOwner, fetchObjectJson, publicKeyToHex } from './suiClientCompat'
+import {
+    fetchAccountIdForOwner,
+    fetchAddressKeyedU8,
+    fetchObjectJson,
+    publicKeyToHex,
+} from './suiClientCompat'
 
 export const NAMESPACE_LABEL_MAX_LENGTH = 64
 export const PERMISSION_READ = 1
@@ -83,17 +87,6 @@ type EventsClient = {
         }>
         nextCursor?: unknown
         hasNextPage?: boolean
-    }>
-}
-
-type InspectClient = {
-    devInspectTransactionBlock: (input: {
-        sender: string
-        transactionBlock: Transaction
-    }) => Promise<{
-        results?: Array<{ returnValues?: Array<[number[] | Uint8Array, string]> }>
-        error?: unknown
-        effects?: { status?: { status?: string; error?: unknown } }
     }>
 }
 
@@ -174,6 +167,23 @@ export function permissionFlags(bits: number): GrantBits {
         canWrite: (bits & PERMISSION_WRITE) === PERMISSION_WRITE,
         canShare: (bits & PERMISSION_SHARE) === PERMISSION_SHARE,
     }
+}
+
+/** Matches `namespace::permissions`: the owner is implicit Read+Write+Share. */
+export function permissionBitsForPrincipal(namespaceOwner: string, principal: string, tableBits: number): number {
+    try {
+        if (normalizeSuiAddress(principal) === normalizeSuiAddress(namespaceOwner)) {
+            return PERMISSION_READ | PERMISSION_WRITE | PERMISSION_SHARE
+        }
+    } catch {
+        return tableBits
+    }
+    return tableBits
+}
+
+export function namespaceIdFromCreatedEvent(parsed: Record<string, unknown> | null | undefined): string {
+    if (!parsed) return ''
+    return asObjectId(parsed.namespace_id)
 }
 
 export function bytesToHex(bytes: Uint8Array): string {
@@ -268,8 +278,11 @@ export function playgroundMemwalAccountId(opts: {
 export function playgroundNamespaceOptions(v2Labels: readonly string[], current: string): string[] {
     const out: string[] = []
     const seen = new Set<string>()
-    for (const label of ['default', ...v2Labels, current]) {
+    const preferV2 = v2Labels.length > 0
+    const labels = preferV2 ? [...v2Labels, current] : ['default', ...v2Labels, current]
+    for (const label of labels) {
         if (!label || seen.has(label)) continue
+        if (preferV2 && label === 'default' && current !== 'default') continue
         seen.add(label)
         out.push(label)
     }
@@ -362,8 +375,7 @@ function eventIsNamespaceCreated(type: string): boolean {
     }
 }
 
-export async function listOwnedV2Namespaces(_suiClient: unknown, owner: string): Promise<V2NamespaceRow[]> {
-    if (!config.v2PackageId || !owner) return []
+async function listOwnedNamespaceIdsViaJsonRpc(owner: string): Promise<string[]> {
     const rpc = getV2JsonRpcClient() as unknown as EventsClient
     const ownerNormalized = normalizeSuiAddress(owner)
     const ids: string[] = []
@@ -381,7 +393,7 @@ export async function listOwnedV2Namespaces(_suiClient: unknown, owner: string):
             const parsed = event.parsedJson ?? event.json ?? {}
             const eventOwner = typeof parsed.owner === 'string' ? parsed.owner : owner
             if (normalizeSuiAddress(eventOwner) !== ownerNormalized) continue
-            const id = asObjectId(parsed.namespace_id)
+            const id = namespaceIdFromCreatedEvent(parsed)
             if (!id || seen.has(id)) continue
             seen.add(id)
             ids.push(id)
@@ -390,45 +402,117 @@ export async function listOwnedV2Namespaces(_suiClient: unknown, owner: string):
         cursor = response.nextCursor
         if (cursor == null) break
     }
+    return ids
+}
 
+function graphqlEventJson(node: { contents?: { json?: unknown } } | null | undefined): Record<string, unknown> | null {
+    const raw = node?.contents?.json
+    if (!raw) return null
+    if (typeof raw === 'string') {
+        try {
+            const parsed = JSON.parse(raw) as unknown
+            return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
+        } catch {
+            return null
+        }
+    }
+    if (typeof raw === 'object') return raw as Record<string, unknown>
+    return null
+}
+
+async function listOwnedNamespaceIdsViaGraphql(owner: string): Promise<string[]> {
+    const url = config.suiGraphqlUrl
+    if (!url || !config.v2PackageId) {
+        throw new Error('GraphQL endpoint is not configured')
+    }
+    const ownerNormalized = normalizeSuiAddress(owner)
+    const eventType = `${config.v2PackageId}::namespace::NamespaceCreated`
+    const query = `
+        query ($sender: SuiAddress!, $type: String!, $after: String) {
+            events(first: 50, after: $after, filter: { sender: $sender, type: $type }) {
+                nodes { contents { json } }
+                pageInfo { hasNextPage endCursor }
+            }
+        }
+    `
+    const ids: string[] = []
+    const seen = new Set<string>()
+    let after: string | null = null
+    for (let page = 0; page < MAX_OWNER_EVENT_PAGES; page++) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query,
+                variables: { sender: ownerNormalized, type: eventType, after },
+            }),
+        })
+        if (!response.ok) {
+            throw new Error(`GraphQL namespace list failed (${response.status})`)
+        }
+        const payload = await response.json() as {
+            errors?: Array<{ message?: string }>
+            data?: {
+                events?: {
+                    nodes?: Array<{ contents?: { json?: unknown } }>
+                    pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }
+                }
+            }
+        }
+        if (payload.errors?.length) {
+            throw new Error(payload.errors[0]?.message || 'GraphQL namespace list failed')
+        }
+        const connection = payload.data?.events
+        for (const node of connection?.nodes ?? []) {
+            const parsed = graphqlEventJson(node)
+            const eventOwner = typeof parsed?.owner === 'string' ? parsed.owner : owner
+            if (normalizeSuiAddress(eventOwner) !== ownerNormalized) continue
+            const id = namespaceIdFromCreatedEvent(parsed)
+            if (!id || seen.has(id)) continue
+            seen.add(id)
+            ids.push(id)
+        }
+        if (!connection?.pageInfo?.hasNextPage) break
+        after = connection.pageInfo.endCursor ?? null
+        if (after == null) break
+    }
+    return ids
+}
+
+export async function listOwnedV2Namespaces(suiClient: unknown, owner: string): Promise<V2NamespaceRow[]> {
+    if (!config.v2PackageId || !owner) return []
+    const ids = config.suiGraphqlUrl
+        ? await listOwnedNamespaceIdsViaGraphql(owner)
+        : await listOwnedNamespaceIdsViaJsonRpc(owner)
     const rows: Array<V2NamespaceRow | null> = await Promise.all(
-        ids.map((id) => readV2NamespaceRow(rpc, id, owner)),
+        ids.map((id) => readV2NamespaceRow(suiClient, id, owner)),
     )
     return rows.filter((row): row is V2NamespaceRow => row != null)
 }
 
-function decodeReturnU8(result: Awaited<ReturnType<InspectClient['devInspectTransactionBlock']>>): number {
-    const bytes = result.results?.[0]?.returnValues?.[0]?.[0]
-    if (!bytes) throw new Error('permissions view returned no value')
-    return Number(bytes[0] ?? 0)
-}
-
 export async function lookupNamespacePermissions(
-    _suiClient: unknown,
+    suiClient: unknown,
     namespaceId: string,
     principal: string,
-    sender: string,
+    _sender: string,
 ): Promise<GrantBits> {
     if (!isValidSuiAddress(principal)) throw new Error('Enter a valid Sui address')
-    const client = getV2JsonRpcClient() as unknown as InspectClient
-    const tx = new Transaction()
-    tx.moveCall({
-        target: `${config.v2PackageId}::namespace::permissions`,
-        arguments: [
-            tx.object(namespaceId),
-            tx.pure('address', normalizeSuiAddress(principal)),
-        ],
-    })
-    const inspected = await client.devInspectTransactionBlock({
-        sender: sender || principal,
-        transactionBlock: tx,
-    })
-    const status = inspected.effects?.status?.status
-    if (inspected.error || (status && status !== 'success')) {
-        const detail = inspected.error ?? inspected.effects?.status?.error
-        throw new Error(typeof detail === 'string' ? detail : 'permissions lookup failed')
+    const fields = await fetchObjectJson(suiClient, namespaceId)
+    if (!fields) throw new Error('namespace not found')
+    const owner = typeof fields.owner === 'string' ? fields.owner : ''
+    const principalNorm = normalizeSuiAddress(principal)
+    if (owner && principalNorm === normalizeSuiAddress(owner)) {
+        return permissionFlags(permissionBitsForPrincipal(owner, principalNorm, 0))
     }
-    return permissionFlags(decodeReturnU8(inspected))
+    const permissionsField = fields.permissions
+    const tableId = asObjectId(
+        permissionsField && typeof permissionsField === 'object'
+            ? (permissionsField as { id?: unknown }).id
+            : permissionsField,
+    )
+    if (!tableId) return permissionFlags(0)
+    const tableBits = await fetchAddressKeyedU8(suiClient, tableId, principalNorm)
+    return permissionFlags(permissionBitsForPrincipal(owner || principalNorm, principalNorm, tableBits))
 }
 
 export async function generateAndWrapNamespaceDek(opts: {

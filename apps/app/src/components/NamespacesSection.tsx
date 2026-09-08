@@ -5,7 +5,6 @@ import {
     useSuiClient,
 } from '@mysten/dapp-kit'
 import { Copy, Plus, RefreshCw } from 'lucide-react'
-import { isValidSuiAddress, normalizeSuiAddress } from '@mysten/sui/utils'
 import { useDelegateKey } from '../App'
 import { Card } from './Card'
 import { config } from '../config'
@@ -16,26 +15,19 @@ import {
     compactObjectId,
     createV2Namespace,
     generateAndWrapNamespaceDek,
-    grantBitsFromCheckboxes,
     grantV2NamespaceAccess,
     initializeV2NamespaceKey,
-    isCurrentAccountDelegate,
-    lookupNamespacePermissions,
     NAMESPACE_LABEL_MAX_LENGTH,
     normalizeLabelForSubmit,
     principalsToGrant,
     readV2NamespaceRow,
     sanitizeLabelInput,
-    sharePrincipalBlockedReason,
     suiAddressFromEd25519PublicKeyHex,
-    validateGrantBits,
     validateNamespaceLabel,
     v2ConfigReady,
     type GrantBits,
     type WalletSignerLike,
 } from '../utils/v2Namespace'
-
-type SessionGrant = GrantBits & { principal: string; namespaceId: string }
 
 export default function NamespacesSection({ previewMode = false }: { previewMode?: boolean }) {
     const currentAccount = useCurrentAccount()
@@ -47,7 +39,6 @@ export default function NamespacesSection({ previewMode = false }: { previewMode
     const {
         namespaces,
         v2AccountId,
-        delegateAddresses,
         loading,
         error,
         refresh,
@@ -61,19 +52,8 @@ export default function NamespacesSection({ previewMode = false }: { previewMode
     const [createPhase, setCreatePhase] = useState('')
     const [createError, setCreateError] = useState('')
     const [selectedId, setSelectedId] = useState<string | null>(null)
-    const [sharePrincipal, setSharePrincipal] = useState('')
-    const [shareRead, setShareRead] = useState(true)
-    const [shareWrite, setShareWrite] = useState(false)
-    const [shareShare, setShareShare] = useState(false)
-    const [sharing, setSharing] = useState(false)
-    const [shareError, setShareError] = useState('')
-    const [lookupPrincipal, setLookupPrincipal] = useState('')
-    const [lookupResult, setLookupResult] = useState<GrantBits | null>(null)
-    const [lookupError, setLookupError] = useState('')
-    const [lookingUp, setLookingUp] = useState(false)
     const [finishing, setFinishing] = useState(false)
     const [cancelling, setCancelling] = useState(false)
-    const [sessionGrants, setSessionGrants] = useState<SessionGrant[]>([])
     const [copied, setCopied] = useState<string | null>(null)
 
     const walletSigner = useMemo<WalletSignerLike | null>(() => {
@@ -86,13 +66,6 @@ export default function NamespacesSection({ previewMode = false }: { previewMode
     }, [currentAccount, signAndExecuteTx, signPersonalMsg])
 
     const selected = namespaces.find((row) => row.id === selectedId) ?? namespaces[0] ?? null
-    const shareAllowed = isCurrentAccountDelegate(sharePrincipal, delegateAddresses)
-    const shareBlocked = sharePrincipalBlockedReason(sharePrincipal, owner)
-    const shareBits = grantBitsFromCheckboxes({
-        read: shareRead,
-        write: shareWrite,
-        share: shareShare && shareAllowed,
-    })
     const lifecycleBusy = creating || finishing || cancelling
 
     useEffect(() => {
@@ -133,7 +106,6 @@ export default function NamespacesSection({ previewMode = false }: { previewMode
                 principal,
                 bits,
             })
-            setSessionGrants((prev) => [...prev, { principal, namespaceId, ...bits }])
         }
     }, [walletSigner, v2AccountId, owner, delegatePublicKey, suiClient])
 
@@ -293,82 +265,9 @@ export default function NamespacesSection({ previewMode = false }: { previewMode
         }
     }, [walletSigner, selected, v2AccountId, suiClient, removeNamespace, refresh])
 
-    const handleShare = useCallback(async () => {
-        if (!walletSigner || !selected || !v2AccountId) return
-        const blocked = sharePrincipalBlockedReason(sharePrincipal, owner)
-        if (blocked) {
-            setShareError(blocked)
-            return
-        }
-        if (!isValidSuiAddress(sharePrincipal)) {
-            setShareError('Enter a valid Sui address')
-            return
-        }
-        const bits = shareBits
-        const invalid = validateGrantBits(bits)
-        if (invalid) {
-            setShareError(invalid)
-            return
-        }
-        if (bits.canShare && !shareAllowed) {
-            setShareError('Share is limited to current account delegates.')
-            return
-        }
-        setSharing(true)
-        setShareError('')
-        try {
-            await grantV2NamespaceAccess({
-                suiClient,
-                walletSigner,
-                accountId: v2AccountId,
-                namespaceId: selected.id,
-                principal: sharePrincipal,
-                bits,
-            })
-            setSessionGrants((prev) => [
-                ...prev,
-                { principal: normalizeSuiAddress(sharePrincipal), namespaceId: selected.id, ...bits },
-            ])
-            setSharePrincipal('')
-            setShareWrite(false)
-            setShareShare(false)
-            setShareRead(true)
-        } catch (err) {
-            setShareError(err instanceof Error ? err.message : String(err))
-        } finally {
-            setSharing(false)
-        }
-    }, [walletSigner, selected, v2AccountId, sharePrincipal, shareBits, shareAllowed, suiClient])
-
-    const handleLookup = useCallback(async () => {
-        if (!selected || !owner) return
-        if (!isValidSuiAddress(lookupPrincipal)) {
-            setLookupError('Enter a valid Sui address')
-            setLookupResult(null)
-            return
-        }
-        setLookingUp(true)
-        setLookupError('')
-        setLookupResult(null)
-        try {
-            const bits = await lookupNamespacePermissions(
-                suiClient,
-                selected.id,
-                lookupPrincipal,
-                owner,
-            )
-            setLookupResult(bits)
-        } catch (err) {
-            setLookupError(err instanceof Error ? err.message : String(err))
-        } finally {
-            setLookingUp(false)
-        }
-    }, [selected, owner, lookupPrincipal, suiClient])
-
     if (!config.v2NamespacesEnabled) return null
 
     const listBusy = loading && namespaces.length === 0
-    const selectedSessionGrants = sessionGrants.filter((grant) => grant.namespaceId === selected?.id)
 
     return (
         <Card
@@ -429,7 +328,7 @@ export default function NamespacesSection({ previewMode = false }: { previewMode
                         />
                     </div>
                     <p className="dashboard-add-key-note">
-                        Create, Seal-wrap a 32-byte namespace key, then grant read/write to operator writers and this session&apos;s delegate. Each step is a separate sponsored transaction.
+                        Creates the namespace, Seal-wraps its key, and grants this session&apos;s agent Read+Write. Separate sponsored transactions.
                     </p>
                     <div className="dashboard-add-key-actions">
                         <button
@@ -481,7 +380,7 @@ export default function NamespacesSection({ previewMode = false }: { previewMode
                         </thead>
                         <tbody>
                             {namespaces.map((row) => {
-                                const isSelected = selected?.id === row.id
+                                const isSelected = selected?.id === row.id && !row.keyInitialized
                                 return (
                                     <tr
                                         key={row.id}
@@ -523,153 +422,29 @@ export default function NamespacesSection({ previewMode = false }: { previewMode
                 </div>
             )}
 
-            {selected && (
+            {selected && !selected.keyInitialized && (
                 <div className="dashboard-add-key-form" style={{ marginTop: 20 }}>
-                    {!selected.keyInitialized && (
-                        <>
-                            <p className="dashboard-add-key-note">
-                                This namespace is reserved but not initialized. Finish wrapping the key, or cancel the reservation to reuse the label.
-                            </p>
-                            <div className="dashboard-add-key-actions">
-                                <button
-                                    className="btn btn-secondary btn-sm dashboard-add-key-cancel"
-                                    onClick={() => void handleCancelReservation()}
-                                    disabled={lifecycleBusy || !walletSigner}
-                                    aria-busy={cancelling}
-                                >
-                                    {cancelling ? 'Cancelling...' : 'Cancel reservation'}
-                                </button>
-                                <button
-                                    className="btn btn-primary btn-sm dashboard-add-key-create"
-                                    onClick={() => void handleFinishInitialize()}
-                                    disabled={lifecycleBusy || !walletSigner}
-                                    aria-busy={finishing}
-                                >
-                                    {finishing ? 'Initializing...' : 'Finish initialize'}
-                                </button>
-                            </div>
-                        </>
-                    )}
-                    <div className="dashboard-add-key-field">
-                        <label className="dashboard-add-key-label">Share {selected.label || compactObjectId(selected.id)}</label>
-                        <input
-                            className="dashboard-add-key-input"
-                            type="text"
-                            value={sharePrincipal}
-                            onChange={(event) => setSharePrincipal(event.target.value.trim())}
-                            placeholder="0x… wallet address"
-                        />
-                    </div>
-                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                        <label>
-                            <input
-                                type="checkbox"
-                                checked={shareBits.canRead}
-                                onChange={(event) => {
-                                    const next = event.target.checked
-                                    setShareRead(next)
-                                    if (!next) {
-                                        setShareWrite(false)
-                                        setShareShare(false)
-                                    }
-                                }}
-                            />{' '}
-                            Read
-                        </label>
-                        <label>
-                            <input
-                                type="checkbox"
-                                checked={shareWrite}
-                                onChange={(event) => {
-                                    const next = event.target.checked
-                                    setShareWrite(next)
-                                    if (next) setShareRead(true)
-                                }}
-                            />{' '}
-                            Write
-                        </label>
-                        <label>
-                            <input
-                                type="checkbox"
-                                checked={shareShare && shareAllowed}
-                                disabled={!shareAllowed}
-                                onChange={(event) => {
-                                    const next = event.target.checked
-                                    setShareShare(next)
-                                    if (next) setShareRead(true)
-                                }}
-                            />{' '}
-                            Share
-                        </label>
-                    </div>
-                    <p className="dashboard-add-key-note">Share is limited to current account delegates.</p>
-                    {shareBlocked && (
-                        <p className="dashboard-add-key-note">{shareBlocked}</p>
-                    )}
-                    {shareError && (
-                        <p className="dashboard-add-key-note" style={{ color: 'var(--danger)' }}>{shareError}</p>
-                    )}
-                    <div className="dashboard-add-key-actions">
-                        <button
-                            className="btn btn-primary btn-sm dashboard-add-key-create"
-                            onClick={() => void handleShare()}
-                            disabled={sharing || lifecycleBusy || !selected.active || !walletSigner || Boolean(shareBlocked)}
-                            aria-busy={sharing}
-                        >
-                            {sharing ? 'Granting...' : 'Grant access'}
-                        </button>
-                    </div>
-
-                    <div className="dashboard-add-key-field">
-                        <label className="dashboard-add-key-label">Look up permissions</label>
-                        <input
-                            className="dashboard-add-key-input"
-                            type="text"
-                            value={lookupPrincipal}
-                            onChange={(event) => setLookupPrincipal(event.target.value.trim())}
-                            placeholder="0x… wallet address"
-                        />
-                    </div>
                     <p className="dashboard-add-key-note">
-                        ACL is not enumerable on chain; look up an address.
+                        This namespace is reserved but not initialized. Finish wrapping the key, or cancel the reservation to reuse the label.
                     </p>
-                    {lookupError && (
-                        <p className="dashboard-add-key-note" style={{ color: 'var(--danger)' }}>{lookupError}</p>
-                    )}
-                    {lookupResult && (
-                        <p className="dashboard-add-key-note">
-                            can read: {lookupResult.canRead ? 'yes' : 'no'} · can write: {lookupResult.canWrite ? 'yes' : 'no'} · can share: {lookupResult.canShare ? 'yes' : 'no'}
-                        </p>
-                    )}
                     <div className="dashboard-add-key-actions">
                         <button
                             className="btn btn-secondary btn-sm dashboard-add-key-cancel"
-                            onClick={() => void handleLookup()}
-                            disabled={lookingUp}
-                            aria-busy={lookingUp}
+                            onClick={() => void handleCancelReservation()}
+                            disabled={lifecycleBusy || !walletSigner}
+                            aria-busy={cancelling}
                         >
-                            {lookingUp ? 'Looking up...' : 'Look up'}
+                            {cancelling ? 'Cancelling...' : 'Cancel reservation'}
+                        </button>
+                        <button
+                            className="btn btn-primary btn-sm dashboard-add-key-create"
+                            onClick={() => void handleFinishInitialize()}
+                            disabled={lifecycleBusy || !walletSigner}
+                            aria-busy={finishing}
+                        >
+                            {finishing ? 'Initializing...' : 'Finish initialize'}
                         </button>
                     </div>
-
-                    {selectedSessionGrants.length > 0 && (
-                        <div className="dashboard-add-key-field">
-                            <label className="dashboard-add-key-label">Granted this session</label>
-                            <ul style={{ margin: 0, paddingLeft: 18, color: '#faf8f5', fontSize: 14 }}>
-                                {selectedSessionGrants.map((grant) => (
-                                    <li key={`${grant.namespaceId}:${grant.principal}`}>
-                                        <code className="dashboard-key-public" title={grant.principal}>
-                                            {compactObjectId(grant.principal)}
-                                        </code>
-                                        {' '}
-                                        {grant.canRead ? 'read' : ''}
-                                        {grant.canWrite ? ' write' : ''}
-                                        {grant.canShare ? ' share' : ''}
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-                    )}
                 </div>
             )}
         </Card>

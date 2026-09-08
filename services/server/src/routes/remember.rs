@@ -104,6 +104,7 @@ fn spawn_prepare_v2_remember_job(
     namespace_label: String,
     ns: V2Namespace,
     writer_index: usize,
+    source_artifact_id: Option<String>,
 ) {
     let request_context = crate::observability::current_context();
     tokio::spawn(async move {
@@ -227,6 +228,8 @@ fn spawn_prepare_v2_remember_job(
                             ciphertext_digest,
                             storage_mode: "managed_oyster".into(),
                             remember_job_id: Some(job_id.clone()),
+                            skip_vector: false,
+                            source_artifact_id: source_artifact_id.clone(),
                         },
                     )
                     .await?;
@@ -814,13 +817,22 @@ pub async fn remember(
         )));
     }
     validate_namespace(&body.namespace)?;
+    if body.source_artifact_id.as_ref().is_some_and(|id| id.is_empty()) {
+        return Err(AppError::BadRequest("source_artifact_id cannot be empty".into()));
+    }
 
     let owner = &auth.owner;
     let namespace = &body.namespace;
     let owner_owned = owner.clone();
     let namespace_owned = namespace.clone();
     let text = body.text;
+    let source_artifact_id = body.source_artifact_id.clone();
     let v2_ns = v2::gate_v2_label(&state, &auth, namespace).await?;
+    if source_artifact_id.is_some() && v2_ns.is_none() {
+        return Err(AppError::BadRequest(
+            "source_artifact_id requires a V2 namespace".into(),
+        ));
+    }
     let v2_writer_index = if let Some(ref ns) = v2_ns {
         Some(v2::authorize_v2_write(&state, &auth, ns).await?)
     } else {
@@ -848,6 +860,7 @@ pub async fn remember(
             namespace_owned,
             ns,
             v2_writer_index.expect("authorized writer index"),
+            source_artifact_id,
         );
     } else {
         spawn_prepare_remember_job(

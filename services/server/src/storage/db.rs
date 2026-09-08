@@ -46,6 +46,7 @@ mod tests {
             include_str!("../../migrations/008_benchmark_plaintext.sql"),
             include_str!("../../migrations/009_importance_signal.sql"),
             include_str!("../../migrations/010_v2_columns.sql"),
+            include_str!("../../migrations/011_artifacts.sql"),
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }
@@ -308,6 +309,12 @@ impl VectorDb {
             .execute(&pool)
             .await
             .map_err(|e| AppError::Internal(format!("Failed to run migration 010: {}", e)))?;
+
+        let migration_011 = include_str!("../../migrations/011_artifacts.sql");
+        sqlx::raw_sql(migration_011)
+            .execute(&pool)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to run migration 011: {}", e)))?;
 
         tracing::info!("database connected and migrations applied");
 

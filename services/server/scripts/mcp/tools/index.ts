@@ -7,6 +7,9 @@ import { registerRecallTool } from "./recall.js";
 import { registerAnalyzeTool } from "./analyze.js";
 import { registerRestoreTool } from "./restore.js";
 import { registerHealthTool } from "./health.js";
+import { registerStoreArtifactTool } from "./store-artifact.js";
+import { registerListArtifactsTool } from "./list-artifacts.js";
+import { registerGetArtifactTool } from "./get-artifact.js";
 
 /**
  * Register every non-manual MemWal tool on the given server. Manual-mode
@@ -20,6 +23,9 @@ export function registerTools(server: McpServer, session: MemWalSession): void {
     registerRecallTool(server, session);
     registerAnalyzeTool(server, session);
     registerRestoreTool(server, session);
+    registerStoreArtifactTool(server, session);
+    registerListArtifactsTool(server, session);
+    registerGetArtifactTool(server, session);
     registerHealthTool(server, session);
 }
 
@@ -29,5 +35,8 @@ export {
     registerRecallTool,
     registerAnalyzeTool,
     registerRestoreTool,
+    registerStoreArtifactTool,
+    registerListArtifactsTool,
+    registerGetArtifactTool,
     registerHealthTool,
 };

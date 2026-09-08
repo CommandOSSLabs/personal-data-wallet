@@ -1,6 +1,6 @@
 import { SuiGrpcClient } from '@mysten/sui/grpc'
 
-import { fetchAccountIdForOwner, fetchObjectJson, isGrpcClient } from './suiClientCompat'
+import { fetchAccountIdForOwner, fetchAddressKeyedU8, fetchObjectJson, isGrpcClient } from './suiClientCompat'
 
 describe('gRPC Sui client compatibility', () => {
     it('uses the gRPC getObject request shape', async () => {
@@ -30,5 +30,17 @@ describe('gRPC Sui client compatibility', () => {
         expect(request.parentId).toBe('0xtable2')
         expect(request.name.type).toBe('address')
         expect(request.name.bcs).toEqual(new Uint8Array(32).fill(0).map((_, i) => i === 31 ? 1 : 0))
+    })
+
+    it('reads a Table<address, u8> cell and treats missing rows as 0', async () => {
+        const client = new SuiGrpcClient({ network: 'testnet', baseUrl: 'https://provider.example/grpc' })
+        const getDynamicField = vi.spyOn(client, 'getDynamicField').mockResolvedValue({
+            dynamicField: { value: { bcs: new Uint8Array([3]) } },
+        } as never)
+        await expect(fetchAddressKeyedU8(client, '0xtable', '0x1')).resolves.toBe(3)
+        expect(getDynamicField).toHaveBeenCalledOnce()
+
+        getDynamicField.mockRejectedValueOnce(new Error('not found'))
+        await expect(fetchAddressKeyedU8(client, '0xtable', '0x1')).resolves.toBe(0)
     })
 })

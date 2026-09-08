@@ -24,10 +24,58 @@ export interface MemWalConfig {
 // API Types
 // ============================================================
 
+/** Options for remember() / rememberAsync(). */
+export interface RememberOptions {
+    /** Override the default namespace for this call. */
+    namespace?: string;
+    /**
+     * Pin this distilled fact to a stored artifact (`storeArtifact` id).
+     * Relayer stores the pointer on the memory row; the file itself is not embedded.
+     */
+    sourceArtifactId?: string;
+}
+
 /** Result from remember() / rememberAsync() */
 export interface RememberAcceptedResult {
     job_id: string;
     status: string;
+}
+
+/** Input for storeArtifact(). File bytes are encrypted; they are not embedded. */
+export interface StoreArtifactInput {
+    filename: string;
+    /** Raw bytes, ArrayBuffer, or UTF-8 text. */
+    bytes: Uint8Array | ArrayBuffer | string;
+    mimeType?: string;
+    /** `upload` | `attachment` | `framework:<name>` | `mcp` */
+    source?: string;
+    namespace?: string;
+}
+
+export interface ArtifactAcceptedResult {
+    artifact_id: string;
+    status: string;
+}
+
+export interface ArtifactRecord {
+    artifact_id: string;
+    status: "pending" | "running" | "uploaded" | "done" | "failed" | "not_found" | string;
+    owner: string;
+    namespace: string;
+    filename: string;
+    mime_type: string;
+    source: string;
+    byte_size: number;
+    blob_id?: string;
+    storage_mode?: string;
+    error?: string;
+    bytes_b64?: string;
+    /** Decoded file bytes. Present on getArtifact() once status is `done`. */
+    bytes?: Uint8Array;
+}
+
+export interface ListArtifactsResult {
+    artifacts: ArtifactRecord[];
 }
 
 /** Status returned for an async remember job */
@@ -183,6 +231,8 @@ export interface AnalyzeOptions {
      * no server-readable metadata column for it (Architecture A).
      */
     occurredAt?: string | Date;
+    /** Pin extracted facts to a stored artifact. */
+    sourceArtifactId?: string;
 }
 
 /** A fact extracted by analyze() and accepted for background storage. */
@@ -583,6 +633,14 @@ export interface RotateKeyOpts extends NamespaceTxOpts {
     namespaceId: string;
     /** Replacement Seal-wrapped DEK */
     newWrappedDek: Uint8Array;
+}
+
+/** Options for cryptoShredKeyVersion() */
+export interface CryptoShredKeyVersionOpts extends NamespaceTxOpts {
+    /** MemoryNamespace shared object ID */
+    namespaceId: string;
+    /** Historical key version to shred. Cannot be the current version. */
+    keyVersion: bigint | number;
 }
 
 /** Options for cancelUninitializedNamespace() */

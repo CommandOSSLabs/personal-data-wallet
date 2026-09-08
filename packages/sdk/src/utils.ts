@@ -67,6 +67,36 @@ export function bytesToHex(bytes: Uint8Array): string {
         .join("");
 }
 
+/** Standard base64 (not url-safe). Used for artifact bytes on the wire. */
+export function bytesToBase64(bytes: Uint8Array): string {
+    if (typeof Buffer !== "undefined") {
+        return Buffer.from(bytes).toString("base64");
+    }
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+}
+
+export function base64ToBytes(value: string): Uint8Array {
+    const clean = value.trim();
+    if (typeof Buffer !== "undefined") {
+        return new Uint8Array(Buffer.from(clean, "base64"));
+    }
+    const binary = atob(clean);
+    const out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+    return out;
+}
+
+export function artifactBytesToUint8Array(bytes: Uint8Array | ArrayBuffer | string): Uint8Array {
+    if (typeof bytes === "string") return new TextEncoder().encode(bytes);
+    if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
+    return bytes;
+}
+
 /**
  * BCS-encode a u64 as 8 little-endian bytes, hex — matching `bcs::to_bytes(&u64)`
  * on the Move side. Used to tail a SEAL key id with the account's rotation

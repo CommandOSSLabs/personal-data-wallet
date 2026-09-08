@@ -69,7 +69,7 @@ async function resolveAccountId(
     ownerAddress: string,
 ): Promise<string | null> {
     try {
-        return await fetchAccountIdForOwner(suiClient, config.memwalRegistryId, ownerAddress)
+        return await fetchAccountIdForOwner(suiClient, config.accountRegistryId, ownerAddress)
     } catch {
         return null
     }
@@ -256,10 +256,10 @@ export default function ConnectMcp() {
             // Build + sign add_delegate_key tx.
             const tx = new Transaction()
             tx.moveCall({
-                target: `${config.memwalPackageId}::account::add_delegate_key`,
+                target: `${config.accountPackageId}::account::add_delegate_key`,
                 arguments: [
                     tx.object(accountId),
-                    tx.object(config.memwalRegistryId),
+                    tx.object(config.accountRegistryId),
                     tx.pure('vector<u8>', hexToBytes(verifiedBridge.publicKey)),
                     // v1_new derives the Sui address on-chain — no address arg.
                     tx.pure('string', verifiedBridge.label),
@@ -296,7 +296,7 @@ export default function ConnectMcp() {
             const payload: McpCallbackPayload = {
                 accountId,
                 walletAddress: currentAccount.address,
-                packageId: config.memwalPackageId,
+                packageId: config.accountPackageId,
                 txDigest: result.digest,
                 label: verifiedBridge.label,
                 state,

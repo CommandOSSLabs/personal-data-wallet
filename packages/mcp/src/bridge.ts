@@ -44,6 +44,8 @@ const NAMESPACE_TOOLS = new Set([
     "memwal_recall",
     "memwal_analyze",
     "memwal_restore",
+    "memwal_store_artifact",
+    "memwal_list_artifacts",
 ]);
 
 /**

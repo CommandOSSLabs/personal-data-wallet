@@ -4,6 +4,8 @@ import {
     compactObjectId,
     grantBitsFromCheckboxes,
     isCurrentAccountDelegate,
+    namespaceIdFromCreatedEvent,
+    permissionBitsForPrincipal,
     NAMESPACE_LABEL_MAX_LENGTH,
     namespaceSealKeyId,
     normalizeLabelForSubmit,
@@ -53,6 +55,22 @@ it('WRITE and SHARE imply READ when mapping grant bits', () => {
         canShare: false,
     })
     expect(validateGrantBits(grantBitsFromCheckboxes({ read: false, write: false, share: false }))).toMatch(/Read or Write/)
+})
+
+it('treats the namespace owner as implicit Read+Write+Share', () => {
+    const owner = '0x158a78f06e4a85cdef1a1f10bc30c41e4860c1a19f3b049a05098aca588593e7'
+    expect(permissionBitsForPrincipal(owner, owner, 0)).toBe(
+        PERMISSION_READ | PERMISSION_WRITE | PERMISSION_SHARE,
+    )
+    expect(permissionBitsForPrincipal(owner, '0x1', PERMISSION_READ)).toBe(PERMISSION_READ)
+    expect(permissionBitsForPrincipal(owner, '0x1', 0)).toBe(0)
+})
+
+it('reads namespace ids from created-event json', () => {
+    expect(namespaceIdFromCreatedEvent({
+        namespace_id: '0x27f64ce284f7687f954c1b5e5b495311ccde2bcf49457177556df7b9f1222ec2',
+    })).toBe('0x27f64ce284f7687f954c1b5e5b495311ccde2bcf49457177556df7b9f1222ec2')
+    expect(namespaceIdFromCreatedEvent(null)).toBe('')
 })
 
 it('decodes on-chain permission flags', () => {
@@ -133,10 +151,10 @@ it('uses the V2 account id only for active V2 namespace labels', () => {
     })).toBe(v1)
 })
 
-it('dedupes playground namespace labels and keeps default first', () => {
+it('dedupes playground namespace labels and prefers V2 labels over default', () => {
     expect(playgroundNamespaceOptions(['memories', 'default', 'memories'], 'notes')).toEqual([
-        'default',
         'memories',
         'notes',
     ])
+    expect(playgroundNamespaceOptions([], 'default')).toEqual(['default'])
 })

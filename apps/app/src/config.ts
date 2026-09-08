@@ -67,6 +67,23 @@ const memwalPackageId = import.meta.env.VITE_MEMWAL_PACKAGE_ID as string ||
     '0xcf6ad755a1cdff7217865c796778fabe5aa399cb0cf2eba986f4b582047229c6'
 const memwalRegistryId = import.meta.env.VITE_MEMWAL_REGISTRY_ID as string ||
     '0xe80f2feec1c139616a86c9f71210152e2a7ca552b20841f2e192f99f75864437'
+const v2PackageIdEnv = (import.meta.env.VITE_MEMWAL_V2_PACKAGE_ID as string) || (
+    (import.meta.env.VITE_SUI_NETWORK as string || 'testnet') === 'testnet'
+        ? '0xdf67385f0842bcdd7234b73d9822f1b29f7d7991115c219a589118d8c5501dfc'
+        : ''
+)
+const v2RegistryIdEnv = (import.meta.env.VITE_MEMWAL_V2_REGISTRY_ID as string) || (
+    (import.meta.env.VITE_SUI_NETWORK as string || 'testnet') === 'testnet'
+        ? '0x0e04320f37466a449d7bf6980bf8dad22d563da41faf98a0aab8b82c802eff86'
+        : ''
+)
+const v2NamespacesEnabledEnv = (import.meta.env.VITE_V2_NAMESPACES_ENABLED as string || '') === 'true'
+const accountPackageId = v2NamespacesEnabledEnv && v2PackageIdEnv
+    ? v2PackageIdEnv
+    : memwalPackageId
+const accountRegistryId = v2NamespacesEnabledEnv && v2RegistryIdEnv
+    ? v2RegistryIdEnv
+    : memwalRegistryId
 const sealKeyServers = parseCsv(import.meta.env.VITE_SEAL_KEY_SERVERS as string)
 const sealServerConfigsParsed = parseSealServerConfigsJson(
     import.meta.env.VITE_SEAL_SERVER_CONFIGS as string,
@@ -80,6 +97,10 @@ export const config = {
     googleClientId: import.meta.env.VITE_GOOGLE_CLIENT_ID as string || '',
     memwalPackageId,
     memwalRegistryId,
+    // When V2 namespaces are on, setup/dashboard account PTBs hit the V2
+    // package+registry. Playground V1 remember still uses memwalPackageId.
+    accountPackageId,
+    accountRegistryId,
     // Legacy-deployment ids for the security-delete surface. The exposed
     // blobs were Seal-encrypted under the PRE-cutover package, and Seal
     // decryption is package-bound (identity namespace + seal_approve policy
@@ -108,6 +129,13 @@ export const config = {
     // also uses it for its explicit localnet escape hatch.
     suiRpcUrl: import.meta.env.VITE_SUI_RPC_URL as string || '',
     localE2eJsonRpc,
+    suiGraphqlUrl: (import.meta.env.VITE_SUI_GRAPHQL_URL as string) || (
+        localE2eJsonRpc
+            ? ''
+            : (import.meta.env.VITE_SUI_NETWORK as string || 'testnet') === 'mainnet'
+                ? 'https://graphql.mainnet.sui.io/graphql'
+                : 'https://graphql.testnet.sui.io/graphql'
+    ),
     // gRPC endpoint used by the security-delete subsystem's dedicated client.
     suiGrpcUrl: import.meta.env.VITE_SUI_GRPC_URL as string || '',
     sealKeyServers,
@@ -169,22 +197,14 @@ export const config = {
     // V2 namespace slice. V1 package/registry defaults above stay unchanged.
     // Testnet object-id fallbacks match scripts/v2e2e/STATE.md only when the
     // VITE_MEMWAL_V2_* vars are unset — never override an explicit env value.
-    v2PackageId: (import.meta.env.VITE_MEMWAL_V2_PACKAGE_ID as string) || (
-        (import.meta.env.VITE_SUI_NETWORK as string || 'testnet') === 'testnet'
-            ? '0xdf67385f0842bcdd7234b73d9822f1b29f7d7991115c219a589118d8c5501dfc'
-            : ''
-    ),
-    v2RegistryId: (import.meta.env.VITE_MEMWAL_V2_REGISTRY_ID as string) || (
-        (import.meta.env.VITE_SUI_NETWORK as string || 'testnet') === 'testnet'
-            ? '0x0e04320f37466a449d7bf6980bf8dad22d563da41faf98a0aab8b82c802eff86'
-            : ''
-    ),
+    v2PackageId: v2PackageIdEnv,
+    v2RegistryId: v2RegistryIdEnv,
     v2NamespaceRegistryId: (import.meta.env.VITE_MEMWAL_V2_NAMESPACE_REGISTRY_ID as string) || (
         (import.meta.env.VITE_SUI_NETWORK as string || 'testnet') === 'testnet'
             ? '0x1d0a9f1bf04832387fa911cbb83e59c99332439d93e89e1e868f23f5a08cb995'
             : ''
     ),
-    v2NamespacesEnabled: (import.meta.env.VITE_V2_NAMESPACES_ENABLED as string || '') === 'true',
+    v2NamespacesEnabled: v2NamespacesEnabledEnv,
     v2WriterAddresses: parseCsv(import.meta.env.VITE_MEMWAL_V2_WRITER_ADDRESSES as string),
     demoUrls: (import.meta.env.VITE_DEMO_URLS as string || '')
         .split(',').map(s => s.trim()).filter(Boolean)

@@ -100,6 +100,46 @@ export async function fetchAccountIdForOwner(
     return typeof value === 'string' ? value : null
 }
 
+/** Read a `Table<address, u8>` cell. Missing rows return 0. */
+export async function fetchAddressKeyedU8(
+    suiClient: unknown,
+    tableId: string,
+    principal: string,
+): Promise<number> {
+    const address = normalizeSuiAddress(principal)
+    if (isGrpcClient(suiClient)) {
+        try {
+            const dynFieldRes = await suiClient.getDynamicField({
+                parentId: tableId,
+                name: { type: 'address', bcs: fromHex(address) },
+            })
+            const valueBytes = dynFieldRes?.dynamicField?.value?.bcs
+            if (!valueBytes || valueBytes.length === 0) return 0
+            return Number(valueBytes[0] ?? 0)
+        } catch {
+            return 0
+        }
+    }
+
+    try {
+        const dynField = await (suiClient as JsonRpcClientLike).getDynamicFieldObject({
+            parentId: tableId,
+            name: { type: 'address', value: address },
+        })
+        const content = dynField?.data?.content
+        if (!content?.fields || typeof content.fields !== 'object') return 0
+        const value = (content.fields as Record<string, unknown>).value
+        if (typeof value === 'number' && Number.isFinite(value)) return value
+        if (typeof value === 'string' && value !== '') {
+            const parsed = Number(value)
+            return Number.isFinite(parsed) ? parsed : 0
+        }
+        return 0
+    } catch {
+        return 0
+    }
+}
+
 /** Normalize a delegate key's public_key field to hex — gRPC encodes it as base64, JSON-RPC as number[]. */
 export function publicKeyToHex(publicKey: unknown): string {
     if (typeof publicKey === 'string') return toHex(fromBase64(publicKey))

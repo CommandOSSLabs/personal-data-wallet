@@ -23,6 +23,7 @@ export {
     grantAccess,
     revokeAccess,
     rotateKey,
+    cryptoShredKeyVersion,
     cancelUninitializedNamespace,
     permissionBits,
 } from "./namespace.js";
@@ -40,6 +41,7 @@ export type {
     GrantAccessOpts,
     RevokeAccessOpts,
     RotateKeyOpts,
+    CryptoShredKeyVersionOpts,
     CancelUninitializedNamespaceOpts,
     WrapNamespaceDekOpts,
     WrapNamespaceDekResult,

@@ -56,7 +56,7 @@ function hexToBytes(hex: string): Uint8Array {
 
 async function getAccountObjectId(suiClient: ReturnType<typeof useSuiClient>, ownerAddress: string): Promise<string | null> {
     try {
-        return await fetchAccountIdForOwner(suiClient, config.memwalRegistryId, ownerAddress)
+        return await fetchAccountIdForOwner(suiClient, config.accountRegistryId, ownerAddress)
     } catch (err) {
         console.warn('[getAccountObjectId] lookup failed, treating as no-account', err)
         return null
@@ -146,10 +146,10 @@ export default function SetupWizard() {
             setTxStatus('account found! adding delegate key...')
             const tx = new Transaction()
             tx.moveCall({
-                target: `${config.memwalPackageId}::account::add_delegate_key`,
+                target: `${config.accountPackageId}::account::add_delegate_key`,
                 arguments: [
                     tx.object(knownAccountId),
-                    tx.object(config.memwalRegistryId),
+                    tx.object(config.accountRegistryId),
                     tx.pure('vector<u8>', pubKeyBytes),
                     // v1_new derives the Sui address on-chain — no address arg.
                     tx.pure('string', 'Web App'),
@@ -162,9 +162,9 @@ export default function SetupWizard() {
             setTxStatus('creating account...')
             const tx = new Transaction()
             tx.moveCall({
-                target: `${config.memwalPackageId}::account::create_account`,
+                target: `${config.accountPackageId}::account::create_account`,
                 arguments: [
-                    tx.object(config.memwalRegistryId),
+                    tx.object(config.accountRegistryId),
                     tx.object('0x6'),
                 ],
             })
@@ -183,10 +183,10 @@ export default function SetupWizard() {
             setTxStatus('adding delegate key...')
             const tx2 = new Transaction()
             tx2.moveCall({
-                target: `${config.memwalPackageId}::account::add_delegate_key`,
+                target: `${config.accountPackageId}::account::add_delegate_key`,
                 arguments: [
                     tx2.object(knownAccountId),
-                    tx2.object(config.memwalRegistryId),
+                    tx2.object(config.accountRegistryId),
                     tx2.pure('vector<u8>', pubKeyBytes),
                     // v1_new derives the Sui address on-chain — no address arg.
                     tx2.pure('string', 'Web App'),

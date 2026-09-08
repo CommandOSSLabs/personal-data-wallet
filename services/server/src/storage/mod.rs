@@ -16,6 +16,7 @@
 //!   server fallback) and `DecryptOutcome` classification.
 //! - [`sui`] — Sui RPC: delegate-key on-chain verification, account lookup.
 
+pub mod artifact;
 pub mod db;
 pub mod legacy_db;
 pub mod oyster;

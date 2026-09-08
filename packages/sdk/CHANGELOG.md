@@ -5,6 +5,7 @@
 ### Added
 
 - Added V2 namespace PTBs and Seal wrap helpers for the namespace DEK.
+- Added `cryptoShredKeyVersion()` for the on-chain historical-key erasure primitive.
 - Added `flush()` for pending `withMemWal` auto-saves.
 - Added `truncated` to restore results for incomplete recovery.
 

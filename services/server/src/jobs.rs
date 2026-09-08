@@ -134,6 +134,13 @@ pub enum WalletOperation {
         ciphertext_digest: Vec<u8>,
         storage_mode: String,
         remember_job_id: Option<String>,
+        /// When true, fence the blob but do not insert `vector_entries`.
+        /// Used for artifacts (no embedding in this spike).
+        #[serde(default)]
+        skip_vector: bool,
+        /// Optional pin from a distilled fact back to a stored artifact.
+        #[serde(default)]
+        source_artifact_id: Option<String>,
     },
     /// Finish a partially recovered upload after metadata+transfer has already
     /// succeeded. This keeps DB/vector retries from repeating an on-chain
@@ -238,6 +245,30 @@ async fn update_remember_job_after_wallet_error(
 
     let _ = sqlx::query(
         "UPDATE remember_jobs SET status = $1, error_msg = $2, updated_at = NOW() WHERE id = $3",
+    )
+    .bind(status)
+    .bind(msg)
+    .bind(jid)
+    .execute(state.db.pool())
+    .await;
+}
+
+async fn update_artifact_after_wallet_error(
+    state: &AppState,
+    artifact_id: Option<&str>,
+    error: &WalletJobError,
+    msg: &str,
+) {
+    let Some(jid) = artifact_id else {
+        return;
+    };
+    let status = if error.aborts_retries() {
+        "failed"
+    } else {
+        "uploaded"
+    };
+    let _ = sqlx::query(
+        "UPDATE artifacts SET status = $1, error_msg = $2, updated_at = NOW() WHERE id = $3",
     )
     .bind(status)
     .bind(msg)
@@ -716,6 +747,8 @@ pub(crate) async fn execute_wallet_job(
             ciphertext_digest,
             storage_mode,
             remember_job_id,
+            skip_vector,
+            source_artifact_id,
         } => {
             execute_v2_write_fence(
                 state,
@@ -736,6 +769,8 @@ pub(crate) async fn execute_wallet_job(
                 ciphertext_digest,
                 storage_mode,
                 remember_job_id,
+                skip_vector,
+                source_artifact_id,
             )
             .await
         }
@@ -1039,16 +1074,22 @@ async fn execute_v2_write_fence(
     ciphertext_digest: Vec<u8>,
     storage_mode: String,
     remember_job_id: Option<String>,
+    skip_vector: bool,
+    source_artifact_id: Option<String>,
 ) -> Result<(), WalletJobError> {
     let existing_digest = if let Some(jid) = remember_job_id.as_deref() {
-        let row: Option<(Option<String>,)> =
-            sqlx::query_as("SELECT fence_tx_digest FROM remember_jobs WHERE id = $1")
-                .bind(jid)
-                .fetch_optional(state.db.pool())
-                .await
-                .map_err(|e| {
-                    WalletJobError::Transient(format!("failed to read fence_tx_digest: {e}"))
-                })?;
+        let sql = if skip_vector {
+            "SELECT fence_tx_digest FROM artifacts WHERE id = $1"
+        } else {
+            "SELECT fence_tx_digest FROM remember_jobs WHERE id = $1"
+        };
+        let row: Option<(Option<String>,)> = sqlx::query_as(sql)
+            .bind(jid)
+            .fetch_optional(state.db.pool())
+            .await
+            .map_err(|e| {
+                WalletJobError::Transient(format!("failed to read fence_tx_digest: {e}"))
+            })?;
         row.and_then(|(digest,)| digest).filter(|d| !d.is_empty())
     } else {
         None
@@ -1090,17 +1131,55 @@ async fn execute_v2_write_fence(
             Err(e) => {
                 let msg = e.to_string();
                 let classified = WalletJobError::classify_sidecar_error(&msg);
-                update_remember_job_after_wallet_error(
-                    state,
-                    remember_job_id.as_deref(),
-                    &classified,
-                    &msg,
-                )
-                .await;
+                if skip_vector {
+                    update_artifact_after_wallet_error(
+                        state,
+                        remember_job_id.as_deref(),
+                        &classified,
+                        &msg,
+                    )
+                    .await;
+                } else {
+                    update_remember_job_after_wallet_error(
+                        state,
+                        remember_job_id.as_deref(),
+                        &classified,
+                        &msg,
+                    )
+                    .await;
+                }
                 return Err(classified);
             }
         }
     };
+
+    if skip_vector {
+        if let Some(jid) = remember_job_id.as_deref() {
+            sqlx::query(
+                "UPDATE artifacts SET
+                    status = 'done', blob_id = $1, fence_tx_digest = $2, error_msg = NULL,
+                    ciphertext_digest = $3, commitment = $4, storage_mode = $5,
+                    oyster_bucket = $6, oyster_key = $7, pooled_blob_object_id = $8,
+                    updated_at = NOW()
+                 WHERE id = $9",
+            )
+            .bind(&blob_id)
+            .bind(&fence_digest)
+            .bind(&ciphertext_digest)
+            .bind(&commitment)
+            .bind(&storage_mode)
+            .bind(&oyster_bucket)
+            .bind(&oyster_key)
+            .bind(&pooled_blob_object_id)
+            .bind(jid)
+            .execute(state.db.pool())
+            .await
+            .map_err(|e| {
+                WalletJobError::Transient(format!("failed to persist artifact fence: {e}"))
+            })?;
+        }
+        return Ok(());
+    }
 
     if let Some(jid) = remember_job_id.as_deref() {
         sqlx::query(
@@ -1149,6 +1228,15 @@ async fn execute_v2_write_fence(
         update_remember_job_after_wallet_error(state, remember_job_id.as_deref(), &classified, &msg)
             .await;
         return Err(classified);
+    }
+    if let Some(aid) = source_artifact_id.as_deref() {
+        let _ = sqlx::query(
+            "UPDATE vector_entries SET source_artifact_id = $1 WHERE id = $2",
+        )
+        .bind(aid)
+        .bind(&vector_id)
+        .execute(state.db.pool())
+        .await;
     }
     if let Some(jid) = remember_job_id.as_deref() {
         let _ = sqlx::query(

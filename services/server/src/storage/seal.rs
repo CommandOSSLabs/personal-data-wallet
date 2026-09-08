@@ -72,6 +72,23 @@ struct SealEncryptRequest {
     owner: String,
     package_id: String,
     account_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_seal_committee_identity: Option<serde_json::Value>,
+}
+
+fn expected_seal_committee_identity_from_env() -> Option<serde_json::Value> {
+    let raw = std::env::var("SEAL_EXPECTED_COMMITTEE_IDENTITY").ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    match serde_json::from_str(trimmed) {
+        Ok(value) => Some(value),
+        Err(err) => {
+            tracing::error!("SEAL_EXPECTED_COMMITTEE_IDENTITY is not valid JSON: {err}");
+            None
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -146,6 +163,7 @@ pub async fn seal_encrypt(
         owner: owner_address.to_string(),
         package_id: package_id.to_string(),
         account_id: account_id.to_string(),
+        expected_seal_committee_identity: expected_seal_committee_identity_from_env(),
     });
     if let Some(secret) = sidecar_secret {
         req = req.header("authorization", format!("Bearer {}", secret));
@@ -627,6 +645,12 @@ pub async fn unwrap_namespace_dek(
     account_id: &str,
     namespace_id: &str,
 ) -> Result<Vec<u8>, AppError> {
+    if wrapped_dek.len() < 80 {
+        return Err(AppError::Internal(format!(
+            "namespace wrapped DEK is {} bytes; expected a Seal ciphertext. This namespace was initialized with a dummy/raw key — create a new namespace (or rotate the key).",
+            wrapped_dek.len()
+        )));
+    }
     let url = format!("{}/seal/unwrap-dek", sidecar_url);
     let req = sidecar_auth(
         client.post(&url).json(&UnwrapDekRequest {
@@ -848,12 +872,31 @@ mod tests {
             owner: "0x1".into(),
             package_id: "0x2".into(),
             account_id: "0x3".into(),
+            expected_seal_committee_identity: None,
         })
         .expect("serialize encrypt request");
         // The sidecar reads access_counter_version off this object to build the
         // SEAL identity; without it POST /seal/encrypt is a 400 and every
         // remember/analyze write fails.
         assert_eq!(value["accountId"], "0x3");
+        assert!(value.get("expectedSealCommitteeIdentity").is_none());
+    }
+
+    #[test]
+    fn encrypt_request_pins_committee_identity_when_set() {
+        let identity = serde_json::json!({
+            "servers": [{"objectId": "0xabc", "weight": 1}],
+            "threshold": 1
+        });
+        let value = serde_json::to_value(SealEncryptRequest {
+            data: "plaintext".into(),
+            owner: "0x1".into(),
+            package_id: "0x2".into(),
+            account_id: "0x3".into(),
+            expected_seal_committee_identity: Some(identity.clone()),
+        })
+        .expect("serialize encrypt request");
+        assert_eq!(value["expectedSealCommitteeIdentity"], identity);
     }
 
     #[test]

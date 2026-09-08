@@ -111,3 +111,23 @@ it('offers finish initialize and cancel on uninitialized rows', () => {
     expect(screen.getByRole('button', { name: 'Finish initialize' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancel reservation' })).toBeInTheDocument()
 })
+
+it('does not show grant-to-wallet or permission lookup on an active namespace', () => {
+    mocks.v2NamespacesEnabled = true
+    mocks.v2AccountId = '0xacc'
+    mocks.namespaces = [{
+        id: '0xns',
+        label: 'e2e-testnet',
+        active: true,
+        keyVersion: 0,
+        keyInitialized: true,
+        destroyed: false,
+        owner: '0x' + '11'.repeat(32),
+        accountId: '0xacc',
+    }]
+    render(<NamespacesSection />)
+    expect(screen.getByText('e2e-testnet')).toBeInTheDocument()
+    expect(screen.queryByText(/Grant to wallet/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Grant access' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Look up permissions/)).not.toBeInTheDocument()
+})

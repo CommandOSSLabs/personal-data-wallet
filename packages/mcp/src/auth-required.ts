@@ -93,6 +93,46 @@ const TOOL_DEFINITIONS = [
         },
     },
     {
+        name: "memwal_store_artifact",
+        description:
+            "Archive a file into Walrus Memory as an encrypted artifact (no embedding). Pass filename and standard base64 bytes.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                filename: { type: "string", minLength: 1 },
+                bytes_b64: { type: "string", minLength: 1 },
+                mime_type: { type: "string" },
+                source: { type: "string" },
+                namespace: { type: "string" },
+            },
+            required: ["filename", "bytes_b64"],
+            additionalProperties: false,
+        },
+    },
+    {
+        name: "memwal_list_artifacts",
+        description: "List encrypted artifacts in a namespace.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                namespace: { type: "string" },
+            },
+            additionalProperties: false,
+        },
+    },
+    {
+        name: "memwal_get_artifact",
+        description: "Fetch one artifact's metadata (and a short text preview when applicable).",
+        inputSchema: {
+            type: "object",
+            properties: {
+                artifact_id: { type: "string", minLength: 1 },
+            },
+            required: ["artifact_id"],
+            additionalProperties: false,
+        },
+    },
+    {
         name: "memwal_login",
         description:
             "Sign this MCP client into your Walrus Memory account by opening a browser. Run once when the agent reports Walrus Memory is not signed in. Opens the dashboard in the default browser, waits for wallet approval, then writes credentials to ~/.memwal/credentials.json. Other memwal_* tools become usable on the next call after a successful login.",

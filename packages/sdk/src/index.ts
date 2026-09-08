@@ -34,8 +34,13 @@ export type {
 export type {
     MemWalConfig,
     RememberAcceptedResult,
+    RememberOptions,
     RememberJobStatus,
     RememberResult,
+    StoreArtifactInput,
+    ArtifactAcceptedResult,
+    ArtifactRecord,
+    ListArtifactsResult,
     RecallResult,
     RecallMemory,
     RecallOptions,

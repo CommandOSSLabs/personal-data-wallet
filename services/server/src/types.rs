@@ -945,6 +945,9 @@ pub struct RememberRequest {
     /// Namespace for memory isolation (default: "default")
     #[serde(default = "default_namespace")]
     pub namespace: String,
+    /// Optional pin: distilled fact came from this stored artifact.
+    #[serde(default)]
+    pub source_artifact_id: Option<String>,
 }
 
 // ============================================================
@@ -1005,6 +1008,57 @@ pub struct RememberBulkStatusResponse {
 pub struct RememberAcceptedResponse {
     pub job_id: String,
     pub status: String, // "running" on accepted background work
+}
+
+/// POST /api/artifacts
+#[derive(Debug, Deserialize)]
+pub struct StoreArtifactRequest {
+    pub filename: String,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    /// Base64-encoded file bytes (standard, not url-safe).
+    pub bytes_b64: String,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default = "default_namespace")]
+    pub namespace: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ArtifactAcceptedResponse {
+    pub artifact_id: String,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ArtifactRecord {
+    pub artifact_id: String,
+    pub status: String,
+    pub owner: String,
+    pub namespace: String,
+    pub filename: String,
+    pub mime_type: String,
+    pub source: String,
+    pub byte_size: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes_b64: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListArtifactsRequest {
+    #[serde(default = "default_namespace")]
+    pub namespace: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListArtifactsResponse {
+    pub artifacts: Vec<ArtifactRecord>,
 }
 
 /// GET /api/remember/:job_id — job status polling response
@@ -1308,6 +1362,9 @@ pub struct AnalyzeRequest {
     /// — that's the privacy-floor-preserving trade we accept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub occurred_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Optional pin: extracted facts came from this stored artifact.
+    #[serde(default)]
+    pub source_artifact_id: Option<String>,
 }
 
 /// POST /api/analyze (async, returns 202 immediately)

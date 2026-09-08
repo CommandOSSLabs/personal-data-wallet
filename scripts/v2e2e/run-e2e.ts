@@ -8,11 +8,20 @@ import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { MemWal } from "../../packages/sdk/src/memwal.ts";
 import {
     createNamespace,
+    cryptoShredKeyVersion,
     generateAndWrapNamespaceDek,
     grantAccess,
     initializeKey,
+    namespaceSealKeyId,
+    revokeAccess,
+    rotateKey,
 } from "../../packages/sdk/src/namespace.ts";
 import { addDelegateKey, generateDelegateKey } from "../../packages/sdk/src/account.ts";
+
+const SUI_CLOCK = "0x0000000000000000000000000000000000000000000000000000000000000006";
+const E_NO_READ = 16;
+const E_NO_WRITE = 17;
+const E_KEY_SHREDDED = 25;
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const ENV_PATH = resolve(ROOT, "scripts/v2e2e/.env.local");
@@ -85,9 +94,161 @@ async function waitFor(url: string, label: string, timeoutMs = 120_000) {
     fail(`health ${label}`, new Error(`timeout waiting for ${url}: ${last}`));
 }
 
+function dump(value: unknown): string {
+    try {
+        return JSON.stringify(value, (_key, inner) =>
+            typeof inner === "bigint" ? inner.toString() : inner,
+        );
+    } catch {
+        return String(value);
+    }
+}
+
+function abortCodeFrom(text: string): number | null {
+    const moveAbort = text.match(/MoveAbort[\s\S]{0,800}?,\s*(\d+)\s*\)/);
+    if (moveAbort) return Number(moveAbort[1]);
+    const named = text.match(/abort(?:Code|_code)"?\s*[:=]\s*"?(\d+)/i);
+    if (named) return Number(named[1]);
+    return null;
+}
+
+function txDigest(result: any): string | undefined {
+    return result?.Transaction?.digest
+        ?? result?.FailedTransaction?.digest
+        ?? result?.digest;
+}
+
+function txSucceeded(result: any): boolean {
+    const data = result?.Transaction ?? result?.FailedTransaction ?? result;
+    const status = data?.status ?? data?.effects?.status;
+    return status?.success === true
+        || (status?.success === undefined && status?.status === "success");
+}
+
+async function namespaceCall(opts: {
+    packageId: string;
+    functionName: string;
+    suiPrivateKey: string;
+    suiClient: any;
+    makeArgs: (tx: any) => any[];
+}): Promise<{ digest: string; result: any }> {
+    const { Transaction } = await import("@mysten/sui/transactions");
+    const { decodeSuiPrivateKey } = await import("@mysten/sui/cryptography");
+    const { Ed25519Keypair } = await import("@mysten/sui/keypairs/ed25519");
+    const { secretKey } = decodeSuiPrivateKey(opts.suiPrivateKey);
+    const keypair = Ed25519Keypair.fromSecretKey(secretKey);
+    const tx = new Transaction();
+    tx.moveCall({
+        target: `${opts.packageId}::namespace::${opts.functionName}`,
+        arguments: opts.makeArgs(tx),
+    });
+    const executionResult = await opts.suiClient.signAndExecuteTransaction({
+        signer: keypair,
+        transaction: tx,
+    });
+    const digest = txDigest(executionResult);
+    if (!digest) {
+        throw new Error(`no digest from ${opts.functionName}: ${dump(executionResult)}`);
+    }
+    const waited = await opts.suiClient.waitForTransaction({
+        digest,
+        include: { effects: true },
+        options: { showEffects: true },
+    });
+    return { digest, result: waited };
+}
+
+async function expectAbort(
+    name: string,
+    abortCode: number,
+    fn: () => Promise<{ digest: string; result: any }>,
+    attempts = 4,
+): Promise<void> {
+    let last: unknown;
+    for (let i = 1; i <= attempts; i++) {
+        try {
+            const { digest, result } = await fn();
+            if (txSucceeded(result)) {
+                fail(name, new Error(`expected MoveAbort ${abortCode}, succeeded ${digest}`));
+            }
+            const text = dump(result);
+            const got = abortCodeFrom(text);
+            if (got === abortCode) {
+                pass(name, `abort=${abortCode} digest=${digest}`);
+                return;
+            }
+            if (got !== null) {
+                fail(name, new Error(`expected abort ${abortCode}, got ${got} ${text.slice(0, 600)}`));
+            }
+            last = new Error(`no MoveAbort in ${text.slice(0, 400)}`);
+        } catch (e) {
+            const text = e instanceof Error ? `${e.message}\n${dump(e)}` : dump(e);
+            const got = abortCodeFrom(text);
+            if (got === abortCode) {
+                pass(name, `abort=${abortCode}`);
+                return;
+            }
+            if (got !== null) {
+                fail(name, new Error(`expected abort ${abortCode}, got ${got} ${text.slice(0, 600)}`));
+            }
+            last = e;
+        }
+        console.warn(`retry ${name} ${i}/${attempts}: ${last instanceof Error ? last.message.slice(0, 180) : dump(last).slice(0, 180)}`);
+        await new Promise((r) => setTimeout(r, 1500 * i));
+    }
+    fail(name, last);
+}
+
+async function transferSui(opts: {
+    suiPrivateKey: string;
+    suiClient: any;
+    to: string;
+    amountMist: bigint;
+}): Promise<string> {
+    const { Transaction } = await import("@mysten/sui/transactions");
+    const { decodeSuiPrivateKey } = await import("@mysten/sui/cryptography");
+    const { Ed25519Keypair } = await import("@mysten/sui/keypairs/ed25519");
+    const { secretKey } = decodeSuiPrivateKey(opts.suiPrivateKey);
+    const keypair = Ed25519Keypair.fromSecretKey(secretKey);
+    const tx = new Transaction();
+    const [coin] = tx.splitCoins(tx.gas, [opts.amountMist]);
+    tx.transferObjects([coin], opts.to);
+    const executionResult = await opts.suiClient.signAndExecuteTransaction({
+        signer: keypair,
+        transaction: tx,
+    });
+    const digest = txDigest(executionResult);
+    if (!digest) throw new Error(`fund: no digest ${dump(executionResult)}`);
+    const waited = await opts.suiClient.waitForTransaction({
+        digest,
+        include: { effects: true },
+        options: { showEffects: true },
+    });
+    if (!txSucceeded(waited)) {
+        throw new Error(`fund failed ${digest}: ${dump(waited)}`);
+    }
+    return digest;
+}
+
+async function recallMustInclude(
+    memwal: InstanceType<typeof MemWal>,
+    query: string,
+    needle: string,
+    name: string,
+) {
+    return withRetry(name, async () => {
+        const recalled = await memwal.recall({ query, limit: 5 });
+        const hit = recalled.results.find((r) => r.text.includes(needle));
+        if (!hit) throw new Error(`no hit in ${JSON.stringify(recalled)}`);
+        pass(name, `text=${hit.text.slice(0, 80)}`);
+        return recalled;
+    });
+}
+
 async function main() {
     const resumeOnly = process.argv.includes("--resume");
     const recallOnly = process.argv.includes("--recall-only");
+    const aclOnly = process.argv.includes("--acl");
     const env = loadEnv(ENV_PATH);
     const packageId = req(env, "MEMWAL_V2_PACKAGE_ID");
     const accountRegistryId = req(env, "MEMWAL_V2_REGISTRY_ID");
@@ -159,10 +320,7 @@ async function main() {
             const done = await memwal.waitForRememberJob(accepted.job_id, { timeoutMs: 600_000 });
             pass("remember done", `blob=${done.blob_id}`);
         }
-        const recalled = await memwal.recall({ query: "peanut allergy", limit: 5 });
-        const hit = recalled.results.find((r) => r.text.includes(saved.label));
-        if (!hit) fail("recall", new Error(`no matching hit in ${JSON.stringify(recalled)}`));
-        pass("recall decrypt", `text=${hit!.text.slice(0, 80)}`);
+        await recallMustInclude(memwal, "peanut allergy", saved.label, "recall decrypt");
         console.log("ALL_E2E_PASS", JSON.stringify({ label: saved.label, namespaceId: saved.namespaceId }));
         return;
     }
@@ -177,119 +335,326 @@ async function main() {
         suiNetwork: "testnet" as const,
     };
 
-    const delegate = await generateDelegateKey();
-    pass("generateDelegateKey", `sui=${delegate.suiAddress.slice(0, 10)}…`);
+    let namespaceId: string;
+    let memwal: InstanceType<typeof MemWal>;
+    let jobId = "";
+    let added = { digest: "acl-resume" };
+    let created = { digest: "acl-resume" };
+    let init = { digest: "acl-resume" };
+    let grantAgent = { digest: "acl-resume" };
+    let grantB = { digest: "acl-resume" };
+    let liveLabel = label;
+    let liveMemoryText = memoryText;
 
-    const added = await withRetry("addDelegateKey", () =>
-        addDelegateKey({
-            packageId,
-            registryId: accountRegistryId,
+    if (aclOnly) {
+        const saved = JSON.parse(readFileSync(ARTIFACT, "utf8")) as {
+            label: string;
+            namespaceId: string;
+            accountId: string;
+            delegatePrivateKeyHex: string;
+            memoryText: string;
+        };
+        liveLabel = saved.label;
+        liveMemoryText = saved.memoryText;
+        namespaceId = saved.namespaceId;
+        memwal = MemWal.create({
+            key: saved.delegatePrivateKeyHex,
+            accountId: saved.accountId,
+            serverUrl: relayer,
+            namespace: saved.label,
+        });
+        pass("acl resume", `${saved.label} ${saved.namespaceId}`);
+        await recallMustInclude(memwal, "peanut allergy", saved.label, "recall decrypt");
+    } else {
+        const delegate = await generateDelegateKey();
+        pass("generateDelegateKey", `sui=${delegate.suiAddress.slice(0, 10)}…`);
+
+        added = await withRetry("addDelegateKey", () =>
+            addDelegateKey({
+                packageId,
+                registryId: accountRegistryId,
+                accountId,
+                publicKey: delegate.publicKey,
+                label: `e2e-agent-${label.slice(-6)}`,
+                suiPrivateKey,
+                suiClient,
+                suiNetwork: "testnet",
+            }),
+        );
+        pass("addDelegateKey", added.digest);
+
+        created = await withRetry("createNamespace", () =>
+            createNamespace({ ...txBase, label }),
+        );
+        namespaceId = created.namespaceId;
+        pass("createNamespace", `${label} ${namespaceId} ${created.digest}`);
+
+        const wrapped = await withRetry("generateAndWrapNamespaceDek", () =>
+            generateAndWrapNamespaceDek({
+                packageId,
+                namespaceId,
+                keyVersion: 0n,
+                threshold,
+                sealServerConfigs: sealConfigs,
+                suiClient,
+                suiNetwork: "testnet",
+            }),
+        );
+        const wrappedDek = wrapped.wrappedDek;
+        pass("generateAndWrapNamespaceDek", `wrapped=${wrappedDek.length}b`);
+
+        init = await withRetry("initializeKey", () =>
+            initializeKey({ ...txBase, namespaceId, wrappedDek }),
+        );
+        pass("initializeKey", init.digest);
+
+        grantAgent = await withRetry("grantAccess HTTP agent WRITE", () =>
+            grantAccess({
+                ...txBase,
+                namespaceId,
+                principal: delegate.suiAddress,
+                canRead: true,
+                canWrite: true,
+                canShare: false,
+            }),
+        );
+        pass("grantAccess HTTP agent WRITE", grantAgent.digest);
+
+        grantB = await withRetry("grantAccess wallet B READ", () =>
+            grantAccess({
+                ...txBase,
+                namespaceId,
+                principal: ducnmm,
+                canRead: true,
+                canWrite: false,
+                canShare: false,
+            }),
+        );
+        pass("grantAccess wallet B READ", grantB.digest);
+
+        mkdirSync(resolve(ROOT, "scripts/v2e2e/.secrets"), { recursive: true });
+        writeFileSync(
+            ARTIFACT,
+            JSON.stringify(
+                {
+                    label,
+                    namespaceId,
+                    accountId,
+                    delegateSuiAddress: delegate.suiAddress,
+                    delegatePrivateKeyHex: delegate.privateKey,
+                    memoryText,
+                },
+                null,
+                2,
+            ),
+        );
+
+        memwal = MemWal.create({
+            key: delegate.privateKey,
             accountId,
-            publicKey: delegate.publicKey,
-            label: `e2e-agent-${label.slice(-6)}`,
+            serverUrl: relayer,
+            namespace: label,
+        });
+
+        try {
+            const accepted = await memwal.remember(memoryText);
+            jobId = accepted.job_id;
+            pass("remember accepted", jobId);
+            const done = await memwal.waitForRememberJob(accepted.job_id, { timeoutMs: 180_000 });
+            pass("remember done", `blob=${done.blob_id}`);
+        } catch (e) {
+            fail("remember", e);
+        }
+
+        await recallMustInclude(memwal, "peanut allergy", label, "recall decrypt");
+    }
+
+    const { Ed25519Keypair } = await import("@mysten/sui/keypairs/ed25519");
+    const stranger = Ed25519Keypair.generate();
+    const strangerAddr = stranger.getPublicKey().toSuiAddress();
+    const strangerKey = stranger.getSecretKey();
+    pass("stranger keypair", strangerAddr);
+
+    const fundDigest = await withRetry("fund stranger", () =>
+        transferSui({
             suiPrivateKey,
             suiClient,
-            suiNetwork: "testnet",
+            to: strangerAddr,
+            amountMist: 100_000_000n,
         }),
     );
-    pass("addDelegateKey", added.digest);
+    pass("fund stranger", fundDigest);
 
-    const created = await withRetry("createNamespace", () =>
-        createNamespace({ ...txBase, label }),
+    const nsObjects = {
+        namespaceRegistryId,
+        accountRegistryId,
+        accountId,
+        namespaceId,
+    };
+    const sealId = (version: number) => namespaceSealKeyId(namespaceId, version);
+    const commitment = new Uint8Array(32).fill(7);
+
+    const sealApprove = (key: string, version: number) =>
+        namespaceCall({
+            packageId,
+            functionName: "seal_approve",
+            suiPrivateKey: key,
+            suiClient,
+            makeArgs: (tx) => [
+                tx.pure("vector<u8>", Array.from(sealId(version))),
+                tx.object(nsObjects.namespaceRegistryId),
+                tx.object(nsObjects.accountRegistryId),
+                tx.object(nsObjects.accountId),
+                tx.object(nsObjects.namespaceId),
+            ],
+        });
+
+    const fence = (key: string, version: number) =>
+        namespaceCall({
+            packageId,
+            functionName: "write_fence",
+            suiPrivateKey: key,
+            suiClient,
+            makeArgs: (tx) => [
+                tx.pure("vector<u8>", Array.from(sealId(version))),
+                tx.object(nsObjects.namespaceRegistryId),
+                tx.object(nsObjects.accountRegistryId),
+                tx.object(nsObjects.accountId),
+                tx.object(nsObjects.namespaceId),
+                tx.pure("vector<u8>", Array.from(commitment)),
+                tx.object(SUI_CLOCK),
+            ],
+        });
+
+    await expectAbort("unauthorized seal_approve", E_NO_READ, () =>
+        sealApprove(strangerKey, 0),
     );
-    const namespaceId = created.namespaceId;
-    pass("createNamespace", `${label} ${namespaceId} ${created.digest}`);
+    await expectAbort("unauthorized write_fence", E_NO_WRITE, () =>
+        fence(strangerKey, 0),
+    );
 
-    const wrapped = await withRetry("generateAndWrapNamespaceDek", () =>
+    const wrapV1 = await withRetry("wrap DEK v1", () =>
         generateAndWrapNamespaceDek({
             packageId,
             namespaceId,
-            keyVersion: 0n,
+            keyVersion: 1n,
             threshold,
             sealServerConfigs: sealConfigs,
             suiClient,
             suiNetwork: "testnet",
         }),
     );
-    const wrappedDek = wrapped.wrappedDek;
-    pass("generateAndWrapNamespaceDek", `wrapped=${wrappedDek.length}b`);
+    pass("wrap DEK v1", `wrapped=${wrapV1.wrappedDek.length}b`);
 
-    const init = await withRetry("initializeKey", () =>
-        initializeKey({ ...txBase, namespaceId, wrappedDek }),
+    const rotated = await withRetry("rotateKey v0→v1", () =>
+        rotateKey({ ...txBase, namespaceId, newWrappedDek: wrapV1.wrappedDek }),
     );
-    pass("initializeKey", init.digest);
+    pass("rotateKey v0→v1", rotated.digest);
 
-    const grantAgent = await withRetry("grantAccess HTTP agent WRITE", () =>
+    await recallMustInclude(memwal, "peanut allergy", liveLabel, "recall after rotate");
+
+    const memoryTextV1 = `v2 e2e rotated key ${liveLabel}`;
+    let jobIdV1 = "";
+    try {
+        const accepted = await memwal.remember(memoryTextV1);
+        jobIdV1 = accepted.job_id;
+        pass("remember v1 accepted", jobIdV1);
+        const done = await memwal.waitForRememberJob(accepted.job_id, { timeoutMs: 180_000 });
+        pass("remember v1 done", `blob=${done.blob_id}`);
+    } catch (e) {
+        fail("remember v1", e);
+    }
+
+    await recallMustInclude(memwal, "rotated key", "rotated key", "recall v1");
+
+    const grantU = await withRetry("grantAccess stranger READ", () =>
         grantAccess({
             ...txBase,
             namespaceId,
-            principal: delegate.suiAddress,
-            canRead: true,
-            canWrite: true,
-            canShare: false,
-        }),
-    );
-    pass("grantAccess HTTP agent WRITE", grantAgent.digest);
-
-    const grantB = await withRetry("grantAccess wallet B READ", () =>
-        grantAccess({
-            ...txBase,
-            namespaceId,
-            principal: ducnmm,
+            principal: strangerAddr,
             canRead: true,
             canWrite: false,
             canShare: false,
         }),
     );
-    pass("grantAccess wallet B READ", grantB.digest);
+    pass("grantAccess stranger READ", grantU.digest);
 
-    mkdirSync(resolve(ROOT, "scripts/v2e2e/.secrets"), { recursive: true });
-    writeFileSync(
-        ARTIFACT,
-        JSON.stringify(
-            {
-                label,
-                namespaceId,
-                accountId,
-                delegateSuiAddress: delegate.suiAddress,
-                delegatePrivateKeyHex: delegate.privateKey,
-                memoryText,
-            },
-            null,
-            2,
-        ),
+    const grantedApprove = await withRetry("granted seal_approve", async () => {
+        const { digest, result } = await sealApprove(strangerKey, 1);
+        if (!txSucceeded(result)) {
+            throw new Error(`granted seal_approve failed ${digest}: ${dump(result)}`);
+        }
+        return { digest };
+    });
+    pass("granted seal_approve", grantedApprove.digest);
+
+    const wrapV2 = await withRetry("wrap DEK v2", () =>
+        generateAndWrapNamespaceDek({
+            packageId,
+            namespaceId,
+            keyVersion: 2n,
+            threshold,
+            sealServerConfigs: sealConfigs,
+            suiClient,
+            suiNetwork: "testnet",
+        }),
+    );
+    pass("wrap DEK v2", `wrapped=${wrapV2.wrappedDek.length}b`);
+
+    const revoked = await withRetry("revokeAccess stranger", () =>
+        revokeAccess({
+            ...txBase,
+            namespaceId,
+            principal: strangerAddr,
+            newWrappedDek: wrapV2.wrappedDek,
+        }),
+    );
+    pass("revokeAccess stranger", revoked.digest);
+
+    await expectAbort("revoked seal_approve", E_NO_READ, () =>
+        sealApprove(strangerKey, 1),
     );
 
-    const memwal = MemWal.create({
-        key: delegate.privateKey,
-        accountId,
-        serverUrl: relayer,
-        namespace: label,
-    });
+    await recallMustInclude(memwal, "peanut allergy", liveLabel, "recall after revoke");
 
-    let jobId = "";
-    try {
-        const accepted = await memwal.remember(memoryText);
-        jobId = accepted.job_id;
-        pass("remember accepted", jobId);
-        const done = await memwal.waitForRememberJob(accepted.job_id, { timeoutMs: 180_000 });
-        pass("remember done", `blob=${done.blob_id}`);
-    } catch (e) {
-        fail("remember", e);
-    }
+    const shredded = await withRetry("cryptoShredKeyVersion v0", () =>
+        cryptoShredKeyVersion({ ...txBase, namespaceId, keyVersion: 0 }),
+    );
+    pass("cryptoShredKeyVersion v0", shredded.digest);
 
-    try {
+    await expectAbort("shredded seal_approve v0", E_KEY_SHREDDED, () =>
+        sealApprove(suiPrivateKey, 0),
+    );
+
+    const peanut = await withRetry("recall shredded v0", async () => {
         const recalled = await memwal.recall({ query: "peanut allergy", limit: 5 });
-        const hit = recalled.results.find((r) => r.text.includes("peanut allergy") && r.text.includes(label));
-        if (!hit) {
-            fail("recall", new Error(`no matching hit in ${JSON.stringify(recalled)}`));
+        const stale = recalled.results.find((r) => r.text.includes("peanut allergy") && r.text.includes(liveLabel));
+        if (stale) {
+            throw new Error(`v0 plaintext still present: ${JSON.stringify(recalled)}`);
         }
-        pass("recall decrypt", `text=${hit!.text.slice(0, 80)}`);
-    } catch (e) {
-        fail("recall", e);
-    }
+        return recalled;
+    });
+    pass("recall shredded v0", `v0 plaintext absent hits=${peanut.results.length}`);
+    await recallMustInclude(memwal, "rotated key", "rotated key", "recall v1 after shred");
 
-    console.log("ALL_E2E_PASS", JSON.stringify({ label, namespaceId, jobId }));
+    console.log("ALL_E2E_PASS", JSON.stringify({
+        label: liveLabel,
+        namespaceId,
+        jobId,
+        jobIdV1,
+        strangerAddr,
+        digests: {
+            addDelegate: added.digest,
+            createNamespace: created.digest,
+            initializeKey: init.digest,
+            grantAgent: grantAgent.digest,
+            grantB: grantB.digest,
+            rotateKey: rotated.digest,
+            grantStranger: grantU.digest,
+            revokeStranger: revoked.digest,
+            shredV0: shredded.digest,
+        },
+    }));
 }
 
 main().catch((err) => {

@@ -1029,6 +1029,23 @@ async fn main() {
         ))
         .layer(DefaultBodyLimit::max(auth::PROTECTED_BODY_LIMIT_BYTES));
 
+    let artifact_routes = Router::new()
+        .route("/api/artifacts", post(routes::store_artifact))
+        .route("/api/artifacts/list", post(routes::list_artifacts))
+        .route(
+            "/api/artifacts/{id}",
+            axum::routing::get(routes::get_artifact),
+        )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit::rate_limit_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::verify_signature,
+        ))
+        .layer(DefaultBodyLimit::max(auth::ARTIFACT_BODY_LIMIT_BYTES));
+
     // Security-delete has its own server-side sponsor and does not use these
     // routes.
     let sponsor_routes = Router::new()
@@ -1206,6 +1223,7 @@ async fn main() {
 
     let app = Router::new()
         .merge(protected_routes)
+        .merge(artifact_routes)
         .merge(public_routes)
         .layer(cors)
         // Merge after applying the deployment-wide CORS layer so its
