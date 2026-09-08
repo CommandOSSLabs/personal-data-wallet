@@ -2,7 +2,7 @@
 
 Every release-candidate batch gets Security review capacity (human, AI, or
 combined) before it ships. Classify the change set, keep one candidate in one
-PR, and request Security review when it is required.
+PR, and request Security review when the change requires it.
 
 ## One candidate per PR
 
