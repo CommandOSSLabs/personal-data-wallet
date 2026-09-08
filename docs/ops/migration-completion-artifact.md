@@ -28,7 +28,7 @@ completion-report. Ceremony GitHub Environments are checked by
 
 | Field | Meaning |
 | --- | --- |
-| `packageId` | Target (destination) package id |
+| `packageId` | Target (destination) package id, in the form `build-finalize-tx.ts` normalizes `PACKAGE_ID` to: lowercase, `0x`-prefixed, 32 bytes of hex |
 | `manifestSha256` | Independently reviewed migration manifest digest (same value as `MANIFEST_SHA256` for finalize-tx) |
 | `imported` | Count of imported records |
 | `skipped` | Count of skipped records |
@@ -59,5 +59,19 @@ node scripts/write-migration-completion-artifact.mjs \
 
 Flags override env of the same name (`PACKAGE_ID`, `MANIFEST_SHA256`,
 `IMPORTED`, `SKIPPED`, `VERIFIED`, `APPROVER`, `OUT`). Missing required fields
-exit 1. Signing and submitting finalize-tx remains a separate offline step;
-see `scripts/build-finalize-tx.ts` and `.github/workflows/finalize-tx.yml`.
+exit 1.
+
+The writer rejects a `packageId` that `scripts/build-finalize-tx.ts` would
+reject, and records it in the same normalized form, so the artifact and the
+transaction name the target package identically. It also refuses to overwrite an
+existing `--out` file: pass `--force` to replace one deliberately. `--force` is
+a flag only, with no env equivalent.
+
+The artifact is an operator record, not a control the tooling enforces. Nothing checks that
+`approver` is a real reviewer or that it differs from the operator running the
+command; step 6 is a procedure the ceremony follows, and the ceremony
+environments in `scripts/verify-migration-environments.sh` are what actually
+prevent self-review.
+
+Signing and submitting finalize-tx remains a separate offline step; see
+`scripts/build-finalize-tx.ts` and `.github/workflows/finalize-tx.yml`.

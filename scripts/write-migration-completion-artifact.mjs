@@ -34,6 +34,8 @@ Flags (override env):
   --approver          APPROVER           ceremony approver
   --out               OUT                output JSON path
 
+  --force             replace an existing --out file (flag only, no env)
+
   --help, -h          print this help
   --self-test         write/read round-trip and missing-field checks
 `;
@@ -80,7 +82,20 @@ function main(argv = process.argv.slice(2), env = process.env) {
 
     const outPath = path.resolve(raw.out);
     mkdirSync(path.dirname(outPath), { recursive: true });
-    writeFileSync(outPath, `${JSON.stringify(artifact, null, 2)}\n`);
+    try {
+        // "wx" fails if the path exists: a completion artifact is an audit
+        // record, so replacing one has to be deliberate.
+        writeFileSync(outPath, `${JSON.stringify(artifact, null, 2)}\n`, {
+            flag: flags.has("force") ? "w" : "wx",
+        });
+    } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+        process.stderr.write(
+            `refusing to overwrite existing artifact: ${outPath}\n` +
+                "pass --force to replace it\n",
+        );
+        return 1;
+    }
     process.stdout.write(`wrote ${outPath}\n`);
     return 0;
 }
@@ -95,6 +110,10 @@ function parseArgv(argv) {
         }
         if (arg === "--self-test") {
             flags.set("self-test", "true");
+            continue;
+        }
+        if (arg === "--force") {
+            flags.set("force", "true");
             continue;
         }
         if (!arg.startsWith("--")) {
@@ -123,8 +142,7 @@ function valueOf(flags, env, flag, envName) {
 }
 
 function buildArtifact(raw) {
-    const packageId = raw["package-id"];
-    if (!packageId) throw new Error("packageId is required");
+    const packageId = parsePackageId(raw["package-id"]);
 
     const manifestSha256 = parseManifestSha256(raw["manifest-sha256"]);
     const imported = parseCount(raw.imported, "imported");
@@ -142,6 +160,26 @@ function buildArtifact(raw) {
         approver,
         timestamp: new Date().toISOString(),
     };
+}
+
+/**
+ * Mirrors assertObjectId() in scripts/assertions.ts, which is
+ * isValidSuiObjectId() + normalizeSuiAddress() from @mysten/sui/utils: a Sui
+ * object id is exactly 32 bytes of hex, optionally 0x-prefixed, and normalizes
+ * to lowercase with the prefix. Reimplemented rather than imported because the
+ * CI job runs this under bare `node` with no install step. An artifact whose
+ * packageId does not round-trip to what build-finalize-tx.ts used is not
+ * evidence of anything, so reject instead of recording it verbatim.
+ */
+function parsePackageId(value) {
+    const hex = /^0[xX]/.test(value) ? value.slice(2) : value;
+    if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+        throw new Error(
+            "packageId must be a Sui object id: 32 bytes of hex (64 characters),"
+                + " optionally 0x-prefixed",
+        );
+    }
+    return `0x${hex.toLowerCase()}`;
 }
 
 function parseManifestSha256(value) {
@@ -216,7 +254,8 @@ function selfTest() {
             { encoding: "utf8", env },
         );
         assert(write.status === 0, `write exit ${write.status}: ${write.stderr}`);
-        const artifact = JSON.parse(readFileSync(out, "utf8"));
+        const before = readFileSync(out, "utf8");
+        const artifact = JSON.parse(before);
         assert(artifact.packageId === packageId, "packageId mismatch");
         assert(artifact.manifestSha256 === manifestSha256, "manifestSha256 mismatch");
         assert(artifact.imported === 3, "imported mismatch");
@@ -240,6 +279,77 @@ function selfTest() {
                     "verified",
                 ]),
             `unexpected keys: ${Object.keys(artifact)}`,
+        );
+
+        // Same valid inputs as above, with per-case overrides appended.
+        const run = (extra) =>
+            spawnSync(
+                process.execPath,
+                [
+                    self,
+                    "--package-id",
+                    packageId,
+                    "--manifest-sha256",
+                    manifestSha256,
+                    "--imported",
+                    "3",
+                    "--skipped",
+                    "1",
+                    "--verified",
+                    "true",
+                    "--approver",
+                    "user:alice",
+                    ...extra,
+                ],
+                { encoding: "utf8", env },
+            );
+
+        // A second write to the same path must not clobber the record.
+        const clobber = run(["--out", out]);
+        assert(clobber.status === 1, `clobber exit ${clobber.status}`);
+        assert(
+            clobber.stderr.includes("refusing to overwrite existing artifact"),
+            `clobber stderr: ${clobber.stderr}`,
+        );
+        assert(
+            readFileSync(out, "utf8") === before,
+            "refused write still modified the artifact",
+        );
+
+        // --force is the deliberate replace.
+        const forced = run(["--out", out, "--skipped", "2", "--force"]);
+        assert(forced.status === 0, `force exit ${forced.status}: ${forced.stderr}`);
+        assert(
+            JSON.parse(readFileSync(out, "utf8")).skipped === 2,
+            "--force did not replace the artifact",
+        );
+
+        // packageId mirrors assertObjectId: reject non-ids and wrong lengths.
+        const badIds = ["not-a-package-id", "0x2", `0x${"ab".repeat(31)}`, `0x${"a".repeat(65)}`];
+        for (const bad of badIds) {
+            const rejected = run(["--package-id", bad, "--out", path.join(dir, "bad.json")]);
+            assert(rejected.status === 1, `bad packageId ${bad} exit ${rejected.status}`);
+            assert(
+                rejected.stderr.includes("packageId must be a Sui object id"),
+                `bad packageId ${bad} stderr: ${rejected.stderr}`,
+            );
+        }
+
+        // ...and normalizes case and the 0x prefix the way finalize-tx does.
+        const normOut = path.join(dir, "normalized.json");
+        const normalized = run([
+            "--package-id",
+            "AB".repeat(32),
+            "--out",
+            normOut,
+        ]);
+        assert(
+            normalized.status === 0,
+            `normalize exit ${normalized.status}: ${normalized.stderr}`,
+        );
+        assert(
+            JSON.parse(readFileSync(normOut, "utf8")).packageId === `0x${"ab".repeat(32)}`,
+            "packageId was not normalized to lowercase 0x form",
         );
     } finally {
         rmSync(dir, { recursive: true, force: true });
