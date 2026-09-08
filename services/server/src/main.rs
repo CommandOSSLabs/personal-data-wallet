@@ -1154,6 +1154,7 @@ async fn main() {
         http_client,
         sui_grpc_client,
         delegate_keys_cache: crate::storage::sui::new_delegate_keys_cache(),
+        verified_delegate_cache: crate::storage::sui::new_verified_delegate_cache(),
         key_pool,
         alerts,
         engine,
@@ -1402,15 +1403,15 @@ async fn main() {
         }
     });
 
-    // Spawn background task to bound the in-memory `DelegateKeysCache`
-    // (the `/agents` cache — see `storage/sui.rs`). Unlike the
-    // Postgres-backed eviction above, nothing else ever removes entries from
-    // this HashMap: the 30s TTL only gates whether a hit is trusted, so
-    // without this sweep it grows for the lifetime of the process, one
-    // entry per distinct account_object_id ever looked up. Sweeping is a
-    // cheap in-memory `retain` (no I/O), so a 5-minute cadence against the
-    // 10-minute `DELEGATE_KEYS_CACHE_MAX_AGE` keeps the map bounded to
-    // recently-active accounts with headroom to spare.
+    // Spawn background task to bound the two in-memory delegate-key caches
+    // (see `storage/sui.rs`). Unlike the Postgres-backed eviction above,
+    // nothing else ever removes entries from these HashMaps: their TTLs only
+    // gate whether a hit is trusted, so without this sweep they grow for the
+    // lifetime of the process — one entry per distinct account_object_id ever
+    // looked up by `/agents`, and one per (delegate key, account) pair ever
+    // authenticated. Sweeping is a cheap in-memory `retain` (no I/O), so a
+    // 5-minute cadence against the 10-minute `*_MAX_AGE` constants keeps both
+    // maps bounded to recently-active entries with headroom to spare.
     let delegate_cache_sweep_state = state.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
@@ -1424,6 +1425,28 @@ async fn main() {
             if evicted > 0 {
                 tracing::debug!(
                     "delegate_keys_cache sweep: evicted {} stale entries ({} remaining)",
+                    evicted,
+                    before - evicted
+                );
+            }
+
+            // WALM-606 re-verify window. `VERIFIED_DELEGATE_CACHE_MAX_AGE` is
+            // an order of magnitude above the 60s ceiling on the re-verify
+            // interval, so this can never evict a still-open window — at
+            // worst it costs one extra `GetObject` for a key idle 10 minutes.
+            let mut verified = delegate_cache_sweep_state
+                .verified_delegate_cache
+                .write()
+                .await;
+            let before = verified.len();
+            verified.retain(|_, v| {
+                v.verified_at.elapsed() < storage::sui::VERIFIED_DELEGATE_CACHE_MAX_AGE
+            });
+            let evicted = before - verified.len();
+            drop(verified);
+            if evicted > 0 {
+                tracing::debug!(
+                    "verified_delegate_cache sweep: evicted {} stale entries ({} remaining)",
                     evicted,
                     before - evicted
                 );
