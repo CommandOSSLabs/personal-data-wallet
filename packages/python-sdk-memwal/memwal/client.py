@@ -35,6 +35,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
+from urllib.parse import ParseResult, urlparse
 
 import httpx
 import nacl.signing
@@ -97,9 +98,60 @@ AUTH_REJECTED_MESSAGE = (
     "and dashboard credentials. Full troubleshooting: "
     "https://docs.wal.app/walrus-memory/troubleshooting/overview#401-auth_rejected-errors"
 )
+AUTH_UPSTREAM_UNAVAILABLE = "AUTH_UPSTREAM_UNAVAILABLE"
+UPSTREAM_UNAVAILABLE_MESSAGE = (
+    "Walrus Memory temporarily cannot verify credentials (upstream unavailable). "
+    "Retry; this is not a sign-in failure."
+)
 
 
 logger = logging.getLogger("memwal")
+
+
+def _server_url_for_log(parsed: ParseResult) -> str:
+    """Scheme/host/port only — never userinfo, path, query, or fragment."""
+
+    host = parsed.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    if parsed.port is not None:
+        return f"{parsed.scheme}://{host}:{parsed.port}"
+    return f"{parsed.scheme}://{host}"
+
+
+def normalize_server_url(url: str) -> str:
+    """Strip a trailing slash and warn on plaintext HTTP to a remote host.
+
+    Ports the TypeScript ``normalizeServerUrl`` helper: localhost,
+    ``127.0.0.1``, ``::1``, and ``*.localhost`` are exempt. Invalid URLs
+    are returned trimmed so the HTTP client can surface the error later.
+
+    The warning logs only scheme/host/port so URL userinfo (HTTPX
+    credentials) and other sensitive components are not written to logs.
+    The returned URL is otherwise unchanged and still used for transport.
+    """
+
+    trimmed = url.rstrip("/")
+    try:
+        parsed = urlparse(trimmed)
+        host = (parsed.hostname or "").lower()
+        is_local = (
+            host == "localhost"
+            or host == "127.0.0.1"
+            or host == "::1"
+            or host.endswith(".localhost")
+        )
+        if parsed.scheme == "http" and host and not is_local:
+            logger.warning(
+                '[memwal] serverUrl "%s" uses plaintext HTTP on a non-localhost host. '
+                "Signed requests and any bearer material will be visible to the network. "
+                "Use https:// in production.",
+                _server_url_for_log(parsed),
+            )
+    except ValueError:
+        # invalid URL — let the HTTP call surface the error at request time
+        pass
+    return trimmed
 
 
 # ============================================================
@@ -229,7 +281,7 @@ class MemWal:
         self._private_key_hex = normalize_private_key(config.key)
         self._signing_key = build_signing_key(self._private_key_hex)
         self._account_id = config.account_id
-        self._server_url = config.server_url.rstrip("/")
+        self._server_url = normalize_server_url(config.server_url)
         self._namespace = config.namespace
         self._client: Optional[httpx.AsyncClient] = None
         self._server_config: Optional[Dict[str, str]] = None
@@ -1285,6 +1337,8 @@ class MemWal:
             raise _HttpStatusError(
                 status=response.status_code,
                 body=err_text,
+                auth_error=response.headers.get("x-auth-error"),
+                retry_after=response.headers.get("retry-after"),
             )
 
         return response.json()
@@ -1328,15 +1382,25 @@ class _HttpStatusError(MemWalError):
     explicitly accepted).
     """
 
-    def __init__(self, status: int, body: str) -> None:
+    def __init__(
+        self,
+        status: int,
+        body: str,
+        auth_error: str | None = None,
+        retry_after: str | None = None,
+    ) -> None:
         if status == 401:
             super().__init__(AUTH_REJECTED_MESSAGE)
+        elif status == 503 and auth_error == AUTH_UPSTREAM_UNAVAILABLE:
+            super().__init__(UPSTREAM_UNAVAILABLE_MESSAGE)
         else:
             super().__init__(
                 f"Walrus Memory API error ({status}): {_redact_internal_urls(body)}"
             )
         self.status = status
         self.body = body
+        self.auth_error = auth_error
+        self.retry_after = retry_after
 
 
 class MemWalRememberJobNotFound(MemWalError):
