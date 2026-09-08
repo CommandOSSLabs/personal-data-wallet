@@ -121,8 +121,8 @@ const MAX_DELEGATE_KEYS = 20
 const MAX_DELEGATE_KEYS_MESSAGE = 'This wallet already has 20 delegate keys. Remove an old key before creating a new delegate key.'
 const DELEGATE_KEYS_SECTION_ID = 'delegate-keys'
 // Relayer clamps `limit` (default 100, max 500); these stay well inside that.
-const NAMESPACE_PAGE_SIZES = [20, 50, 100]
-const NAMESPACE_DEFAULT_PAGE_SIZE = 20
+const NAMESPACE_PAGE_SIZES = [15, 25, 50, 100]
+const NAMESPACE_DEFAULT_PAGE_SIZE = 15
 const PRIVATE_KEY_ENV = 'MEMWAL_PRIVATE_KEY'
 const ACCOUNT_ID_ENV = 'MEMWAL_ACCOUNT_ID'
 const SERVER_URL_ENV = 'MEMWAL_SERVER_URL'

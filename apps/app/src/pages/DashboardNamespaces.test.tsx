@@ -123,12 +123,12 @@ describe('Dashboard namespaces pagination', () => {
         mocks.apiGet.mockImplementation(async (_k: string, _u: string, path: string) => {
             if (!path.includes('/namespaces')) return {}
             if (path.includes('updated_after=cursor-1')) return page('b', 2, false)
-            return page('a', 20, true, 'cursor-1')
+            return page('a', 15, true, 'cursor-1')
         })
 
         const card = await namespacesCard()
         await within(card).findByText('a-0')
-        expect(nsCalls()[0]).toContain('limit=20')
+        expect(nsCalls()[0]).toContain('limit=15')
         expect(nsCalls()[0]).not.toContain('updated_after')
 
         await user.click(within(card).getByRole('button', { name: 'Next page' }))
@@ -144,14 +144,14 @@ describe('Dashboard namespaces pagination', () => {
     it('stops at has_more=false even when the page came back full', async () => {
         // The relayer clamps `limit`, so a full page is not proof of more data.
         mocks.apiGet.mockImplementation(async (_k: string, _u: string, path: string) =>
-            path.includes('/namespaces') ? page('a', 20, false, 'ignored-cursor') : {},
+            path.includes('/namespaces') ? page('a', 15, false, 'ignored-cursor') : {},
         )
 
         const card = await namespacesCard()
         await within(card).findByText('a-0')
         // Nothing to paginate: the footer stays out of the way entirely.
         expect(within(card).queryByRole('button', { name: 'Next page' })).toBeNull()
-        expect(within(card).getByText('210 memories across 20 namespaces')).toBeTruthy()
+        expect(within(card).getByText('120 memories across 15 namespaces')).toBeTruthy()
     })
 
     it('goes back to the previous page without refetching from scratch', async () => {
@@ -159,19 +159,19 @@ describe('Dashboard namespaces pagination', () => {
         mocks.apiGet.mockImplementation(async (_k: string, _u: string, path: string) => {
             if (!path.includes('/namespaces')) return {}
             if (path.includes('updated_after=cursor-1')) return page('b', 3, false)
-            return page('a', 20, true, 'cursor-1')
+            return page('a', 15, true, 'cursor-1')
         })
 
         const card = await namespacesCard()
         await within(card).findByText('a-0')
         await user.click(within(card).getByRole('button', { name: 'Next page' }))
         await within(card).findByText('b-0')
-        expect(within(card).getByText('21–23')).toBeTruthy()
+        expect(within(card).getByText('16–18')).toBeTruthy()
 
         await user.click(within(card).getByRole('button', { name: 'Previous page' }))
 
         await within(card).findByText('a-0')
-        expect(within(card).getByText('1–20')).toBeTruthy()
+        expect(within(card).getByText('1–15')).toBeTruthy()
         expect(nsCalls().at(-1)).not.toContain('updated_after')
         expect(within(card).getByRole('button', { name: 'Previous page' })).toBeDisabled()
     })
@@ -181,7 +181,7 @@ describe('Dashboard namespaces pagination', () => {
         mocks.apiGet.mockImplementation(async (_k: string, _u: string, path: string) => {
             if (!path.includes('/namespaces')) return {}
             if (path.includes('updated_after=cursor-1')) return page('b', 3, false)
-            return page('a', 20, true, 'cursor-1')
+            return page('a', 15, true, 'cursor-1')
         })
 
         const card = await namespacesCard()
@@ -201,7 +201,7 @@ describe('Dashboard namespaces pagination', () => {
         mocks.apiGet.mockImplementation(async (_k: string, _u: string, path: string) => {
             if (!path.includes('/namespaces')) return {}
             if (path.includes('updated_after=cursor-1')) return page('b', 3, false)
-            return page('a', 20, true, 'cursor-1')
+            return page('a', 15, true, 'cursor-1')
         })
 
         const card = await namespacesCard()
@@ -217,12 +217,12 @@ describe('Dashboard namespaces pagination', () => {
 
     it('keeps the page-size selector reachable after the list fits one page', async () => {
         const user = userEvent.setup()
-        // 25 namespaces: two pages at 20, a single page at 50.
+        // 25 namespaces: two pages at 15, a single page at 50.
         mocks.apiGet.mockImplementation(async (_k: string, _u: string, path: string) => {
             if (!path.includes('/namespaces')) return {}
             if (path.includes('limit=50')) return page('all', 25, false)
             if (path.includes('updated_after=cursor-1')) return page('b', 5, false)
-            return page('a', 20, true, 'cursor-1')
+            return page('a', 15, true, 'cursor-1')
         })
 
         const card = await namespacesCard()
@@ -230,11 +230,11 @@ describe('Dashboard namespaces pagination', () => {
         await user.selectOptions(within(card).getByLabelText('Items per page'), '50')
 
         await within(card).findByText('all-24')
-        // Everything now fits, but the selector must survive so 20 is reachable.
+        // Everything now fits, but the selector must survive so 15 is reachable.
         const select = within(card).getByLabelText('Items per page')
         expect(select).toBeTruthy()
-        await user.selectOptions(select, '20')
-        await waitFor(() => expect(nsCalls().at(-1)).toContain('limit=20'))
+        await user.selectOptions(select, '15')
+        await waitFor(() => expect(nsCalls().at(-1)).toContain('limit=15'))
     })
 
     it('keeps the empty state', async () => {
