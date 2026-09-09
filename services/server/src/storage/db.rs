@@ -28,7 +28,14 @@ impl VectorDb {
         let Some((alerts, network)) = &self.storage_alerts else {
             return;
         };
-        crate::alerts::maybe_alert_sqlx_postgres_storage_exhausted(alerts, network, err).await;
+        if crate::alerts::sqlx_error_is_postgres_storage_exhausted(err) {
+            crate::alerts::maybe_alert_postgres_storage_exhausted(
+                alerts,
+                network,
+                &err.to_string(),
+            )
+            .await;
+        }
     }
 }
 
@@ -1659,12 +1666,8 @@ impl VectorDb {
         .bind(plaintext)
         .bind(importance)
         .execute(&mut *tx)
-        .await;
-        if let Err(ref e) = result {
-            self.maybe_alert_storage_exhausted(e).await;
-        }
-        let result = result
-            .map_err(|e| AppError::Internal(format!("Failed to insert plaintext vector: {}", e)));
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to insert plaintext vector: {}", e)));
         crate::observability::observe_db(
             "vector.insert_plaintext",
             db_status(&result),

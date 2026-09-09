@@ -781,7 +781,7 @@ pub async fn reserve_storage_quota(
     let lock_key = stable_hash_i64(owner);
     let requested: i64 = reservations.iter().map(|r| r.bytes).sum();
 
-    let admission = match state
+    let admission = state
         .db
         .admit_storage_reservations(
             owner,
@@ -790,19 +790,7 @@ pub async fn reserve_storage_quota(
             reservations,
             STORAGE_RESERVATION_TTL,
         )
-        .await
-    {
-        Ok(admission) => admission,
-        Err(e) => {
-            crate::alerts::maybe_alert_postgres_storage_exhausted(
-                &state.alerts,
-                &state.config.sui_network,
-                &e.to_string(),
-            )
-            .await;
-            return Err(e);
-        }
-    };
+        .await?;
 
     match admission {
         StorageAdmission::Admitted => Ok(()),

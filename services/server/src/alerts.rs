@@ -283,7 +283,10 @@ impl AlertManager {
         };
         // Cluster-wide cap: one notification per network per window. Concurrent
         // remember/analyze jobs all hit the same Neon/Postgres size limit.
-        if self.should_suppress_postgres_storage(&alert.sui_network) {
+        if self
+            .postgres_storage_dedup
+            .should_suppress(postgres_storage_dedup_key(&alert.sui_network))
+        {
             return Ok(());
         }
         let payload = SlackPayload::for_postgres_storage_exhausted(&alert);
@@ -293,11 +296,6 @@ impl AlertManager {
     fn should_suppress_wallet_balance_low(&self, alert: &WalletBalanceLowAlert) -> bool {
         self.wallet_balance_low_dedup
             .should_suppress(wallet_balance_low_dedup_key(alert))
-    }
-
-    fn should_suppress_postgres_storage(&self, sui_network: &str) -> bool {
-        self.postgres_storage_dedup
-            .should_suppress(postgres_storage_dedup_key(sui_network))
     }
 }
 
@@ -319,8 +317,8 @@ fn postgres_storage_dedup_key(sui_network: &str) -> (String, String) {
 /// size cap is exhausted. Matches the prod Neon message
 /// `could not extend file because project size limit (3072 MB) has been exceeded`
 /// plus vanilla `no space left on device`. sqlx 0.8 `Display` is message-only,
-/// so SQLSTATE `53100` is matched via `DatabaseError::code` when the typed
-/// error is in hand — not as a substring of the message.
+/// so SQLSTATE `53100` is matched via `DatabaseError::code` — not as a
+/// substring of the message.
 pub fn is_postgres_storage_exhausted(msg: &str) -> bool {
     let lower = msg.to_ascii_lowercase();
     lower.contains("could not extend file")
@@ -340,29 +338,13 @@ pub fn sqlx_error_is_postgres_storage_exhausted(err: &sqlx::Error) -> bool {
     is_postgres_storage_exhausted(&err.to_string())
 }
 
+/// Slack the cluster-wide disk / Neon size-cap incident. Callers classify
+/// first (`sqlx_error_is_postgres_storage_exhausted`).
 pub async fn maybe_alert_postgres_storage_exhausted(
     alerts: &AlertManager,
     sui_network: &str,
     err: &str,
 ) {
-    if !is_postgres_storage_exhausted(err) {
-        return;
-    }
-    notify_postgres_storage_exhausted(alerts, sui_network, err).await;
-}
-
-pub async fn maybe_alert_sqlx_postgres_storage_exhausted(
-    alerts: &AlertManager,
-    sui_network: &str,
-    err: &sqlx::Error,
-) {
-    if !sqlx_error_is_postgres_storage_exhausted(err) {
-        return;
-    }
-    notify_postgres_storage_exhausted(alerts, sui_network, &err.to_string()).await;
-}
-
-async fn notify_postgres_storage_exhausted(alerts: &AlertManager, sui_network: &str, err: &str) {
     let alert = PostgresStorageExhaustedAlert {
         sui_network: sui_network.to_string(),
         error: err.to_string(),

@@ -149,9 +149,6 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> 
             extract: crate::services::extractor::FACT_EXTRACTION_PROMPT_VERSION.to_string(),
             ask: ASK_SYSTEM_PROMPT_VERSION.to_string(),
         },
-        // CI wait-for-relayer gates on this being true; postgres probe errors
-        // fail open (missing neon extension / pool timeout) so deploy-wait
-        // still completes when the sidecar is up.
         write_ready: write_ready(&state).await,
         writes: writes_health_status(state.config.writes_paused),
     })
@@ -202,9 +199,9 @@ async fn sidecar_write_ready(state: &std::sync::Arc<AppState>) -> bool {
 }
 
 /// Self-hosted Postgres without `neon.max_cluster_size` stays ready (sidecar
-/// still applies). Storage-exhausted is fail-closed; every other probe error
-/// (missing `public.pg_cluster_size`, pool timeout) fails open so CI
-/// `wait-for-relayer` and a flapping pool do not look like a write outage.
+/// still applies). Missing `public.pg_cluster_size` and probe/pool failures
+/// fail open at `warn` (timeout at `debug`) so CI `wait-for-relayer` and a
+/// flapping pool do not look like a write outage.
 async fn postgres_write_ready(state: &std::sync::Arc<AppState>) -> bool {
     match tokio::time::timeout(
         WRITE_READY_PROBE_TIMEOUT,
@@ -214,24 +211,13 @@ async fn postgres_write_ready(state: &std::sync::Arc<AppState>) -> bool {
     {
         Ok(Ok(ready)) => ready,
         Ok(Err(err)) => {
-            if crate::alerts::sqlx_error_is_postgres_storage_exhausted(&err) {
-                tracing::warn!(
-                    error = %err,
-                    "postgres write-ready probe: storage exhausted"
-                );
-                false
-            } else {
-                // Fail-open so a missing neon extension is visible but does
-                // not hang CI or flip `/health` when the sidecar is up.
-                tracing::warn!(
-                    error = %err,
-                    "postgres write-ready probe failed; treating writes as ready"
-                );
-                true
-            }
+            tracing::warn!(
+                error = %err,
+                "postgres write-ready probe failed; treating writes as ready"
+            );
+            true
         }
         Err(_) => {
-            // Fail-open: a pool-acquire timeout must not report a write outage.
             tracing::debug!("postgres write-ready probe timed out");
             true
         }
@@ -265,8 +251,7 @@ async fn probe_postgres_write_ready(pool: &sqlx::PgPool) -> Result<bool, sqlx::E
     // Neon gates smgrextend on cluster size (WAL/history/other DBs), not
     // pg_database_size of this database. `CREATE EXTENSION neon` (relocatable,
     // no schema in neon.control) puts `pg_cluster_size` in `public`. Qualify
-    // for empty search_path through PgBouncer. Missing function fails open
-    // in `postgres_write_ready`.
+    // for empty search_path through PgBouncer.
     let used_bytes: i64 = sqlx::query_scalar("SELECT public.pg_cluster_size()::bigint")
         .fetch_one(pool)
         .await?;
