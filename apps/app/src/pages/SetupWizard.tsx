@@ -92,12 +92,10 @@ async function accountIdAfterCreate(
     try {
         const waited = await suiClient.waitForTransaction({
             digest,
+            include: { events: true, effects: true, objectTypes: true },
             options: { showEvents: true, showObjectChanges: true },
-        })
-        const fromTx = findCreatedAccountId(waited as {
-            objectChanges?: Array<Record<string, unknown>> | null
-            events?: Array<Record<string, unknown>> | null
-        })
+        } as Parameters<typeof suiClient.waitForTransaction>[0])
+        const fromTx = findCreatedAccountId(waited)
         if (fromTx) return fromTx
     } catch {
         await suiClient.waitForTransaction({ digest })

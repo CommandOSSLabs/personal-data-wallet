@@ -1,4 +1,5 @@
 import { SuiGrpcClient } from '@mysten/sui/grpc'
+import { bcs } from '@mysten/sui/bcs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -128,6 +129,23 @@ describe('JSON-RPC registry lookup', () => {
     })
 })
 
+describe('isMissingObjectError', () => {
+    it('treats HTTP 404 and notExists as a miss', () => {
+        expect(isMissingObjectError(Object.assign(new Error('Unexpected status code: 404 ()'), { status: 404 }))).toBe(true)
+        expect(isMissingObjectError(new Error('notExists'))).toBe(true)
+        expect(isMissingObjectError(new Error('dynamicFieldNotFound'))).toBe(true)
+        expect(isMissingObjectError(new Error('object not found'))).toBe(true)
+    })
+
+    it('does not treat JSON-RPC Method not found as a missing object', () => {
+        expect(
+            isMissingObjectError(
+                new Error('Method not found. JSON-RPC on public fullnodes has been deprecated.'),
+            ),
+        ).toBe(false)
+    })
+})
+
 describe('findCreatedAccountId', () => {
     it('falls back to the AccountCreated event when objectChanges omit the account', () => {
         expect(
@@ -141,6 +159,41 @@ describe('findCreatedAccountId', () => {
                 ],
             }),
         ).toBe('0xaccount-from-event')
+    })
+
+    it('reads gRPC eventType + BCS AccountCreated', () => {
+        const AccountCreatedBcs = bcs.struct('AccountCreated', {
+            account_id: bcs.Address,
+            owner: bcs.Address,
+        })
+        const accountId = `0x${'11'.repeat(32)}`
+        const owner = `0x${'22'.repeat(32)}`
+        const eventBcs = AccountCreatedBcs.serialize({ account_id: accountId, owner }).toBytes()
+
+        expect(
+            findCreatedAccountId({
+                Transaction: {
+                    events: [
+                        {
+                            eventType: '0xpackage::account::AccountCreated',
+                            bcs: eventBcs,
+                        },
+                    ],
+                },
+            }),
+        ).toBe(accountId)
+    })
+
+    it('reads gRPC created objects via objectTypes', () => {
+        const accountId = '0xgrpc-account'
+        expect(
+            findCreatedAccountId({
+                effects: {
+                    changedObjects: [{ objectId: accountId, idOperation: 'Created' }],
+                },
+                objectTypes: { [accountId]: '0xpackage::account::MemWalAccount' },
+            }),
+        ).toBe(accountId)
     })
 })
 

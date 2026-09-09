@@ -8,8 +8,14 @@
  * one shape unconditionally.
  */
 
+import { bcs } from '@mysten/sui/bcs'
 import { isSuiGrpcClient, type SuiGrpcClient } from '@mysten/sui/grpc'
 import { fromBase64, fromHex, normalizeSuiAddress, toHex } from '@mysten/sui/utils'
+
+const AccountCreatedBcs = bcs.struct('AccountCreated', {
+    account_id: bcs.Address,
+    owner: bcs.Address,
+})
 
 interface JsonRpcClientLike {
     getObject(input: { id: string; options: { showContent: boolean } }): Promise<{
@@ -54,7 +60,9 @@ export function isMissingObjectError(error: unknown): boolean {
             : undefined
     if (status === 404) return true
     const message = error instanceof Error ? error.message : String(error)
-    return /unexpected status code:\s*404|status code:\s*404|notExists|not found/i.test(message)
+    // Do not match a bare "not found" — that also hits JSON-RPC's
+    // "Method not found" deprecation error on public fullnodes.
+    return /unexpected status code:\s*404|status code:\s*404|notExists|dynamicFieldNotFound|object not found/i.test(message)
 }
 
 /** Fetch a Move object's fields as a flat JS object, regardless of client transport. */
@@ -91,27 +99,89 @@ function extractTableId(accounts: unknown): string | undefined {
     return typeof rawId === 'string' ? rawId : rawId?.id
 }
 
-/** Extract the account created by create_account across JSON-RPC response variants. */
-export function findCreatedAccountId(transaction: {
-    objectChanges?: Array<Record<string, unknown>> | null
-    events?: Array<Record<string, unknown>> | null
-}): string | null {
-    const createdAccount = transaction.objectChanges?.find(
-        (change) =>
-            change.type === 'created' &&
-            typeof change.objectType === 'string' &&
-            change.objectType.includes('::account::MemWalAccount'),
-    )
-    if (typeof createdAccount?.objectId === 'string') return createdAccount.objectId
+function asRecord(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === 'object' ? (value as Record<string, unknown>) : null
+}
 
-    const accountCreatedEvent = transaction.events?.find(
-        (event) =>
-            typeof event.type === 'string' && event.type.endsWith('::account::AccountCreated'),
-    )
-    const parsedJson = accountCreatedEvent?.parsedJson
+function transactionBody(transaction: unknown): Record<string, unknown> {
+    const root = asRecord(transaction) ?? {}
+    return asRecord(root.Transaction) ?? asRecord(root.FailedTransaction) ?? root
+}
+
+function eventBcsBytes(event: Record<string, unknown>): Uint8Array | null {
+    const raw = event.bcs
+    if (raw instanceof Uint8Array) return raw
+    if (typeof raw === 'string') {
+        try {
+            return fromBase64(raw)
+        } catch {
+            return null
+        }
+    }
+    return null
+}
+
+function accountIdFromCreatedEvent(event: Record<string, unknown>): string | null {
+    const parsedJson = event.parsedJson
     if (parsedJson && typeof parsedJson === 'object') {
         const accountId = (parsedJson as { account_id?: unknown }).account_id
         if (typeof accountId === 'string') return accountId
+    }
+    const bytes = eventBcsBytes(event)
+    if (!bytes) return null
+    try {
+        const parsed = AccountCreatedBcs.parse(bytes)
+        return typeof parsed.account_id === 'string' ? parsed.account_id : null
+    } catch {
+        return null
+    }
+}
+
+/** Extract the account created by create_account across JSON-RPC and gRPC shapes. */
+export function findCreatedAccountId(transaction: unknown): string | null {
+    const body = transactionBody(transaction)
+
+    const objectChanges = body.objectChanges
+    if (Array.isArray(objectChanges)) {
+        const createdAccount = objectChanges.find((change) => {
+            const rec = asRecord(change)
+            return (
+                rec?.type === 'created' &&
+                typeof rec.objectType === 'string' &&
+                rec.objectType.includes('::account::MemWalAccount')
+            )
+        })
+        const objectId = asRecord(createdAccount)?.objectId
+        if (typeof objectId === 'string') return objectId
+    }
+
+    const events = body.events
+    if (Array.isArray(events)) {
+        const accountCreatedEvent = events.find((event) => {
+            const rec = asRecord(event)
+            const type = rec && (typeof rec.type === 'string' ? rec.type : rec.eventType)
+            return typeof type === 'string' && type.endsWith('::account::AccountCreated')
+        })
+        const fromEvent = accountCreatedEvent ? accountIdFromCreatedEvent(asRecord(accountCreatedEvent) ?? {}) : null
+        if (fromEvent) return fromEvent
+    }
+
+    const objectTypes = asRecord(body.objectTypes)
+    const changedObjects = asRecord(body.effects)?.changedObjects
+    if (objectTypes && Array.isArray(changedObjects)) {
+        for (const change of changedObjects) {
+            const rec = asRecord(change)
+            const objectId = rec && typeof rec.objectId === 'string' ? rec.objectId : null
+            const objectType = objectId ? objectTypes[objectId] : undefined
+            if (
+                rec?.idOperation === 'Created' &&
+                objectId &&
+                typeof objectType === 'string' &&
+                objectType.includes('::account::MemWalAccount')
+            ) {
+                return objectId
+            }
+        }
     }
 
     return null
