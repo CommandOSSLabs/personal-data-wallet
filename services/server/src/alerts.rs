@@ -340,15 +340,34 @@ pub fn sqlx_error_is_postgres_storage_exhausted(err: &sqlx::Error) -> bool {
     is_postgres_storage_exhausted(&err.to_string())
 }
 
-pub async fn maybe_alert_postgres_storage_exhausted(state: &crate::types::AppState, err: &str) {
+pub async fn maybe_alert_postgres_storage_exhausted(
+    alerts: &AlertManager,
+    sui_network: &str,
+    err: &str,
+) {
     if !is_postgres_storage_exhausted(err) {
         return;
     }
+    notify_postgres_storage_exhausted(alerts, sui_network, err).await;
+}
+
+pub async fn maybe_alert_sqlx_postgres_storage_exhausted(
+    alerts: &AlertManager,
+    sui_network: &str,
+    err: &sqlx::Error,
+) {
+    if !sqlx_error_is_postgres_storage_exhausted(err) {
+        return;
+    }
+    notify_postgres_storage_exhausted(alerts, sui_network, &err.to_string()).await;
+}
+
+async fn notify_postgres_storage_exhausted(alerts: &AlertManager, sui_network: &str, err: &str) {
     let alert = PostgresStorageExhaustedAlert {
-        sui_network: state.config.sui_network.clone(),
+        sui_network: sui_network.to_string(),
         error: err.to_string(),
     };
-    if let Err(alert_err) = state.alerts.notify_postgres_storage_exhausted(alert).await {
+    if let Err(alert_err) = alerts.notify_postgres_storage_exhausted(alert).await {
         tracing::warn!(
             "failed to send Slack alert for Postgres storage exhaustion: {}",
             alert_err

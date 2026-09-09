@@ -919,9 +919,7 @@ pub async fn remember(
     {
         Ok(inserted) => inserted,
         Err(e) => {
-            let err = AppError::Internal(format!("Failed to create job row: {}", e));
-            crate::alerts::maybe_alert_postgres_storage_exhausted(&state, &err.to_string()).await;
-            return Err(err);
+            return Err(AppError::Internal(format!("Failed to create job row: {}", e)));
         }
     };
 
@@ -1317,9 +1315,10 @@ pub async fn remember_bulk(
         .execute(state.db.pool())
         .await
         {
-            let err = AppError::Internal(format!("Failed to create bulk job row: {}", e));
-            crate::alerts::maybe_alert_postgres_storage_exhausted(&state, &err.to_string()).await;
-            return Err(err);
+            return Err(AppError::Internal(format!(
+                "Failed to create bulk job row: {}",
+                e
+            )));
         }
 
         pending_items.push(PendingBulkRememberItem {

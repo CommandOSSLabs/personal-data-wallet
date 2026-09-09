@@ -27,14 +27,14 @@ export function registerHealthTool(
                 write_ready?: boolean;
                 writes?: string;
             };
-            const writeNote =
+            const readyNote =
                 extra.write_ready === false
-                    ? extra.writes === "paused"
-                        ? " write_ready=false (writes paused)"
-                        : " write_ready=false (writes unavailable)"
+                    ? " write_ready=false (writes unavailable)"
                     : extra.write_ready === true
                       ? " write_ready=true"
                       : "";
+            const pausedNote = extra.writes === "paused" ? " writes=paused" : "";
+            const writeNote = `${readyNote}${pausedNote}`;
             return {
                 content: [
                     {

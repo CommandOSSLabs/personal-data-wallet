@@ -794,7 +794,12 @@ pub async fn reserve_storage_quota(
     {
         Ok(admission) => admission,
         Err(e) => {
-            crate::alerts::maybe_alert_postgres_storage_exhausted(state, &e.to_string()).await;
+            crate::alerts::maybe_alert_postgres_storage_exhausted(
+                &state.alerts,
+                &state.config.sui_network,
+                &e.to_string(),
+            )
+            .await;
             return Err(e);
         }
     };
