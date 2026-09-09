@@ -10,6 +10,7 @@
 ### Fixed
 
 - HTTP 503 with `x-auth-error: AUTH_UPSTREAM_UNAVAILABLE` is reported as a retryable credential-verification outage, not a sign-in failure. Other 503s keep the generic sanitized body. Empty-body 401s still point at `memwal_login`.
+- `waitForRememberJob` throws `RememberJobTimeoutError` (`status` 504, `jobId`, `timeoutMs`) when polling misses the deadline. `waitForRememberJobs` still returns `status: "timeout"` for that case.
 
 ## 0.1.5
 
