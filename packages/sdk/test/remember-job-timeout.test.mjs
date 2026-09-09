@@ -13,8 +13,7 @@ test.afterEach(() => {
 
 function pendingRememberFetch() {
     return async (url, init = {}) => {
-        const parsed = new URL(url);
-        const path = parsed.pathname;
+        const path = new URL(url).pathname;
         if (path === "/version") {
             return Response.json({
                 apiVersion: "1.0.0",
@@ -59,7 +58,10 @@ test("waitForRememberJob throws RememberJobTimeoutError; waitForRememberJobs ret
             assert.equal(err.status, 504);
             assert.equal(err.jobId, "slow-job");
             assert.equal(err.timeoutMs, TIMEOUT_MS);
-            assert.match(err.message, /timed out after 1ms \(job_id=slow-job\)/);
+            assert.equal(
+                err.message,
+                "remember job timed out after 1ms (job_id=slow-job)",
+            );
             return true;
         },
     );
@@ -69,5 +71,5 @@ test("waitForRememberJob throws RememberJobTimeoutError; waitForRememberJobs ret
     assert.equal(bulk.results[0].status, "timeout");
     assert.equal(bulk.results[0].id, "slow-job");
     assert.equal(bulk.results[0].blob_id, "");
-    assert.match(bulk.results[0].error ?? "", /polling timed out after 1ms/);
+    assert.equal(bulk.results[0].error, "polling timed out after 1ms");
 });

@@ -57,8 +57,6 @@ const memwal = MemWal.create({
 // Store a memory
 const job = await memwal.remember("User prefers dark mode and works in TypeScript.");
 await memwal.waitForRememberJob(job.job_id);
-// Poll timeout throws RememberJobTimeoutError (status 504).
-// waitForRememberJobs returns status: "timeout" instead.
 
 // Recall relevant memories
 const result = await memwal.recall({ query: "What do we know about this user?", limit: 5 });

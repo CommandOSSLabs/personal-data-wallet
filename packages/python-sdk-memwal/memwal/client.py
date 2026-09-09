@@ -423,7 +423,7 @@ class MemWal:
         - Backoff is jittered exponential (1.5x cap 10s, ±25%) to avoid
           thundering-herd at scale.
         - Default ``timeout_ms`` is 60s. Missing the deadline raises
-          :class:`MemWalRememberJobTimeout` (HTTP 504).
+          :class:`MemWalRememberJobTimeout` (``status`` 504).
           ``wait_for_remember_jobs`` returns ``status="timeout"`` for the
           same condition instead of raising.
         """

@@ -313,10 +313,11 @@ export class MemWal {
     /**
      * Poll an accepted remember job until it reaches `done`.
      *
-     * Default `timeoutMs` is 60_000. If the job is still non-terminal at the
-     * deadline, this throws {@link RememberJobTimeoutError} (`status` 504).
-     * `waitForRememberJobs` does not throw for the same condition: leftover
-     * items resolve with `status: "timeout"`.
+     * Default `timeoutMs` is 60_000. Failed or missing jobs throw. If the job
+     * is still non-terminal at the deadline, this throws
+     * {@link RememberJobTimeoutError} (`status` 504). `waitForRememberJobs`
+     * does not throw for that condition: leftover items resolve with
+     * `status: "timeout"`.
      */
     async waitForRememberJob(
         jobId: string,

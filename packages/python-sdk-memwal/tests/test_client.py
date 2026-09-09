@@ -648,6 +648,7 @@ class TestErrorHandling:
         assert exc.value.status == 504
         assert exc.value.job_id == "slow-job"
         assert exc.value.timeout_ms == 1
+        assert str(exc.value) == "remember job timed out after 1ms (job_id=slow-job)"
 
         bulk = await memwal_client.wait_for_remember_jobs(
             ["slow-job"],
