@@ -35,6 +35,8 @@ import {
     statSync,
     rmSync,
     realpathSync,
+    renameSync,
+    existsSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -177,4 +179,141 @@ test("saveCreds leaves no temporary file behind", async (t) => {
 
     const stray = readdirSync(join(home, ".memwal")).filter((name) => name.endsWith(".tmp"));
     assert.deepEqual(stray, [], "a completed save should not leave a temporary file in the directory");
+});
+
+/**
+ * The Windows locked-destination fallback.
+ *
+ * CI has no Windows runner, so these drive `replaceWithTemp` directly with an
+ * injected platform and a `rename` that fails the way `MoveFileEx` does when
+ * another handle holds the destination. The fallback returns SUCCESSFULLY, so
+ * nothing upstream cleans up after it — a leaked temp here is a second
+ * plaintext copy of the delegate key, which is the exact class of bug this
+ * file exists to prevent.
+ */
+const lockedRename = (code) => () => {
+    const err = new Error(`${code}: locked`);
+    err.code = code;
+    throw err;
+};
+
+/** A temp file already written at 0600, as `writeSecretFile` leaves it. */
+function stageTemp(t, contents = "SECRET_KEY_MATERIAL") {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "memwal-replace-")));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const tmp = join(dir, ".credentials.json.123.abc.tmp");
+    const dest = join(dir, "credentials.json");
+    writeFileSync(tmp, contents, { mode: 0o600 });
+    return { dir, tmp, dest, contents };
+}
+
+for (const code of ["EPERM", "EACCES", "EBUSY"]) {
+    test(`a destination locked with ${code} still lands, leaving no temp behind`, async (t) => {
+        const { auth } = await sandbox(t);
+        const { dir, tmp, dest, contents } = stageTemp(t);
+
+        auth.replaceWithTemp(tmp, dest, contents, {
+            platform: "win32",
+            rename: lockedRename(code),
+            sleep: () => {},
+        });
+
+        assert.equal(readFileSync(dest, "utf8"), contents, "the save must still land");
+        assert.equal(
+            existsSync(tmp),
+            false,
+            "the temp still holds the plaintext key — it must not survive the fallback",
+        );
+        assert.deepEqual(
+            readdirSync(dir).filter((n) => n.endsWith(".tmp")),
+            [],
+            "no temporary file may remain in the credentials directory",
+        );
+    });
+}
+
+test("repeated locked saves do not accumulate copies of the key", async (t) => {
+    // The regression the fallback introduced: the old in-place writeFileSync
+    // never created a sibling file, so nothing used to pile up here.
+    const { auth } = await sandbox(t);
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "memwal-replace-many-")));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const dest = join(dir, "credentials.json");
+
+    for (let i = 0; i < 3; i++) {
+        const tmp = join(dir, `.credentials.json.123.run${i}.tmp`);
+        writeFileSync(tmp, `SECRET_${i}`, { mode: 0o600 });
+        auth.replaceWithTemp(tmp, dest, `SECRET_${i}`, {
+            platform: "win32",
+            rename: lockedRename("EPERM"),
+            sleep: () => {},
+        });
+    }
+
+    assert.equal(readFileSync(dest, "utf8"), "SECRET_2", "the last save wins");
+    assert.deepEqual(
+        readdirSync(dir).filter((n) => n.endsWith(".tmp")),
+        [],
+        "three locked saves must not leave three copies of the delegate key",
+    );
+});
+
+test("a lock that clears before the attempts run out renames instead of falling back", async (t) => {
+    const { auth } = await sandbox(t);
+    const { tmp, dest, contents } = stageTemp(t);
+
+    let calls = 0;
+    auth.replaceWithTemp(tmp, dest, contents, {
+        platform: "win32",
+        sleep: () => {},
+        rename: (from, to) => {
+            calls++;
+            if (calls < 3) lockedRename("EPERM")();
+            renameSync(from, to);
+        },
+    });
+
+    assert.equal(calls, 3, "should have retried rather than given up on the first refusal");
+    assert.equal(readFileSync(dest, "utf8"), contents);
+    assert.equal(existsSync(tmp), false, "the rename consumed the temp");
+});
+
+test("a non-lock rename error is not swallowed by the Windows path", async (t) => {
+    // Only lock codes get the retry-and-fall-back treatment. Anything else is
+    // a real failure and must reach `writeSecretFile`, which removes the temp.
+    const { auth } = await sandbox(t);
+    const { tmp, dest, contents } = stageTemp(t);
+
+    assert.throws(
+        () =>
+            auth.replaceWithTemp(tmp, dest, contents, {
+                platform: "win32",
+                rename: lockedRename("ENOSPC"),
+                sleep: () => {},
+            }),
+        /ENOSPC/,
+    );
+    assert.equal(existsSync(dest), false, "nothing should have been written");
+});
+
+test("POSIX does not retry or fall back", async (t) => {
+    // There the mode IS the protection, and rename(2) replaces a destination
+    // regardless of who holds it open, so a refusal is a real error.
+    const { auth } = await sandbox(t);
+    const { tmp, dest, contents } = stageTemp(t);
+
+    let calls = 0;
+    assert.throws(
+        () =>
+            auth.replaceWithTemp(tmp, dest, contents, {
+                platform: "linux",
+                rename: () => {
+                    calls++;
+                    lockedRename("EPERM")();
+                },
+            }),
+        /EPERM/,
+    );
+    assert.equal(calls, 1, "POSIX must not retry");
+    assert.equal(existsSync(dest), false, "and must not write in place");
 });

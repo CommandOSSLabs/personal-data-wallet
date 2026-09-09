@@ -216,26 +216,56 @@ function sleepSync(ms: number): void {
  * doing the work there; NTFS ACLs are, and they are inherited from the
  * directory either way. On POSIX, where the mode IS the protection, there is no
  * fallback and no retry.
+ *
+ * `deps` is a seam for tests. CI has no Windows runner, and the fallback is the
+ * one branch here that can leave a second plaintext copy of the delegate key on
+ * disk, so it must be exercisable off Windows.
  */
-function replaceWithTemp(tmp: string, path: string, contents: string): void {
-    if (process.platform !== "win32") {
-        renameSync(tmp, path);
+export function replaceWithTemp(
+    tmp: string,
+    path: string,
+    contents: string,
+    deps: {
+        platform?: string;
+        rename?: (from: string, to: string) => void;
+        sleep?: (ms: number) => void;
+    } = {},
+): void {
+    const platform = deps.platform ?? process.platform;
+    const rename = deps.rename ?? renameSync;
+    const sleep = deps.sleep ?? sleepSync;
+
+    if (platform !== "win32") {
+        rename(tmp, path);
         return;
     }
     for (let attempt = 1; ; attempt++) {
         try {
-            renameSync(tmp, path);
+            rename(tmp, path);
             return;
         } catch (err) {
             const code = (err as NodeJS.ErrnoException).code ?? "";
             if (!WIN32_LOCKED_CODES.has(code)) throw err;
             if (attempt < WIN32_RENAME_ATTEMPTS) {
-                sleepSync(WIN32_RENAME_BACKOFF_MS * attempt);
+                sleep(WIN32_RENAME_BACKOFF_MS * attempt);
                 continue;
             }
-            // Still locked. Write through the existing handle's inode instead
-            // of failing the sign-in. `writeSecretFile`'s catch removes `tmp`.
+            // Still locked. Write through the existing handle's inode rather
+            // than failing the sign-in.
             writeFileSync(path, contents, { encoding: "utf8", mode: 0o600 });
+            // This returns SUCCESSFULLY, so `writeSecretFile`'s catch never
+            // runs and nothing else will remove `tmp` — which still holds the
+            // plaintext delegate key. Every locked save would otherwise leave
+            // another copy of it beside the credentials file, which is the
+            // opposite of what this whole helper is for.
+            //
+            // Best-effort: a temp that cannot be unlinked must not fail a save
+            // that has already landed.
+            try {
+                unlinkSync(tmp);
+            } catch {
+                /* nothing more to do; the destination write already succeeded */
+            }
             return;
         }
     }
