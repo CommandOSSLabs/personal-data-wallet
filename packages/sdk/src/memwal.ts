@@ -363,9 +363,13 @@ export class MemWal {
             }
 
             if (!("status" in status) || status.status === "not_found") {
+                // Job cleanup can retire a row an earlier poll already saw
+                // `uploaded`. Carry that observation out, same as 502/504.
                 throw Object.assign(new Error(`remember job not found: ${jobId}`), {
                     status: 404,
                     jobId,
+                    lastStatus,
+                    lastBlobId,
                 });
             }
 
@@ -376,12 +380,9 @@ export class MemWal {
 
             if (status.status === "done") {
                 if (!status.blob_id) {
-                    // The server sets blob_id and status='done' in the same
-                    // UPDATE, so this cannot happen against a healthy relayer.
-                    // Surface it rather than resolving with blob_id: "" — a
-                    // caller that stores the empty string has silently lost the
-                    // memory. lastBlobId lets a caller recover deliberately if
-                    // an earlier "uploaded" poll did carry the blob id.
+                    // Reject `done` without a blob id rather than resolving
+                    // with blob_id: "". `lastBlobId` carries anything an
+                    // earlier poll saw, so a caller can still recover.
                     throw Object.assign(
                         new Error(
                             `remember job reported done without a blob_id (job_id=${jobId})`,
@@ -402,7 +403,7 @@ export class MemWal {
                     new Error(
                         `remember job failed: ${redactInternalUrls(status.error ?? "unknown error")}`,
                     ),
-                    { status: 500, jobId },
+                    { status: 500, jobId, lastStatus, lastBlobId },
                 );
             }
         }
@@ -537,10 +538,9 @@ export class MemWal {
             namespace: namespaces[idx] ?? this.namespace,
             error: `polling timed out after ${timeoutMs}ms`,
         }));
-        // Track pending work per *occurrence*, not per id. The same job id may
-        // legitimately appear twice in `jobIds`, and resolving it by
-        // `jobIds.indexOf(jobId)` always wrote to the first slot — leaving the
-        // duplicate stuck on its pre-seeded timeout entry.
+        // Track pending work per *occurrence*, not per id: the same job id may
+        // legitimately appear twice in `jobIds`, and each slot needs its own
+        // result.
         let pendingSlots = jobIds.map((jobId, idx) => ({ jobId, idx }));
         let attempt = 0;
 
@@ -593,8 +593,8 @@ export class MemWal {
                     // returns per-item results instead of throwing.
                     if (!status.blob_id) {
                         results[slot.idx] = {
+                            ...results[slot.idx],
                             id: slot.jobId,
-                            blob_id: "",
                             status: "failed",
                             namespace,
                             error: "job reported done without a blob_id",
@@ -610,9 +610,12 @@ export class MemWal {
                     continue;
                 }
                 if (status.status === "failed" || status.status === "not_found") {
+                    // Spread first: a blob id an earlier `uploaded` poll folded
+                    // in is the caller's only handle on a write that may have
+                    // landed. Do not reset it to "".
                     results[slot.idx] = {
+                        ...results[slot.idx],
                         id: slot.jobId,
-                        blob_id: "",
                         status: "failed",
                         namespace,
                         error:
@@ -637,9 +640,9 @@ export class MemWal {
         }
 
         const succeeded = results.filter((r) => r.status === "done").length;
-        // A timeout is an unknown outcome, not a known failure — the job may
-        // well still complete server-side. Counting it as `failed` (which
-        // `results.length - succeeded` did) told callers the write was lost.
+        // A timeout is an unknown outcome, not a known failure: the job may
+        // still complete server-side. Callers who need "did every write land"
+        // must check `failed + timedOut`, not `failed`.
         const failed = results.filter((r) => r.status === "failed").length;
         const timedOut = results.filter((r) => r.status === "timeout").length;
 
