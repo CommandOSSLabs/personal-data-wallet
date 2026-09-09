@@ -175,7 +175,7 @@ These are not all enforced at boot, but most real deployments need them.
 - `MEMWAL_PACKAGE_ID` and `MEMWAL_REGISTRY_ID` are server env vars. Do not replace them with `VITE_*` app env vars.
 - For network-specific `MEMWAL_PACKAGE_ID` and `MEMWAL_REGISTRY_ID` values, see [Contract Overview](/contract/overview).
 - `MEMWAL_RELAYER_URL` is only needed when the sidecar should call a different relayer URL than the Rust server's local port. The Rust server sets it automatically to `http://127.0.0.1:$PORT` for the managed sidecar when it starts.
-- Set `MEMWAL_RELAYER_URL` to the deployment's public origin if you want `memwal_health` to name the network it answered on. The Rust server forwards an operator-supplied value to the sidecar as `MEMWAL_PUBLIC_RELAYER_URL`, and only that value is reported; the loopback default is not, because an address that names no network would make a client bound to the wrong relayer read as correctly configured. Hosted OAuth deployments already set this — it is the issuer. Clients run through the `memwal-mcp` stdio package always see the relayer that package dialled, whether or not this is set.
+- Set `MEMWAL_RELAYER_URL` to the deployment's public origin if you want `memwal_health` to name the network it answered on. The Rust server forwards an operator-supplied value to the sidecar as `MEMWAL_PUBLIC_RELAYER_URL`, and only that value is reported; the loopback default is not, because an address that names no network would make a client bound to the wrong relayer read as correctly configured. Hosted OAuth deployments already set this, because it is the issuer. Clients run through the `memwal-mcp` stdio package always see the relayer that package dialled, whether or not this is set.
 
 ## Frontend apps
 
