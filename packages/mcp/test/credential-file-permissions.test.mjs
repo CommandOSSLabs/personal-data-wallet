@@ -64,6 +64,16 @@ function modeOf(path) {
     return statSync(path).mode & 0o777;
 }
 
+// Windows does not enforce POSIX mode bits. `statSync().mode` there is
+// synthesized from the read-only attribute, so a `0o600` assertion tests
+// nothing, and `writeSecretFile` falls back to an in-place write when the
+// destination is locked. NTFS ACLs carry the protection instead, inherited
+// from the containing directory. Tests whose premise IS the mode bit are
+// skipped rather than weakened into passing everywhere.
+const POSIX_ONLY = {
+    skip: process.platform === "win32" ? "POSIX mode bits are not enforced on Windows" : false,
+};
+
 /**
  * Fresh HOME with the module re-imported so it observes it. The working
  * directory is moved to an empty sandbox too, so no project-local
@@ -112,7 +122,7 @@ function readThroughOpenFd(fd) {
     return buffer.subarray(0, bytes).toString("utf8");
 }
 
-test("saveCreds never writes the new secret through a pre-existing permissive file", async (t) => {
+test("saveCreds never writes the new secret through a pre-existing permissive file", POSIX_ONLY, async (t) => {
     const { auth, path } = await sandbox(t, { existingFileMode: 0o644 });
 
     // The attacker's handle, opened while the file is still world-readable and
@@ -138,7 +148,7 @@ test("saveCreds never writes the new secret through a pre-existing permissive fi
     assert.equal(modeOf(path), 0o600, "the file in place after the save must be 0600");
 });
 
-test("saveCreds creates a new credentials file at 0600", async (t) => {
+test("saveCreds creates a new credentials file at 0600", POSIX_ONLY, async (t) => {
     const { auth, path } = await sandbox(t);
 
     auth.saveCreds(makeCreds(ACCOUNT, NEW_KEY));
@@ -148,13 +158,15 @@ test("saveCreds creates a new credentials file at 0600", async (t) => {
 });
 
 test("the backup of a displaced account is written at 0600", async (t) => {
-    const { auth, home } = await sandbox(t, { existingFileMode: 0o600 });
+    const { auth } = await sandbox(t, { existingFileMode: 0o600 });
 
     const saved = auth.saveCreds(makeCreds(OTHER_ACCOUNT, NEW_KEY));
 
     assert.equal(saved.replacedAccountId, ACCOUNT, "the outgoing account should be reported");
     assert.ok(saved.backedUpTo, "a different incoming account should be backed up");
-    assert.equal(modeOf(saved.backedUpTo), 0o600, "the backup holds the same plaintext key");
+    if (process.platform !== "win32") {
+        assert.equal(modeOf(saved.backedUpTo), 0o600, "the backup holds the same plaintext key");
+    }
     assert.equal(JSON.parse(readFileSync(saved.backedUpTo, "utf8")).delegatePrivateKey, OLD_KEY);
 });
 

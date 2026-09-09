@@ -175,7 +175,7 @@ function writeSecretFile(path: string, contents: string): void {
     const tmp = join(dir, `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
     try {
         writeFileSync(tmp, contents, { encoding: "utf8", mode: 0o600, flag: "wx" });
-        renameSync(tmp, path);
+        replaceWithTemp(tmp, path, contents);
     } catch (err) {
         // Never leave a temp file holding the secret behind on a failed write.
         try {
@@ -184,6 +184,60 @@ function writeSecretFile(path: string, contents: string): void {
             /* already gone, or never created */
         }
         throw err;
+    }
+}
+
+/** Windows errors for "someone else holds the destination open". */
+const WIN32_LOCKED_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+const WIN32_RENAME_ATTEMPTS = 5;
+const WIN32_RENAME_BACKOFF_MS = 20;
+
+/** Block the calling thread. `saveCreds` is synchronous all the way up. */
+function sleepSync(ms: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Move `tmp` onto `path`, atomically where the platform can.
+ *
+ * POSIX `rename(2)` replaces a destination regardless of who has it open, so
+ * there is nothing to handle there and any error is a real one. Windows
+ * implements the same call as `MoveFileEx(MOVEFILE_REPLACE_EXISTING)`, which
+ * refuses with EPERM / EACCES / EBUSY while another handle holds the
+ * destination — an antivirus scan or a backup agent touching
+ * `credentials.json` is enough. Before this file wrote through a temp inode,
+ * `writeFileSync` to the final path survived that; `login.ts` turns a thrown
+ * `saveCreds` into an HTTP 500, so a lock that lasts a few milliseconds would
+ * otherwise become a failed sign-in.
+ *
+ * So on Windows: retry briefly, then write in place rather than fail. That
+ * fallback gives up the atomic swap, but not the property this function exists
+ * for — Windows does not enforce POSIX mode bits at all, so `0600` was never
+ * doing the work there; NTFS ACLs are, and they are inherited from the
+ * directory either way. On POSIX, where the mode IS the protection, there is no
+ * fallback and no retry.
+ */
+function replaceWithTemp(tmp: string, path: string, contents: string): void {
+    if (process.platform !== "win32") {
+        renameSync(tmp, path);
+        return;
+    }
+    for (let attempt = 1; ; attempt++) {
+        try {
+            renameSync(tmp, path);
+            return;
+        } catch (err) {
+            const code = (err as NodeJS.ErrnoException).code ?? "";
+            if (!WIN32_LOCKED_CODES.has(code)) throw err;
+            if (attempt < WIN32_RENAME_ATTEMPTS) {
+                sleepSync(WIN32_RENAME_BACKOFF_MS * attempt);
+                continue;
+            }
+            // Still locked. Write through the existing handle's inode instead
+            // of failing the sign-in. `writeSecretFile`'s catch removes `tmp`.
+            writeFileSync(path, contents, { encoding: "utf8", mode: 0o600 });
+            return;
+        }
     }
 }
 
