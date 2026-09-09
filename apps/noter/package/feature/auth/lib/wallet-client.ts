@@ -179,18 +179,3 @@ export async function disconnectWallet(type: WalletType): Promise<void> {
     console.error(`[Wallet Disconnect] Error:`, error);
   }
 }
-
-/**
- * Generate authentication message
- */
-export function generateAuthMessage(): string {
-  const timestamp = Date.now();
-  const nonce = Math.random().toString(36).substring(7);
-
-  return `Sign this message to authenticate with Noter
-
-Timestamp: ${timestamp}
-Nonce: ${nonce}
-
-This will not trigger any blockchain transaction or cost any gas fees.`;
-}
