@@ -59,7 +59,8 @@ node scripts/write-migration-completion-artifact.mjs \
 
 Flags override env of the same name (`PACKAGE_ID`, `MANIFEST_SHA256`,
 `IMPORTED`, `SKIPPED`, `VERIFIED`, `APPROVER`, `OUT`). Missing required fields
-exit 1.
+exit 1, and so does an unrecognized flag: a misspelled `--approver` would
+otherwise fall back to `APPROVER` and record an approver nobody typed.
 
 The writer rejects a `packageId` that `scripts/build-finalize-tx.ts` would
 reject, and records it in the same normalized form, so the artifact and the

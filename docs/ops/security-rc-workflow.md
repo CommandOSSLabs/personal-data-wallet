@@ -34,6 +34,5 @@ migration completion artifact (`docs/ops/migration-completion-artifact.md`).
 
 ## TDD bar
 
-The PR body lists test proof, method, and reproduction (existing Commandoss PR
-template). Prefer unit tests plus connected-surface integration / e2e over
-coverage slogans.
+The PR body lists test proof, method, and reproduction. Prefer unit tests plus
+connected-surface integration / e2e over coverage slogans.

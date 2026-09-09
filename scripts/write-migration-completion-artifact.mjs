@@ -12,7 +12,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,14 +41,25 @@ Flags (override env):
 `;
 
 const REQUIRED = [
-    ["package-id", "PACKAGE_ID", "packageId"],
-    ["manifest-sha256", "MANIFEST_SHA256", "manifestSha256"],
-    ["imported", "IMPORTED", "imported"],
-    ["skipped", "SKIPPED", "skipped"],
-    ["verified", "VERIFIED", "verified"],
-    ["approver", "APPROVER", "approver"],
-    ["out", "OUT", "out"],
+    ["package-id", "PACKAGE_ID"],
+    ["manifest-sha256", "MANIFEST_SHA256"],
+    ["imported", "IMPORTED"],
+    ["skipped", "SKIPPED"],
+    ["verified", "VERIFIED"],
+    ["approver", "APPROVER"],
+    ["out", "OUT"],
 ];
+
+// Every flag the parser accepts. An unrecognized --flag is a typo, and a typo
+// on a value flag would otherwise fall through to the env var of the same name
+// and record something the operator never typed.
+const KNOWN_FLAGS = new Set([
+    ...REQUIRED.map(([flag]) => flag),
+    "force",
+    "help",
+    "h",
+    "self-test",
+]);
 
 function main(argv = process.argv.slice(2), env = process.env) {
     const flags = parseArgv(argv);
@@ -81,6 +92,12 @@ function main(argv = process.argv.slice(2), env = process.env) {
     }
 
     const outPath = path.resolve(raw.out);
+    if (statSync(outPath, { throwIfNoEntry: false })?.isDirectory()) {
+        // "wx" reports EEXIST for a directory, so without this the operator is
+        // told to pass --force, which then fails with EISDIR.
+        process.stderr.write(`--out is a directory, not a file: ${outPath}\n`);
+        return 1;
+    }
     mkdirSync(path.dirname(outPath), { recursive: true });
     try {
         // "wx" fails if the path exists: a completion artifact is an audit
@@ -121,10 +138,11 @@ function parseArgv(argv) {
         }
         const eq = arg.indexOf("=");
         if (eq !== -1) {
-            flags.set(arg.slice(2, eq), arg.slice(eq + 1));
+            const name = assertKnown(arg.slice(2, eq));
+            flags.set(name, arg.slice(eq + 1));
             continue;
         }
-        const name = arg.slice(2);
+        const name = assertKnown(arg.slice(2));
         const next = argv[i + 1];
         if (next === undefined || next.startsWith("--")) {
             flags.set(name, "");
@@ -134,6 +152,13 @@ function parseArgv(argv) {
         i += 1;
     }
     return flags;
+}
+
+function assertKnown(name) {
+    if (!KNOWN_FLAGS.has(name)) {
+        throw new Error(`unknown flag: --${name}`);
+    }
+    return name;
 }
 
 function valueOf(flags, env, flag, envName) {
@@ -322,6 +347,24 @@ function selfTest() {
         assert(
             JSON.parse(readFileSync(out, "utf8")).skipped === 2,
             "--force did not replace the artifact",
+        );
+
+        // A typo in a value flag must not fall through to the env var of the
+        // same name and record something the operator never typed.
+        const unknown = run(["--out", path.join(dir, "unknown.json"), "--aprover", "user:bob"]);
+        assert(unknown.status === 1, `unknown flag exit ${unknown.status}`);
+        assert(
+            unknown.stderr.includes("unknown flag: --aprover"),
+            `unknown flag stderr: ${unknown.stderr}`,
+        );
+
+        // A directory --out is caught before the overwrite check, which would
+        // otherwise tell the operator to pass --force.
+        const dirOut = run(["--out", dir]);
+        assert(dirOut.status === 1, `directory --out exit ${dirOut.status}`);
+        assert(
+            dirOut.stderr.includes("--out is a directory"),
+            `directory --out stderr: ${dirOut.stderr}`,
         );
 
         // packageId mirrors assertObjectId: reject non-ids and wrong lengths.
