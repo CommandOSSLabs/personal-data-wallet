@@ -675,9 +675,10 @@ function handleLocalLogout(): { text: string; isError: boolean } {
         // an interrupted re-login leaves `login-pending.json` behind, and the
         // next start's `recoverPendingLogin` signs the user straight back in.
         //
-        // NOT folded into `clearCreds()`: that also runs on 401 session
-        // teardown, where a newer stranded key is exactly what recovery still
-        // needs. Only a deliberate logout means "forget all of it".
+        // Kept out of `clearCreds()` so only a deliberate sign-out discards a
+        // key that may still be reclaimable. `clearCreds` is exported, and a
+        // 401 deliberately does NOT wipe credentials (see the relayer-401
+        // handling below), so the two are not the same decision.
         clearPendingLogin();
         log.info("memwal_logout.bridge.success", {
             removedPath: cleared.removedPath ?? null,

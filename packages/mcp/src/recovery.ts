@@ -274,8 +274,9 @@ export function formatStrandedLoginNotice(result: RecoveryResult): string | null
         );
     } else {
         lines.push(
-            `The relayer did not accept it. Run \`memwal_login\` to sign in again,`,
-            `then revoke the key above from the dashboard so it isn't left dangling.`,
+            `The relayer did not accept it. Run \`memwal_login\` to sign in again; the`,
+            `same key is reused, so a registration you already paid for is not thrown`,
+            `away. Revoke it from the dashboard only if you don't recognise it.`,
         );
     }
     return lines.join("\n");

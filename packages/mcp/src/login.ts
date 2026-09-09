@@ -326,7 +326,7 @@ export async function loginFlow(opts: LoginOptions = {}): Promise<MemWalCredenti
         const timer = setTimeout(() => {
             if (!creds) {
                 error = new Error(
-                    `Login timed out after ${cfg.timeoutMs}ms. If you already approved the wallet transaction, a delegate key may exist on-chain without local credentials. Remove unused keys from the dashboard, then run login again.`,
+                    `Login timed out after ${cfg.timeoutMs}ms. If you already approved the wallet transaction, that delegate key is on disk and still usable: run login again and it is reused, or restart and it is reclaimed automatically. Only remove it from the dashboard if you mean to abandon it.`,
                 );
                 server.close();
                 resolve();

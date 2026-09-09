@@ -261,11 +261,11 @@ test("logging out discards the pending record, not just the credentials", async 
     );
 });
 
-test("a 401 session teardown keeps the pending record", async (t) => {
-    // `clearCreds` also runs when the relayer rejects the session key. A newer
-    // stranded key is exactly what recovery still needs there, which is why
-    // clearing the pending record belongs to the logout paths and not to
-    // `clearCreds` itself.
+test("clearing credentials on its own keeps the pending record", async (t) => {
+    // Discarding a key that may still be reclaimable is a decision only an
+    // explicit sign-out gets to make, which is why the pending clear lives in
+    // the logout paths rather than inside `clearCreds` (which is exported, and
+    // which a relayer 401 deliberately does not call).
     const home = freshHome();
     t.after(() => rmSync(home, { recursive: true, force: true }));
 
