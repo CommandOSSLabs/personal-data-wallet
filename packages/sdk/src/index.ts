@@ -24,6 +24,10 @@ export {
 
 // Delegate key utilities (no @mysten/sui dependency)
 export { delegateKeyToSuiAddress, delegateKeyToPublicKey } from "./utils.js";
+// Unknown-outcome recovery: tell "the write may still land" apart from
+// "the write failed" before retrying anything.
+export { isRememberTimeoutError } from "./utils.js";
+export type { RememberTimeoutError } from "./utils.js";
 export {
     estimateTokens,
     truncateToTokenBudget,

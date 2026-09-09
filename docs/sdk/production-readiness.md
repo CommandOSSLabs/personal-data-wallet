@@ -37,26 +37,64 @@ Several of these are patterns you implement around the client today. Where a cap
 
 ## Make writes idempotent
 
-The relayer does not deduplicate writes. A `remember` call that retries after a network blip, or fired twice by an at-least-once job queue, stores the same text twice and pollutes later recall. Until content-based deduplication is available natively, gate writes on a key your agent controls so a repeat is a no-op.
+Every write carries an idempotency key. Pass your own via `idempotencyKey` and a
+repeat submission returns the original job instead of minting — and charging for
+— a second blob. Omit it and the SDK generates one per call, which still covers
+its own internal retries but gives you nothing to replay with later.
 
 ```ts
 import { createHash } from "crypto";
 
-const written = new Set<string>(); // back this with Redis or a DB in production
+function writeKey(text: string, namespace = "default") {
+  return createHash("sha256").update(`${namespace}:${text}`).digest("hex");
+}
 
-async function rememberOnce(memwal: MemWal, text: string, namespace?: string) {
-  const id = createHash("sha256").update(`${namespace ?? "default"}:${text}`).digest("hex");
-  if (written.has(id)) return; // already stored this exact memory
+const job = await memwal.remember(text, namespace, { idempotencyKey: writeKey(text, namespace) });
+// job.idempotency_key is the handle to persist alongside job.job_id.
+```
 
-  const job = await memwal.remember(text, namespace);
-  await memwal.waitForRememberJob(job.job_id);
-  written.add(id);
+Reusing a key for *different* content is rejected with a `409`, so a key derived
+from the content itself is the safest choice.
+
+<Note>
+Persist the key outside the process (Redis, a database row, a Sui object), not in
+memory. An in-memory map resets on restart, which is exactly when a retry storm
+is most likely.
+</Note>
+
+## Recover an unknown outcome
+
+When `rememberAndWait()` exhausts its poll budget, the write is **unknown, not
+failed**. The relayer accepted the job before the budget expired and usually
+finishes it seconds later. Retrying that call blindly is what stores the memory
+twice.
+
+`isRememberTimeoutError()` separates the two cases, and the error carries both
+handles you need to settle the write:
+
+```ts
+import { isRememberTimeoutError } from "@mysten-incubation/memwal";
+
+try {
+  await memwal.rememberAndWait(text, namespace);
+} catch (err) {
+  if (!isRememberTimeoutError(err)) throw err; // a real failure
+
+  // Option A — settle the job that already exists. No second write.
+  const settled = await memwal.waitForRememberJob(err.jobId, { timeoutMs: 120_000 });
+  console.log(settled.blob_id);
+
+  // Option B — hand err.jobId and err.idempotencyKey to a durable queue and
+  // resume later, even from another process:
+  //   await memwal.rememberAndWait(text, err.namespace, {
+  //     idempotencyKey: err.idempotencyKey,
+  //   });
 }
 ```
 
-<Note>
-Persist the idempotency set outside the process (Redis, a database row, a Sui object), not in memory. An in-memory set resets on restart, which is exactly when a retry storm is most likely.
-</Note>
+Prefer option A while the process is still up: it is a read. Option B is for a
+worker that picks the write back up after a restart — the replay collapses onto
+the original job, so it settles the same blob rather than paying for a new one.
 
 ## Retry with backoff, but only retryable failures
 

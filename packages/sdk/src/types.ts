@@ -31,6 +31,12 @@ export interface MemWalConfig {
 export interface RememberAcceptedResult {
     job_id: string;
     status: string;
+    /**
+     * The idempotency key this write was submitted under. Replaying the same
+     * write with it returns this job instead of minting a second blob, so it is
+     * the handle to persist alongside `job_id` (WALM-595).
+     */
+    idempotency_key?: string;
 }
 
 /** Status returned for an async remember job */

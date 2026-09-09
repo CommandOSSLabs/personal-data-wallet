@@ -1,5 +1,11 @@
 # memwal
 
+## Unreleased
+
+### Added
+
+- `MemWalRememberJobTimeout` carries `idempotency_key` and `namespace` alongside `job_id`. A poll timeout is an unknown outcome — the relayer accepted the write and it may still complete — so a caller can settle it with `wait_for_remember_job(err.job_id)`, or replay `remember_and_wait(..., idempotency_key=err.idempotency_key)` from another process and get the original job back instead of a second paid blob. Previously the generated key never left the client instance (WALM-595, GH #658).
+
 ## 0.1.10
 
 ### Added

@@ -1,5 +1,13 @@
 # @mysten-incubation/memwal
 
+## Unreleased
+
+### Added
+
+- `isRememberTimeoutError(err)` and the `RememberTimeoutError` type. A `rememberAndWait()` / `waitForRememberJob()` poll timeout is an unknown outcome — the relayer accepted the job and it may still complete — and is now distinguishable from a genuine failure without duck-typing (WALM-595, GH #658).
+- The timeout carries `jobId`, `idempotencyKey` and `namespace`. Poll `waitForRememberJob(err.jobId)` to settle the write without submitting another, or replay `rememberAndWait(text, err.namespace, { idempotencyKey: err.idempotencyKey })` — including from a different process — and the relayer returns the original job instead of minting a second blob. Previously the generated key never left the SDK instance, so a restarted service had no way to avoid the duplicate.
+- `RememberAcceptedResult.idempotency_key` echoes the key a write was submitted under, so callers of `remember()` / `rememberAsync()` can persist it next to `job_id`.
+
 ## 0.1.7
 
 ### Added

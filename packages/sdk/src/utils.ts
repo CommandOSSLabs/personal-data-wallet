@@ -438,3 +438,74 @@ export async function delegateKeyToPublicKey(privateKeyHex: string): Promise<Uin
     const ed = await import("@noble/ed25519");
     return ed.getPublicKeyAsync(hexToBytes(normalizePrivateKey(privateKeyHex)));
 }
+
+// ============================================================
+// Unknown-outcome recovery for remember (WALM-595)
+// ============================================================
+
+/**
+ * `rememberAndWait()` / `waitForRememberJob()` gave up while the job was still
+ * running. The write is an UNKNOWN outcome, not a failure: the relayer already
+ * accepted it, and it usually completes seconds later (GH #658).
+ *
+ * Both handles needed to settle it are on the error, so a caller can recover
+ * without issuing — and paying for — a second write:
+ *
+ * - `jobId` → `waitForRememberJob(jobId)` polls the same job.
+ * - `idempotencyKey` → replaying `rememberAndWait(text, ns, { idempotencyKey })`
+ *   returns the original job instead of minting a second blob. This is the one
+ *   that survives a process restart, which the SDK's in-memory key map does not.
+ */
+export interface RememberTimeoutError extends Error {
+    name: "MemWalRememberTimeoutError";
+    /** Always 504, matching the pre-existing untyped shape. */
+    status: number;
+    /** The accepted job that was still running. Poll it to settle the write. */
+    jobId: string;
+    /** Budget that was exceeded, in milliseconds. */
+    timeoutMs: number;
+    /**
+     * The key this write was submitted under. Present whenever the SDK owns the
+     * submission (`rememberAndWait`); absent when polling a job id directly via
+     * `waitForRememberJob`, which never saw one.
+     */
+    idempotencyKey?: string;
+    /** Namespace the write targeted, for replaying it verbatim. */
+    namespace?: string;
+}
+
+/**
+ * True when a write's outcome is unknown rather than failed. Callers should
+ * branch on this before any retry: retrying a `RememberTimeoutError` without
+ * its `idempotencyKey` is what mints the duplicate blob.
+ */
+export function isRememberTimeoutError(err: unknown): err is RememberTimeoutError {
+    return (
+        err instanceof Error &&
+        err.name === "MemWalRememberTimeoutError" &&
+        typeof (err as RememberTimeoutError).jobId === "string"
+    );
+}
+
+export function rememberTimeoutError(
+    jobId: string,
+    timeoutMs: number,
+    context: { idempotencyKey?: string; namespace?: string } = {},
+): RememberTimeoutError {
+    const detail = [
+        `job_id=${jobId}`,
+        ...(context.idempotencyKey ? [`idempotency_key=${context.idempotencyKey}`] : []),
+    ].join(", ");
+    const err = new Error(
+        `remember job timed out after ${timeoutMs}ms (${detail}). The write may still ` +
+            `complete: poll waitForRememberJob("${jobId}") to settle it, or replay with the ` +
+            `same idempotencyKey. Do not retry without one — that mints a second blob.`,
+    ) as RememberTimeoutError;
+    err.name = "MemWalRememberTimeoutError";
+    err.status = 504;
+    err.jobId = jobId;
+    err.timeoutMs = timeoutMs;
+    if (context.idempotencyKey) err.idempotencyKey = context.idempotencyKey;
+    if (context.namespace) err.namespace = context.namespace;
+    return err;
+}
