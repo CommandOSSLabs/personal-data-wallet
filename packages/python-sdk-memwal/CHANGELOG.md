@@ -1,5 +1,11 @@
 # memwal
 
+## 0.1.10
+
+### Changed
+
+- Document that `wait_for_remember_job` raises `MemWalRememberJobTimeout` on poll timeout while `wait_for_remember_jobs` returns `status="timeout"`.
+
 ## 0.1.9
 
 ### Fixed

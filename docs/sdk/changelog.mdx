@@ -28,8 +28,16 @@ questions:
   - When was bulk remember added to the Walrus Memory SDK?
   - What security improvements have been made to the MemWal SDK?
 answer: >-
-  The latest TypeScript SDK release is 0.1.6. It adds optional `created_at` on `recall()` results, plus `sort` and `scoringWeights` on `RecallOptions`. HTTP 503 from the relayer is reported as a retryable upstream outage instead of a sign-in failure. `waitForRememberJob` throws typed `RememberJobTimeoutError` on poll timeout; `waitForRememberJobs` still returns `status: "timeout"`. 0.1.5 added `dropped_count` on recall results and `write_ready` on health, switched `rememberManual` to sending `encryptedData`, and hardened hex decoding and error redaction.
+  The latest TypeScript SDK release is 0.1.7. `waitForRememberJob` throws typed `RememberJobTimeoutError` on poll timeout; `waitForRememberJobs` still returns `status: "timeout"`. 0.1.6 added optional `created_at` on `recall()` results, plus `sort` and `scoringWeights` on `RecallOptions`, and reports HTTP 503 as a retryable upstream outage instead of a sign-in failure. 0.1.5 added `dropped_count` on recall results and `write_ready` on health, switched `rememberManual` to sending `encryptedData`, and hardened hex decoding and error redaction.
 ---
+
+## 0.1.7
+
+This release exports `RememberJobTimeoutError` from `waitForRememberJob` / `rememberAndWait` when polling misses the deadline. `waitForRememberJobs` still returns `status: "timeout"`.
+
+### Added
+
+- `waitForRememberJob` throws `RememberJobTimeoutError` (`status` 504, `jobId`, `timeoutMs`) when polling misses the deadline. `waitForRememberJobs` still returns `status: "timeout"` for that case.
 
 ## 0.1.6
 
@@ -43,7 +51,6 @@ This release adds write-time on recall results, lets callers sort by recency or 
 ### Fixed
 
 - HTTP 503 from the relayer is reported as a retryable upstream outage, not a sign-in failure. Empty-body 401s still point at `memwal_login`.
-- `waitForRememberJob` throws `RememberJobTimeoutError` (`status` 504, `jobId`, `timeoutMs`) when polling misses the deadline. `waitForRememberJobs` still returns `status: "timeout"` for that case.
 
 ## 0.1.5
 
