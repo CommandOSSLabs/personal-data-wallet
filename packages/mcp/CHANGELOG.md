@@ -10,6 +10,7 @@
 ### Fixed
 
 - Clarify `memwal_restore` `truncated=true` as known-retryable-incomplete: raising `limit` expands the sidecar cap only while `limit < 20`; `truncated=false` is not completeness (WALM-451 `sourceCapped`).
+- `memwal_restore` reports `failed` and retries the same page when `truncated` is a download/embed blip (`restored=0` and `skipped+failed < total`), instead of always telling the agent to raise `limit` (WALM-480).
 - When every decrypted `memwal_recall` hit misses `maxDistance`, keep the outside-cutoff wording and append any decrypt-drop count instead of replacing the message with a decrypt-failure report.
 - Resolve the credential directory on every access instead of freezing it at module load, and let `MEMWAL_CREDS_DIR` override it. The login test sandboxed the home directory with `HOME` alone, which `os.homedir()` ignores on Windows, so running the package's test suite there wrote fixture credentials over the developer's real `~/.memwal/credentials.json` and destroyed the delegate key stored in it. (#705)
 
