@@ -2,6 +2,10 @@
 
 ## 0.1.10
 
+### Added
+
+- `restore()` results include `failed` (default `0`) for permanent decrypt/UTF-8 failures instead of folding them into `skipped` or dropping them silently.
+
 ### Changed
 
 - Document that `wait_for_remember_job` raises `MemWalRememberJobTimeout` on poll timeout while `wait_for_remember_jobs` returns `status="timeout"`.
