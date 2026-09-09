@@ -122,18 +122,16 @@ fn cache_reverify_action(result: Result<String, OnchainVerifyError>) -> CacheRev
     }
 }
 
-/// WALM-606: what a Postgres `delegate_key_cache` hit resolves to, once the
-/// short-lived on-chain re-verify window is taken into account.
+/// What a Postgres `delegate_key_cache` hit resolves to, once the on-chain
+/// re-verify window is taken into account (WALM-606).
 ///
-/// Split out from `CacheReverifyAction` so the "authenticated without any
-/// RPC" case is a distinct variant from "verified on-chain just now". That
-/// separation is load-bearing: only `VerifiedOnchain` carries the instruction
-/// to open/refresh a window, which makes it structurally impossible for an
-/// `RpcError` (`UnavailableKeepCache`) to open one.
+/// "Authenticated without any RPC" is a separate variant from "verified
+/// on-chain just now" so that only `VerifiedOnchain` can open a window — an
+/// `RpcError` opening one would be a fail-open.
 #[derive(Debug)]
 enum CacheHitOutcome {
     /// Re-verify window still open — authenticate from the last good verify.
-    /// No `GetObject` was issued. This is the whole point of WALM-606.
+    /// No `GetObject` was issued.
     AuthenticatedFromWindow { owner: String },
     /// Window closed/absent, and the on-chain verify just succeeded. The
     /// caller must record it so the next request can skip its RPC.
@@ -489,16 +487,10 @@ async fn resolve_account(
     if let Ok(Some((cached_account_id, _cached_owner))) =
         state.db.get_cached_account(public_key_hex).await
     {
-        // WALM-606: this path used to re-verify on-chain on EVERY hit, so a
-        // fullnode 429 burst was amplified one-for-one into user-visible auth
-        // failures. Skip that `GetObject` when this exact (key, account) pair
-        // already passed an on-chain verify inside the re-verify window, and
-        // authenticate as the owner *that verify* returned — not as the owner
-        // in the (mutable, 24h) Postgres row.
-        //
-        // Outside the window the behaviour is unchanged: a transient RPC
-        // failure is still *not* a revoke, so keep the row but fail closed
-        // with 503 (WALM-429); definitive misses still evict.
+        // Skip the per-request `GetObject` when this exact (key, account)
+        // pair verified on-chain inside the re-verify window, authenticating
+        // as the owner *that verify* returned rather than the mutable
+        // Postgres row. Outside the window, behaviour is unchanged.
         let window_owner = crate::storage::sui::recent_verified_owner(
             &state.verified_delegate_cache,
             public_key_hex,

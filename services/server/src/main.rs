@@ -1404,14 +1404,15 @@ async fn main() {
     });
 
     // Spawn background task to bound the two in-memory delegate-key caches
-    // (see `storage/sui.rs`). Unlike the Postgres-backed eviction above,
-    // nothing else ever removes entries from these HashMaps: their TTLs only
-    // gate whether a hit is trusted, so without this sweep they grow for the
-    // lifetime of the process — one entry per distinct account_object_id ever
-    // looked up by `/agents`, and one per (delegate key, account) pair ever
-    // authenticated. Sweeping is a cheap in-memory `retain` (no I/O), so a
-    // 5-minute cadence against the 10-minute `*_MAX_AGE` constants keeps both
-    // maps bounded to recently-active entries with headroom to spare.
+    // (see `storage/sui.rs`). Their TTLs only gate whether a hit is trusted,
+    // never residency, so entries need sweeping out.
+    //
+    // `DelegateKeysCache` (`/agents`) is sweep-only: nothing else removes from
+    // it. `VerifiedDelegateCache` is also pruned by `forget_verified_delegate`
+    // on a definitive miss, but that does not run when a window merely expires,
+    // so the sweep still bounds keys that go idle. Sweeping is a cheap
+    // in-memory `retain` (no I/O), so a 5-minute cadence against the 10-minute
+    // `*_MAX_AGE` constants keeps both maps bounded with headroom.
     let delegate_cache_sweep_state = state.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));

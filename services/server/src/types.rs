@@ -164,16 +164,9 @@ pub(crate) fn configured_auth_clock_drift_secs() -> i64 {
 /// verifies on-chain for a given account, later signed requests from that same
 /// (key, account) pair skip their per-request Sui `GetObject` for this long.
 ///
-/// Before this window existed, `auth::resolve_account` issued one `GetObject`
-/// per signed request even on a Postgres `delegate_key_cache` hit, so a
-/// fullnode 429 burst turned straight into user-visible auth 503s (WALM-429).
-///
-/// 45s sits in the middle of the reviewed 30–60s band. The tradeoff is
-/// revocation visibility: a delegate key removed on-chain keeps working for at
-/// most one window before the next request re-verifies and evicts it. 45s
-/// keeps that worst case inside a minute — shorter than the 24h Postgres
-/// mapping cache it sits in front of by four orders of magnitude — while
-/// removing ~all steady-state per-request RPC for an active client.
+/// The tradeoff is revocation visibility: a key removed on-chain keeps working
+/// for at most one window. 45s sits mid-band and keeps that worst case inside
+/// a minute.
 pub const DEFAULT_AUTH_REVERIFY_INTERVAL_SECS: u64 = 45;
 
 /// Hard ceiling on the configurable re-verify window. This is the

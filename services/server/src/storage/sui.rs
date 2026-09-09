@@ -255,48 +255,23 @@ pub async fn list_delegate_keys_cached(
 // Verified delegate keys — per-request auth re-verify window (WALM-606)
 // ============================================================
 //
-// `auth::resolve_account` used to call `verify_delegate_key_onchain` — one
-// Sui `GetObject` — on EVERY signed request, including every hit on the
-// 24h Postgres `delegate_key_cache`. That DB cache only skips the
-// AccountRegistry *scan*; it never skipped the per-request RPC. So a
-// fullnode 429 burst was amplified one-for-one into user-visible auth
-// failures: WALM-429 / PR #811 made those honest 503s instead of
-// misleading 401s, but did not reduce the pressure that caused them.
+// Memoizes a *successful* `verify_delegate_key_onchain` so repeat requests
+// from the same delegate key authenticate without a per-request `GetObject`.
+// It is the only one of the three auth-path caches that may skip that RPC
+// (`delegate_key_cache` in Postgres skips the registry scan; `DelegateKeysCache`
+// above serves `/agents` and is not on the auth path).
 //
-// This cache memoizes a *successful* `verify_delegate_key_onchain` for a
-// short window, so repeat requests from the same delegate key authenticate
-// without touching the chain.
+// Invariants, all load-bearing:
 //
-// Three caches now sit on the auth path. They are deliberately distinct:
-//
-//   * `delegate_key_cache` (Postgres, 24h, `storage/db.rs`) — maps
-//     `public_key -> (account_id, owner)` so a hit skips the registry SCAN.
-//     Survives restarts. Says nothing about whether the key is *still*
-//     registered on-chain, which is why every hit used to be re-verified.
-//   * `DelegateKeysCache` (above, 30s, in-memory) — the full delegate-key
-//     LIST per account, for the page-load `GET /v1/owners/{owner}/agents`
-//     read. Not on the auth path at all.
-//   * `VerifiedDelegateCache` (this one, in-memory) — "this exact
-//     (public_key, account_id) pair passed an on-chain verify at time T".
-//     It is the only one of the three that may skip the per-request
-//     `GetObject`, and it is what bounds how stale an authorization can be.
-//
-// Security properties this cache must preserve, and how:
-//
-//   * Keyed on the (public_key, account_id) PAIR, not the public key alone,
-//     so a rewritten Postgres cache row pointing the same key at a
-//     different account cannot ride a window opened against the old one.
-//   * Stores the `owner` returned by the verify itself, so a live window
-//     authenticates as the identity that was actually verified rather than
-//     re-reading a mutable DB row.
-//   * Only `Ok(..)` from `verify_delegate_key_onchain` may insert. An
-//     `RpcError` never opens a window — otherwise an unverifiable key could
-//     authenticate purely because Sui was unreachable, which is the exact
-//     fail-open this middleware exists to prevent.
-//   * Bounded staleness: a revocation is observed at most
-//     `types::MAX_AUTH_REVERIFY_INTERVAL_SECS` after it lands on-chain,
-//     because outside the window every request re-verifies exactly as
-//     before this change.
+//   * Keyed on the (public_key, account_id) PAIR, so a rewritten Postgres row
+//     pointing the same key at another account cannot ride a window opened
+//     against the old one.
+//   * Stores the `owner` the verify itself returned, so a live window
+//     authenticates as the verified identity, not a mutable DB row.
+//   * Only `Ok(..)` may insert. An `RpcError` must never open a window, or an
+//     unverifiable key would authenticate because Sui was unreachable.
+//   * Staleness is bounded by `types::MAX_AUTH_REVERIFY_INTERVAL_SECS`:
+//     outside the window every request re-verifies.
 
 /// Staleness threshold for the periodic `VerifiedDelegateCache` sweep run
 /// from `main.rs`, mirroring `DELEGATE_KEYS_CACHE_MAX_AGE` above and for the
@@ -318,6 +293,51 @@ pub struct VerifiedDelegate {
     pub owner: String,
     /// When that verify succeeded. Only ever set from a successful verify.
     pub verified_at: std::time::Instant,
+}
+
+/// Borrowed view of a `(public_key_hex, account_object_id)` key.
+///
+/// `HashMap<(String, String), _>` cannot be probed with `(&str, &str)`, and
+/// this lookup runs on every signed request, so the map is keyed through this
+/// trait object instead of allocating two `String`s per hit. `(String, String)`
+/// and `(&str, &str)` hash identically — tuples hash element-wise, and `String`
+/// hashes as its `str` — so the borrowed probe finds the owned key.
+/// `Send + Sync` because the probe is held across the cache's `.await`, and a
+/// non-`Sync` referent there would make every signed-request future non-`Send`.
+pub trait DelegatePairKey: Send + Sync {
+    fn pair(&self) -> (&str, &str);
+}
+
+impl DelegatePairKey for (String, String) {
+    fn pair(&self) -> (&str, &str) {
+        (self.0.as_str(), self.1.as_str())
+    }
+}
+
+impl DelegatePairKey for (&str, &str) {
+    fn pair(&self) -> (&str, &str) {
+        (self.0, self.1)
+    }
+}
+
+impl std::hash::Hash for dyn DelegatePairKey + '_ {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.pair().hash(state);
+    }
+}
+
+impl PartialEq for dyn DelegatePairKey + '_ {
+    fn eq(&self, other: &Self) -> bool {
+        self.pair() == other.pair()
+    }
+}
+
+impl Eq for dyn DelegatePairKey + '_ {}
+
+impl<'a> std::borrow::Borrow<dyn DelegatePairKey + 'a> for (String, String) {
+    fn borrow(&self) -> &(dyn DelegatePairKey + 'a) {
+        self
+    }
 }
 
 /// Keyed by `(public_key_hex, account_object_id)` — the pair that was
@@ -351,8 +371,9 @@ pub async fn recent_verified_owner(
     account_object_id: &str,
     interval: std::time::Duration,
 ) -> Option<String> {
+    let probe: &dyn DelegatePairKey = &(public_key_hex, account_object_id);
     let guard = cache.read().await;
-    let entry = guard.get(&(public_key_hex.to_string(), account_object_id.to_string()))?;
+    let entry = guard.get(probe)?;
     if verify_window_open(Some(entry.verified_at), interval) {
         Some(entry.owner.clone())
     } else {
