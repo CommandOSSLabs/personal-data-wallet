@@ -20,6 +20,7 @@ import {
     existsSync,
     copyFileSync,
 } from "node:fs";
+import { log } from "./logger.js";
 
 export interface MemWalCredentials {
     /** 64-hex Ed25519 private key seed (32 bytes). NEVER log this. */
@@ -331,9 +332,20 @@ export function pendingLoginPath(): string {
     return join(dirname(credsPath()), PENDING_FILE);
 }
 
-/** Persist the pending keypair. Best-effort: a login that cannot write its
- * write-ahead record is still better than no login at all, so this never
- * throws — it degrades to today's behaviour. */
+/**
+ * Persist the pending keypair. Throws if it cannot.
+ *
+ * Deliberately NOT best-effort. The invariant this record exists to hold is
+ * that the delegate private key is on disk before its public half can reach a
+ * browser that will pay gas to register it. Swallowing the error would publish
+ * the connect URL while claiming a durability that does not exist — the
+ * original WALM-332 loss, now silent.
+ *
+ * Failing the login costs the user nothing: this file sits beside
+ * `credentials.json`, so a directory that cannot take it cannot take the
+ * credentials either. The same login would have failed at the callback anyway,
+ * one on-chain `add_delegate_key` later.
+ */
 export function savePendingLogin(pending: PendingLogin): void {
     const path = pendingLoginPath();
     try {
@@ -342,14 +354,48 @@ export function savePendingLogin(pending: PendingLogin): void {
             encoding: "utf8",
             mode: 0o600,
         });
-        try {
-            chmodSync(path, 0o600);
-        } catch {
-            /* Windows etc. — best effort */
-        }
-    } catch {
-        /* see doc comment */
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.error("login.pending.write_failed", { path, msg });
+        throw new Error(
+            `Could not write the login write-ahead record at ${path}: ${msg}. ` +
+                `Refusing to start a sign-in that could register a delegate key on-chain ` +
+                `without being able to save it.`,
+        );
     }
+    try {
+        chmodSync(path, 0o600);
+    } catch {
+        // Windows does not enforce POSIX mode bits; `writeFileSync` already
+        // applied what the platform honours. Not worth failing a login over.
+    }
+}
+
+/**
+ * A pending record this login can adopt instead of minting a new keypair.
+ *
+ * `loginFlow` used to generate a fresh keypair every call and overwrite the
+ * record unconditionally. Recovery only runs at process start and is skipped
+ * for `--login` / `forceLogin`, so a timed-out login followed by `memwal_login`
+ * in the same process replaced the only copy of a key the browser may already
+ * have paid to register. Reusing the record keeps that key reclaimable.
+ *
+ * Scoped to the same relayer: a key registered against one relayer's account
+ * proves nothing to another, and `recovery` must never repoint. TTL and shape
+ * are already enforced by {@link loadPendingLogin}.
+ */
+export function reusablePendingLogin(relayerUrl: string): PendingLogin | null {
+    const pending = loadPendingLogin();
+    if (!pending) return null;
+    if (pending.relayerUrl !== relayerUrl) {
+        log.warn("login.pending.relayer_changed", {
+            publicKey: pending.delegatePublicKeyHex,
+            from: pending.relayerUrl,
+            to: relayerUrl,
+        });
+        return null;
+    }
+    return pending;
 }
 
 /**

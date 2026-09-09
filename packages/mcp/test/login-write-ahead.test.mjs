@@ -11,7 +11,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, statSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, statSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -53,7 +53,14 @@ async function startLogin(overrides = {}) {
     // The flow rejects on timeout; nobody is going to complete it in these
     // tests, so absorb it rather than tripping an unhandled rejection.
     flow.catch(() => {});
-    return { flow, url: new URL(await urlReady) };
+    // A flow that fails BEFORE publishing — the write-ahead record cannot be
+    // written, say — must surface here as a rejection. Awaiting `urlReady`
+    // alone would hang forever on a URL that is never coming.
+    const failedEarly = flow.then(() => {
+        throw new Error("login resolved without ever publishing a URL");
+    });
+    failedEarly.catch(() => {});
+    return { flow, url: new URL(await Promise.race([urlReady, failedEarly])) };
 }
 
 test("the delegate keypair is on disk before the browser is given the connect URL", async (t) => {
@@ -85,12 +92,16 @@ test("the delegate keypair is on disk before the browser is given the connect UR
     assert.equal(pending.relayerUrl, RELAYER);
     assert.ok(pending.createdAt, "record needs a timestamp so it can expire");
 
-    // Same handling as credentials.json — owner-only.
-    assert.equal(
-        statSync(pendingPath(home)).mode & 0o777,
-        0o600,
-        "pending login must be owner-only, like credentials.json",
-    );
+    // Same handling as credentials.json — owner-only. Windows does not enforce
+    // POSIX mode bits, and `savePendingLogin` treats `chmodSync` as best-effort
+    // there, so asserting them would test the platform rather than the code.
+    if (process.platform !== "win32") {
+        assert.equal(
+            statSync(pendingPath(home)).mode & 0o777,
+            0o600,
+            "pending login must be owner-only, like credentials.json",
+        );
+    }
 
     // Nothing has completed, so no credentials yet.
     assert.equal(existsSync(credsPath(home)), false);
@@ -129,5 +140,144 @@ test("a completed login clears the pending record", async (t) => {
         existsSync(pendingPath(home)),
         false,
         "pending record must be cleared once the key is safely in credentials.json",
+    );
+});
+
+/**
+ * Recovery only runs at process start, and is skipped for `--login` /
+ * `forceLogin`. So a login that times out, followed by `memwal_login` in the
+ * same process, used to mint a fresh keypair and overwrite the record — and if
+ * the browser had already paid for `add_delegate_key` on the first key, the
+ * private half went with it.
+ */
+test("a second login for the same relayer reuses the stranded keypair", async (t) => {
+    const home = freshHome();
+    t.after(() => rmSync(home, { recursive: true, force: true }));
+
+    const first = await startLogin();
+    const stranded = JSON.parse(readFileSync(pendingPath(home), "utf8"));
+    first.flow.catch(() => {});
+
+    const second = await startLogin();
+    const after = JSON.parse(readFileSync(pendingPath(home), "utf8"));
+    second.flow.catch(() => {});
+
+    assert.equal(
+        after.delegatePrivateKey,
+        stranded.delegatePrivateKey,
+        "the paid-for key must not be replaced by a second attempt",
+    );
+    assert.equal(
+        second.url.searchParams.get("publicKey")?.toLowerCase(),
+        stranded.delegatePublicKeyHex.toLowerCase(),
+        "the browser should be sent the key that may already be registered",
+    );
+    assert.equal(
+        after.createdAt,
+        stranded.createdAt,
+        "reusing must not extend the TTL past the attempt that may have registered it",
+    );
+});
+
+test("a login against a different relayer does not reuse the record", async (t) => {
+    // A key registered against one relayer's account proves nothing to
+    // another, and recovery must never repoint a record at a new relayer.
+    const home = freshHome();
+    t.after(() => rmSync(home, { recursive: true, force: true }));
+
+    const first = await startLogin();
+    const stranded = JSON.parse(readFileSync(pendingPath(home), "utf8"));
+    first.flow.catch(() => {});
+
+    const second = await startLogin({ relayerUrl: "https://other-relayer.example" });
+    const after = JSON.parse(readFileSync(pendingPath(home), "utf8"));
+    second.flow.catch(() => {});
+
+    assert.notEqual(after.delegatePrivateKey, stranded.delegatePrivateKey);
+    assert.equal(after.relayerUrl, "https://other-relayer.example");
+});
+
+test("a login refuses to start when the write-ahead record cannot be persisted", async (t) => {
+    // The whole invariant is that the key is durable before its public half can
+    // reach a browser that will pay to register it. Continuing anyway would
+    // publish the URL while only pretending to hold that.
+    const home = freshHome();
+    const dir = join(home, ".memwal");
+    mkdirSync(dir, { recursive: true });
+    t.after(() => {
+        try {
+            chmodSync(dir, 0o700);
+        } catch {
+            /* nothing to restore */
+        }
+        rmSync(home, { recursive: true, force: true });
+    });
+
+    // Read-only directory. Root ignores mode bits, and Windows does not
+    // enforce them at all, so only assert where the setup actually bites.
+    chmodSync(dir, 0o500);
+    let writable = true;
+    try {
+        writeFileSync(join(dir, ".probe"), "x");
+    } catch {
+        writable = false;
+    }
+    t.diagnostic(`credentials dir writable after chmod 0500: ${writable}`);
+    if (writable) {
+        t.skip("the sandbox directory is still writable — cannot provoke the failure here");
+        return;
+    }
+
+    await assert.rejects(
+        () => startLogin(),
+        /write-ahead/i,
+        "the login must fail loudly rather than publish a URL it cannot back",
+    );
+    assert.equal(existsSync(pendingPath(home)), false, "nothing should have been written");
+});
+
+/**
+ * `clearPendingLogin()` used to run only after a successful callback. CLI
+ * `--logout` and the `memwal_logout` tool both cleared `credentials.json`
+ * alone, so an interrupted re-login left the pending key behind and the next
+ * start's `recoverPendingLogin` signed the user straight back in — a logout
+ * that undid itself.
+ */
+test("logging out discards the pending record, not just the credentials", async (t) => {
+    const home = freshHome();
+    t.after(() => rmSync(home, { recursive: true, force: true }));
+
+    const { flow } = await startLogin();
+    flow.catch(() => {});
+    assert.ok(existsSync(pendingPath(home)), "precondition: a pending record exists");
+
+    const { main } = await import(`../dist/index.js?t=${Date.now()}${Math.random()}`);
+    await main(["--logout"]);
+
+    assert.equal(
+        existsSync(pendingPath(home)),
+        false,
+        "an explicit logout must not leave a key that signs the user back in",
+    );
+});
+
+test("a 401 session teardown keeps the pending record", async (t) => {
+    // `clearCreds` also runs when the relayer rejects the session key. A newer
+    // stranded key is exactly what recovery still needs there, which is why
+    // clearing the pending record belongs to the logout paths and not to
+    // `clearCreds` itself.
+    const home = freshHome();
+    t.after(() => rmSync(home, { recursive: true, force: true }));
+
+    const { flow } = await startLogin();
+    flow.catch(() => {});
+    assert.ok(existsSync(pendingPath(home)), "precondition: a pending record exists");
+
+    const { clearCreds } = await import(`../dist/auth.js?t=${Date.now()}${Math.random()}`);
+    clearCreds();
+
+    assert.ok(
+        existsSync(pendingPath(home)),
+        "clearCreds must not discard a key that may still be reclaimable",
     );
 });

@@ -28,6 +28,7 @@ import {
     formatPendingSignInWarning,
     savePendingLogin,
     clearPendingLogin,
+    reusablePendingLogin,
 } from "./auth.js";
 import { generateKeypair } from "./crypto.js";
 import { log, note } from "./logger.js";
@@ -216,22 +217,47 @@ export async function loginFlow(opts: LoginOptions = {}): Promise<MemWalCredenti
         ...opts,
         timeoutMs: opts.timeoutMs ?? resolveLoginTimeoutMs(),
     };
-    const keypair = await generateKeypair();
+    // Adopt a still-valid record for this relayer rather than minting over it.
+    // Recovery only runs at process start and is skipped for `--login`, so a
+    // timed-out login followed by `memwal_login` in the same process would
+    // otherwise replace the only copy of a key the browser may already have
+    // paid to register.
+    const reusable = reusablePendingLogin(cfg.relayerUrl);
+    if (reusable) {
+        log.info("login.pending.reused", {
+            publicKey: reusable.delegatePublicKeyHex,
+            createdAt: reusable.createdAt,
+        });
+    }
+    const keypair = reusable
+        ? {
+              privateKeyHex: reusable.delegatePrivateKey,
+              publicKeyHex: reusable.delegatePublicKeyHex,
+              suiAddress: reusable.delegateAddress,
+          }
+        : await generateKeypair();
     // Write-ahead (WALM-332). From the moment anything can hand this public key
     // to a browser, the private half has to survive losing this process — the
     // browser's on-chain `add_delegate_key` costs gas and cannot be undone, and
     // it happens strictly before the callback that would otherwise be our only
     // chance to save the key. Persisting here, ahead of the URL, is what makes
     // an interrupted flow recoverable instead of an orphaned paid registration.
-    savePendingLogin({
-        delegatePrivateKey: keypair.privateKeyHex,
-        delegatePublicKeyHex: keypair.publicKeyHex,
-        delegateAddress: keypair.suiAddress,
-        relayerUrl: cfg.relayerUrl,
-        label: cfg.label,
-        createdAt: new Date().toISOString(),
-        version: 1,
-    });
+    //
+    // A reused record is written back unchanged, `createdAt` included: the TTL
+    // has to keep measuring from the attempt that may have registered the key,
+    // and `recoverPendingLogin` compares it against `credentials.createdAt` to
+    // decide which of the two is newer.
+    savePendingLogin(
+        reusable ?? {
+            delegatePrivateKey: keypair.privateKeyHex,
+            delegatePublicKeyHex: keypair.publicKeyHex,
+            delegateAddress: keypair.suiAddress,
+            relayerUrl: cfg.relayerUrl,
+            label: cfg.label,
+            createdAt: new Date().toISOString(),
+            version: 1,
+        },
+    );
     // Cryptographic single-use state token. Round-trip through the browser:
     // we put it in `connectUrl`, the page echoes it back in the callback
     // payload, and we constant-time-compare on receipt. Defeats cross-origin

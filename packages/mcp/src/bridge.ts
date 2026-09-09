@@ -15,7 +15,7 @@
  * Re-auth requires an explicit `memwal-mcp login` from the user.
  */
 import type { MemWalCredentials } from "./auth.js";
-import { clearCreds, credsPath } from "./auth.js";
+import { clearCreds, clearPendingLogin, credsPath } from "./auth.js";
 import { TOOL_DEFINITIONS } from "./auth-required.js";
 import {
     clientInfoHeaders,
@@ -671,6 +671,14 @@ async function handleLocalLogin(
 function handleLocalLogout(): { text: string; isError: boolean } {
     try {
         const cleared = clearCreds();
+        // Explicit sign-out discards the write-ahead record too. Without this
+        // an interrupted re-login leaves `login-pending.json` behind, and the
+        // next start's `recoverPendingLogin` signs the user straight back in.
+        //
+        // NOT folded into `clearCreds()`: that also runs on 401 session
+        // teardown, where a newer stranded key is exactly what recovery still
+        // needs. Only a deliberate logout means "forget all of it".
+        clearPendingLogin();
         log.info("memwal_logout.bridge.success", {
             removedPath: cleared.removedPath ?? null,
             fallbackPath: cleared.fallbackPath ?? null,

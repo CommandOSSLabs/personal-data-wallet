@@ -9,7 +9,7 @@
  *   5. On 401 (revoked key), the bridge wipes credentials before throwing
  *      — the next process spawn will re-trigger login.
  */
-import { clearCreds, credsPath, loadCreds } from "./auth.js";
+import { clearCreds, clearPendingLogin, credsPath, loadCreds } from "./auth.js";
 import { recoverPendingLogin, formatStrandedLoginNotice } from "./recovery.js";
 import { runAuthRequiredServer } from "./auth-required.js";
 import { runBridge } from "./bridge.js";
@@ -106,6 +106,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     }
     if (args.logout) {
         const cleared = clearCreds();
+        // Explicit sign-out discards the write-ahead record too. Without this
+        // an interrupted re-login leaves `login-pending.json` behind, and the
+        // next start's `recoverPendingLogin` signs the user straight back in.
+        //
+        // NOT folded into `clearCreds()`: that also runs on 401 session
+        // teardown, where a newer stranded key is exactly what recovery still
+        // needs. Only a deliberate logout means "forget all of it".
+        clearPendingLogin();
         if (!cleared.removedPath) {
             note(`No credentials to remove (${credsPath()}).`);
             return;

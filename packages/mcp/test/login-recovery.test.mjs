@@ -212,3 +212,119 @@ test("no pending record is a silent no-op", async (t) => {
     assert.equal(result.outcome, "no-pending");
     assert.equal(formatStrandedLoginNotice(result), null);
 });
+
+/**
+ * The relayer freshness-checks `x-timestamp` against `Utc::now().timestamp()`
+ * — SECONDS. `String(Date.now())` is milliseconds, ~10^12, which is outside
+ * every drift window there will ever be, so whoami 401'd on every attempt and
+ * recovery could not have worked at all.
+ */
+test("whoami signs a Unix timestamp in seconds, not milliseconds", async (t) => {
+    const home = freshHome();
+    let seen = null;
+    const { server, url } = await startWhoami((req, res) => {
+        seen = req.headers["x-timestamp"];
+        okWhoami(req, res);
+    });
+    t.after(() => {
+        server.close();
+        rmSync(home, { recursive: true, force: true });
+    });
+
+    writePending(home, url);
+    const { recoverPendingLogin } = await importRecovery();
+    await recoverPendingLogin();
+
+    assert.match(seen ?? "", /^\d{10}$/, `expected 10-digit seconds, got ${seen}`);
+    const skew = Math.abs(Number(seen) - Math.floor(Date.now() / 1000));
+    assert.ok(skew < 300, `timestamp is ${skew}s from now — outside the relayer's window`);
+});
+
+/**
+ * `rejected` tells the user to sign in again and revoke the key. That advice is
+ * actively harmful when the relayer merely could not reach Sui: the key is
+ * fine, and re-registering costs gas for nothing.
+ */
+for (const [label, status, headers] of [
+    ["a 503 with AUTH_UPSTREAM_UNAVAILABLE", 503, { "x-auth-error": "AUTH_UPSTREAM_UNAVAILABLE" }],
+    ["a bare 500", 500, {}],
+    ["a 429", 429, {}],
+    ["a 404 from a relayer without the route", 404, {}],
+]) {
+    test(`${label} is retryable, not a rejection`, async (t) => {
+        const home = freshHome();
+        const { server, url } = await startWhoami((_req, res) => {
+            res.writeHead(status, headers).end("{}");
+        });
+        t.after(() => {
+            server.close();
+            rmSync(home, { recursive: true, force: true });
+        });
+
+        writePending(home, url);
+        const { recoverPendingLogin, formatStrandedLoginNotice } = await importRecovery();
+        const result = await recoverPendingLogin();
+
+        assert.equal(result.outcome, "unavailable", `status ${status} should not read as a denial`);
+        assert.equal(existsSync(pendingPath(home)), true, "the record must survive");
+
+        const notice = formatStrandedLoginNotice(result);
+        assert.doesNotMatch(
+            notice,
+            /revoke/i,
+            "must not send the user to revoke a key that may be perfectly good",
+        );
+        assert.match(notice, /retried/i, "should say it will be retried");
+    });
+}
+
+test("a 401 carrying AUTH_UPSTREAM_UNAVAILABLE is still retryable", async (t) => {
+    // The status alone is not enough: the header is what distinguishes
+    // "we could not check" from "we checked and said no".
+    const home = freshHome();
+    const { server, url } = await startWhoami((_req, res) => {
+        res.writeHead(401, { "x-auth-error": "AUTH_UPSTREAM_UNAVAILABLE" }).end("{}");
+    });
+    t.after(() => {
+        server.close();
+        rmSync(home, { recursive: true, force: true });
+    });
+
+    writePending(home, url);
+    const { recoverPendingLogin } = await importRecovery();
+    assert.equal((await recoverPendingLogin()).outcome, "unavailable");
+});
+
+test("a 200 that is not a whoami body is retryable, not a rejection", async (t) => {
+    // Means we are not talking to the endpoint we think we are — nothing has
+    // denied this key.
+    const home = freshHome();
+    const { server, url } = await startWhoami((_req, res) => {
+        res.writeHead(200, { "content-type": "application/json" }).end('{"hello":"world"}');
+    });
+    t.after(() => {
+        server.close();
+        rmSync(home, { recursive: true, force: true });
+    });
+
+    writePending(home, url);
+    const { recoverPendingLogin } = await importRecovery();
+    assert.equal((await recoverPendingLogin()).outcome, "unavailable");
+});
+
+test("a plain 401 is still a rejection", async (t) => {
+    // Regression guard on the split above: widening `unavailable` must not
+    // swallow the one case where the relayer really did deny the identity.
+    const home = freshHome();
+    const { server, url } = await startWhoami((_req, res) => {
+        res.writeHead(401).end("{}");
+    });
+    t.after(() => {
+        server.close();
+        rmSync(home, { recursive: true, force: true });
+    });
+
+    writePending(home, url);
+    const { recoverPendingLogin } = await importRecovery();
+    assert.equal((await recoverPendingLogin()).outcome, "rejected");
+});
