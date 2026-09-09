@@ -587,21 +587,16 @@ fn restore_truncated_after_page(
     truncated || (restored == 0 && newly_failed == 0 && transient_unresolved > 0)
 }
 
-/// One restore decrypt attempt. Permanent failures are negative-cached and
-/// counted in `RestoreResponse.failed`; transients are retried next call.
 enum RestoreDecrypt {
     Ok(String, String),
     PermanentFail,
     TransientFail,
 }
 
-/// Per-blob restore inspection stage. Download/embed are never permanent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RestoreFailStage {
     InvalidUtf8,
     Decrypt,
-    Download,
-    Embed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -610,8 +605,8 @@ enum RestoreFailClass {
     Transient,
 }
 
-/// Classify a restore inspection failure. Swapping permanent/transient
-/// here would negative-cache blobs during a SEAL/embedder blip.
+/// Classify a restore decrypt/UTF-8 failure. Swapping permanent/transient
+/// here would negative-cache blobs during a SEAL infra blip.
 fn restore_fail_class(stage: RestoreFailStage, decrypt_err: Option<&str>) -> RestoreFailClass {
     match stage {
         RestoreFailStage::InvalidUtf8 => RestoreFailClass::Permanent,
@@ -621,7 +616,6 @@ fn restore_fail_class(stage: RestoreFailStage, decrypt_err: Option<&str>) -> Res
             }
             _ => RestoreFailClass::Transient,
         },
-        RestoreFailStage::Download | RestoreFailStage::Embed => RestoreFailClass::Transient,
     }
 }
 
@@ -1025,7 +1019,6 @@ async fn restore_unbounded(
                     Ok(vector) => Some((blob_id, vector)),
                     Err(e) => {
                         tracing::warn!("restore: embedding failed for {}: {}", blob_id, e);
-                        // Embed failures are transient: do not negative-cache.
                         None
                     }
                 }
@@ -1355,25 +1348,17 @@ mod tests {
     }
 
     #[test]
-    fn restore_truncated_true_when_page_is_only_transients() {
+    fn restore_truncated_after_page_signals_retry_on_transients_only() {
         // Embedder down / download blip: inspected page yielded neither a
         // restore nor a permanent failure. source_capped=false would otherwise
         // leave truncated=false and the caller would not retry (WALM-480).
         assert!(super::restore_truncated_after_page(false, 0, 0, 10));
         assert!(super::restore_truncated_after_page(false, 0, 0, 1));
-    }
-
-    #[test]
-    fn restore_truncated_false_when_page_has_success_or_permanent_fail() {
+        assert!(super::restore_truncated_after_page(true, 5, 0, 0));
         assert!(!super::restore_truncated_after_page(false, 1, 0, 9));
         assert!(!super::restore_truncated_after_page(false, 0, 10, 0));
         assert!(!super::restore_truncated_after_page(false, 0, 1, 9));
         assert!(!super::restore_truncated_after_page(false, 0, 0, 0));
-    }
-
-    #[test]
-    fn restore_truncated_after_page_preserves_existing_true() {
-        assert!(super::restore_truncated_after_page(true, 5, 0, 0));
     }
 
     #[test]
@@ -1407,15 +1392,6 @@ mod tests {
             ),
             RestoreFailClass::Transient,
             "SEAL infra blips must not be negative-cached"
-        );
-        assert_eq!(
-            restore_fail_class(RestoreFailStage::Download, None),
-            RestoreFailClass::Transient
-        );
-        assert_eq!(
-            restore_fail_class(RestoreFailStage::Embed, None),
-            RestoreFailClass::Transient,
-            "embedder-down is transient; do not negative-cache"
         );
     }
 

@@ -72,7 +72,7 @@ export function registerRestoreTool(
         {
             ...TOOL_METADATA.memwal_restore,
             description:
-                "Recovery tool. Re-index a namespace from Walrus blobs back into the relayer's search index — use when memwal_recall unexpectedly returns nothing even though facts were saved before (e.g. on a new machine, a fresh relayer, or after switching servers). Returns restored/skipped/failed/total plus truncated — does not return memory texts. truncated=true is known-retryable-incomplete: retry the same limit when restored=0 and skipped+failed < total (download/embed blip); raising limit expands the sidecar cap only while limit < 20; after the cap saturates, truncation follows this call's missing-blob page. truncated=false is not completeness; WALM-451 will add sourceCapped. Call memwal_recall afterwards to query the rebuilt index.",
+                "Recovery tool. Re-index a namespace from Walrus blobs back into the relayer's search index — use when memwal_recall unexpectedly returns nothing even though facts were saved before (e.g. on a new machine, a fresh relayer, or after switching servers). Returns restored/skipped/failed/total plus truncated — does not return memory texts. truncated=true is known-retryable-incomplete: retry the same limit on a download/embed blip; raising limit expands the sidecar cap only while limit < 20; after the cap saturates, truncation follows this call's missing-blob page. truncated=false is not completeness; WALM-451 will add sourceCapped. Call memwal_recall afterwards to query the rebuilt index.",
             inputSchema: RESTORE_INPUT,
         },
         wrapTool<{ namespace: string; limit: number }>(session, "memwal_restore", async ({ namespace, limit }) => {

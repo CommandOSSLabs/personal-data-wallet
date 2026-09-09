@@ -271,7 +271,7 @@ interface EmbedResult {
 interface RestoreResult {
   restored: number;
   skipped: number;
-  failed?: number;
+  failed: number;
   total: number;
   namespace: string;
   owner: string;
