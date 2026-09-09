@@ -253,10 +253,7 @@ export async function pollAccountIdForOwner(
             const accountId = await fetchAccountIdForOwner(suiClient, registryId, ownerAddress)
             if (accountId) return accountId
         } catch (error) {
-            // Known miss: treat as unreadability and keep polling.
-            // Unrecognized throw: still spend the remaining attempts so a
-            // miss variant that slips past isMissingObjectError cannot abort
-            // the first try. Fail closed only on the last attempt.
+            // Unrecognized throws still spend the remaining attempts; rethrow on the last try.
             if (!isMissingObjectError(error) && i === attempts - 1) throw error
         }
         if (i < attempts - 1) {
