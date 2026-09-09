@@ -45,6 +45,8 @@ import type {
     RecallManualOptions,
     RecallManualResult,
     RestoreResult,
+    NamespacesResult,
+    ListNamespacesOptions,
     RememberBulkItem,
     RememberBulkOptions,
     RememberBulkResult,
@@ -193,6 +195,11 @@ export class MemWal {
     private sessionBuildPromise: Promise<string> | null = null;
     /** Single-flight guard so concurrent requests share one compatibility probe. */
     private compatibilityPromise: Promise<RelayerVersionMetadata> | null = null;
+    /** Resolved owner address for this account. See `resolveOwner()`. */
+    private ownerAddress: string | null = null;
+    /** Single-flight guard so concurrent reads share one owner resolution. */
+    private ownerPromise: Promise<string> | null = null;
+
     /**
      * Keep a generated idempotency key while a remember request has no
      * acknowledged response. If the transport times out after the server
@@ -666,6 +673,15 @@ export class MemWal {
                 query,
                 limit,
                 namespace: resolvedNamespace,
+                // `undefined` when no weights were supplied, which
+                // JSON.stringify drops — so a default-weighted recall stays
+                // byte-identical on the wire and the relayer keeps
+                // short-circuiting to the plain pgvector cosine order.
+                scoring_weights: scoringWeightsToWire(options.scoringWeights),
+                // Same `undefined`-is-dropped trick: an unset sort leaves the
+                // request byte-identical and the relayer applies its own
+                // "relevance" default.
+                sort: options.sort,
             }, { signal: ac.signal });
 
             let processed = result;
@@ -900,6 +916,90 @@ export class MemWal {
         // "not present" as "not known to be truncated" rather than drop
         // the field or require every relayer version to send it.
         return { ...result, truncated: result.truncated ?? false };
+    }
+
+    /**
+     * List the namespaces this account holds memories in.
+     *
+     * Recall is similarity-ranked and needs a namespace to search; without
+     * this, an agent connecting to an unfamiliar account has to guess names
+     * or fall back to `"default"`. Returns metadata only — no blob fetch, no
+     * decryption.
+     *
+     * Paginate with `has_more`, NOT page length: the server clamps `limit`,
+     * so asking for more than the cap returns exactly the cap.
+     *
+     * ```ts
+     * let cursor: string | undefined;
+     * let more = true;
+     * while (more) {
+     *     const page = await memwal.listNamespaces({ cursor });
+     *     for (const ns of page.namespaces) console.log(ns.name, ns.memory_count);
+     *     cursor = page.next_cursor ?? undefined;
+     *     more = page.has_more;
+     * }
+     * ```
+     */
+    async listNamespaces(options: ListNamespacesOptions = {}): Promise<NamespacesResult> {
+        const owner = await this.resolveOwner();
+
+        const params = new URLSearchParams();
+        if (options.cursor !== undefined) params.set("updated_after", options.cursor);
+        if (options.limit !== undefined) params.set("limit", String(options.limit));
+        const query = params.toString();
+
+        // Query string must be part of the signed path: the server verifies
+        // against `path_and_query`, not `path` (see `auth.rs`).
+        const path = `/v1/owners/${owner}/namespaces${query ? `?${query}` : ""}`;
+
+        // Metadata-only read — no ciphertext comes back, so no SEAL session
+        // is built or transmitted.
+        return this.signedRequest<NamespacesResult>("GET", path, {}, [200], {
+            includeDelegateKey: false,
+        });
+    }
+
+    /**
+     * Resolve this account's owner address, memoised for the client's life.
+     *
+     * The owner-scoped read routes take the address in the path and reject a
+     * mismatch against the caller's credentials — but `MemWalConfig` carries
+     * only the delegate key and account id, so the SDK has to learn its own
+     * address from the server.
+     *
+     * `POST /api/stats` is used because it authenticates with the same
+     * delegate scheme, needs nothing but a namespace, is rate-limit weight 1,
+     * and returns the owner the server resolved. Using a stats endpoint as a
+     * whoami is admittedly indirect; it avoids a server change and keeps this
+     * working against relayers older than any such change. If a dedicated
+     * self-reference lands (e.g. accepting `me` as the path owner), this
+     * method is the only place that needs to change.
+     */
+    private async resolveOwner(): Promise<string> {
+        if (this.ownerAddress) return this.ownerAddress;
+        if (this.ownerPromise) return this.ownerPromise;
+
+        this.ownerPromise = (async () => {
+            const stats = await this.signedRequest<{ owner?: string }>(
+                "POST",
+                "/api/stats",
+                { namespace: this.namespace },
+                [200],
+                { includeDelegateKey: false },
+            );
+            if (!stats.owner) {
+                throw new Error(
+                    "Walrus Memory could not resolve this account's owner address " +
+                        "(POST /api/stats returned no owner).",
+                );
+            }
+            this.ownerAddress = stats.owner;
+            return stats.owner;
+        })().finally(() => {
+            this.ownerPromise = null;
+        });
+
+        return this.ownerPromise;
     }
 
     /**
@@ -1284,14 +1384,23 @@ export class MemWal {
             const clockDriftError = clockDriftErrorFromResponse(res);
             if (clockDriftError) throw clockDriftError;
 
-            const { message, serverCode } = sanitizeServerError(res.status, raw);
+            const { message, serverCode } = sanitizeServerError(
+                res.status,
+                raw,
+                res.headers.get("x-auth-error"),
+            );
             const err = new Error(message) as Error & {
                 status?: number;
                 serverCode?: string;
+                retryAfterSeconds?: number;
                 cause?: string;
             };
             err.status = res.status;
             if (serverCode) err.serverCode = serverCode;
+            const retryAfter = Number(res.headers.get("retry-after"));
+            if (Number.isFinite(retryAfter) && retryAfter > 0) {
+                err.retryAfterSeconds = retryAfter;
+            }
             // Preserve raw body on `cause` for in-process debugging only.
             err.cause = raw;
             throw err;

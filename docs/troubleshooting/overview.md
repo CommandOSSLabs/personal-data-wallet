@@ -56,6 +56,14 @@ To triage quickly, confirm 3 things in order: the key is listed under the correc
 A version mismatch is rarely the cause here. The relayer reports its minimum supported SDK version, which is TypeScript 0.0.4 at the time of writing, so 0.1.0 is supported. A true version mismatch surfaces as `MemWalCompatibilityError` rather than `AUTH_REJECTED`.
 </Info>
 
+### Intermittent `isn't signed in` / `memwal_login` on recall
+
+**Symptom:** The same credentials recall successfully one moment and fail the next with `Walrus Memory isn't signed in. Call the memwal_login tool, then retry.` `memwal_login` does not fix it. Other clients or a retry a few seconds later succeed.
+
+**Cause:** The relayer re-checks the delegate key on Sui on every signed request. When Sui gRPC `GetObject` returns 429 or is otherwise unavailable, older relayers treated that as a revoked key, evicted the cache, and returned an empty HTTP 401. The SDK maps empty 401s to the login hint. The key is usually still registered.
+
+**Fix:** Retry. This is not a sign-in failure. Current relayers keep the cached mapping when Sui cannot be consulted, or return HTTP 503 `upstream unavailable` on a cache miss. A 503 from the SDK means "retry"; it does not mean call `memwal_login`. If every call 401s, including after a few minutes, then follow the `AUTH_REJECTED` checks above.
+
 ## MCP connection issues
 
 This section covers problems that appear before the memory tools work.
@@ -75,6 +83,20 @@ This section covers problems that appear before the memory tools work.
 **Cause:** MCP servers load only when the client starts, so a server added during a session does not appear.
 
 **Fix:** Quit the MCP client fully, then start it again. If you registered the server with `claude mcp add`, run `claude mcp list` to confirm `memwal` is registered before you restart.
+
+### Sign-in succeeds but credentials are not saved
+
+**Symptom:** The sign-in page confirms that your delegate key was registered, but says it could not hand the credentials back to your computer. The agent stays logged out and `~/.memwal/credentials.json` does not appear.
+
+**Cause:** Signing in has two halves. Your browser registers a delegate key onchain, then sends that key back to a short-lived listener the MCP package runs on `127.0.0.1`. The unused key from this attempt is already on your account and should be revoked. Signing in again is a full new attempt, including the wallet step. The usual reasons:
+
+- The MCP client restarted, or the login command was cancelled, while the browser tab was still open.
+- This tab is leftover from a sign-in that already finished, or the hand-off did not match what the app expected.
+- Local software such as a firewall, a VPN client, or a browser extension blocks requests from a website to `127.0.0.1`.
+
+**Fix:** Call `memwal_login` again and open the new URL promptly. A retry only helps once the MCP client is left running through the wallet prompt. Remove the unused key from the Delegate keys panel in the dashboard; it is already on your account.
+
+If it keeps failing, confirm that nothing blocks localhost traffic, then run `npx -y @mysten-incubation/memwal-mcp login --prod` directly in a terminal. A terminal sign-in prints the failure reason instead of leaving it in the MCP client's logs.
 
 ## Saving and timeouts
 
@@ -145,6 +167,10 @@ Probably not. The relayer processes saves as background jobs and keeps working a
 ### Why does recall feel instant while saving feels slow?
 
 Recall is one search request. A save embeds, encrypts, uploads to Walrus, and indexes the result, and `memwal_analyze` does that for every fact it extracts. Saves are expected to take longer, and they run in the background.
+
+### Score vs distance
+
+SDK `recall` returns cosine **distance** (lower = more similar), and `maxDistance` drops hits where `distance >= maxDistance`. MCP `memwal_recall` prints **score** as `1 - distance` (higher = more similar). Do not apply an SDK `maxDistance` to MCP scores. That inverts the filter.
 
 ### How do I check whether the service is reachable?
 

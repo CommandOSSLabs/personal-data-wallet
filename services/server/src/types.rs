@@ -45,6 +45,9 @@ pub const MAX_WALRUS_STORAGE_EPOCHS: u32 = 15;
 /// representable range in `routes::owner_token::issue_token`'s `expires_at`
 /// computation.
 pub const MAX_OWNER_TOKEN_TTL_SECS: u64 = 24 * 60 * 60;
+/// Minimum `OWNER_TOKEN_SECRET` length in bytes when the env var is set.
+/// Unset or empty still disables the feature.
+pub const MIN_OWNER_TOKEN_SECRET_LEN: usize = 32;
 pub const DEFAULT_TESTNET_WALRUS_STORAGE_EPOCHS: u32 = 5;
 
 pub(crate) fn default_walrus_storage_epochs_for_network(network: &str) -> u32 {
@@ -395,6 +398,10 @@ pub struct Config {
     /// bypassing SEAL + Walrus. **Not for production.** Off by default;
     /// set `BENCHMARK_MODE=true` to enable. Surfaced via `GET /health`.
     pub benchmark_mode: bool,
+    /// Operator write-pause flag from `WRITES_PAUSED`. When true, write
+    /// routes reject with HTTP 503 and `/health` reports `writes: "paused"`
+    /// while staying HTTP 200. Distinct from sidecar liveness (`write_ready`).
+    pub writes_paused: bool,
     /// Master visibility flag for the memory-deletion feature family.
     pub enable_memory_deletion: bool,
     /// Selects the tracked, backend-built security-delete flow. The master
@@ -445,6 +452,8 @@ pub struct Config {
     /// /v1/owner-tokens` and the `OwnerToken` extractor treat that as an
     /// unconditional rejection rather than letting an empty HMAC key
     /// validate (see `owner_token_auth::OwnerToken`'s doc comment).
+    /// When set, the value must be at least [`MIN_OWNER_TOKEN_SECRET_LEN`]
+    /// bytes or config load panics.
     pub owner_token_secret: String,
     /// The **service credential**: one static
     /// shared secret WM generates and hands to Console, which Console
@@ -597,6 +606,7 @@ impl Config {
             benchmark_mode: std::env::var("BENCHMARK_MODE")
                 .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
                 .unwrap_or(false),
+            writes_paused: env_bool("WRITES_PAUSED"),
             enable_memory_deletion: env_bool("ENABLE_MEMORY_DELETION"),
             enable_security_delete: env_bool("ENABLE_SECURITY_DELETE"),
             legacy_db_url: nonempty_env("LEGACY_DB_URL"),
@@ -638,7 +648,9 @@ impl Config {
                 .unwrap_or_default(),
             walrus_staking_pool_id: nonempty_env("WALRUS_STAKING_POOL_ID")
                 .unwrap_or_else(|| default_walrus_staking_pool_id.to_string()),
-            owner_token_secret: nonempty_env("OWNER_TOKEN_SECRET").unwrap_or_default(),
+            owner_token_secret: require_owner_token_secret_len(
+                nonempty_env("OWNER_TOKEN_SECRET").unwrap_or_default(),
+            ),
             owner_token_service_credential: nonempty_env("OWNER_TOKEN_SERVICE_CREDENTIAL")
                 .unwrap_or_default(),
             owner_token_ttl_secs: env_positive_u64("OWNER_TOKEN_TTL_SECS", 900)
@@ -696,6 +708,19 @@ fn nonempty_env(name: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
+}
+
+fn require_owner_token_secret_len(secret: String) -> String {
+    if secret.is_empty() {
+        return secret;
+    }
+    if secret.len() < MIN_OWNER_TOKEN_SECRET_LEN {
+        panic!(
+            "OWNER_TOKEN_SECRET must be at least {MIN_OWNER_TOKEN_SECRET_LEN} bytes; got {}",
+            secret.len()
+        );
+    }
+    secret
 }
 
 fn env_number<T>(name: &str, default: T) -> T
@@ -891,6 +916,30 @@ fn env_bool(name: &str) -> bool {
             )
         })
         .unwrap_or(false)
+}
+
+/// `/health` `writes` wire value: `"paused"` when `WRITES_PAUSED` is set.
+pub(crate) fn writes_health_status(paused: bool) -> String {
+    if paused {
+        "paused".to_string()
+    } else {
+        "ok".to_string()
+    }
+}
+
+/// Stable client-facing body for write-path 503 when `WRITES_PAUSED` is set.
+const WRITES_PAUSED_ERROR: &str = "writes are paused";
+
+/// Reject write-path admission when `WRITES_PAUSED` is set.
+///
+/// Shared by `remember`, `remember_bulk`, `remember_manual`, and `analyze`
+/// so `/health` `writes: "paused"` and write rejection stay one flag.
+pub(crate) fn reject_if_writes_paused(paused: bool) -> Result<(), AppError> {
+    if paused {
+        Err(AppError::WritesPaused(WRITES_PAUSED_ERROR.to_string()))
+    } else {
+        Ok(())
+    }
 }
 
 fn parse_walrus_aggregator_urls(primary: &str, extra_csv: Option<&str>) -> Vec<String> {
@@ -1283,6 +1332,14 @@ fn default_namespace() -> String {
     "default".to_string()
 }
 
+/// Shared namespace validation for every request that carries a namespace.
+///
+/// API-compatibility note: this rejects the empty string, and the read paths
+/// (`recall`, `recall_manual`, `ask`) call it, so an explicit
+/// `"namespace": ""` returns HTTP 400 where it previously returned HTTP 200
+/// with an empty result set. That matches the write paths, but it is
+/// client-visible: a caller that sends `""` to mean "unset" must omit the
+/// field instead and let `default_namespace` apply.
 pub fn validate_namespace(namespace: &str) -> Result<(), AppError> {
     if namespace.is_empty() {
         return Err(AppError::BadRequest("namespace cannot be empty".into()));
@@ -1292,6 +1349,18 @@ pub fn validate_namespace(namespace: &str) -> Result<(), AppError> {
             "namespace exceeds maximum length of {} bytes",
             MAX_NAMESPACE_BYTES
         )));
+    }
+    // NUL must not reach PostgreSQL: a `\0` in a text bind makes libpq/pg
+    // reject the query as an opaque 500. Reject here so recall/ask match
+    // remember and return HTTP 400 (WALM-439 / GH #787).
+    //
+    // Deliberately NUL-only, not every Unicode Cc character: `\t`, `\n`, `\r`,
+    // DEL and C1 are all valid Postgres `text` and stored fine before this
+    // check existed. Because this validator also guards the read and delete
+    // paths, rejecting them here would strand any namespace already written
+    // with one — unreadable via recall/ask/stats and undeletable via forget.
+    if namespace.contains('\0') {
+        return Err(AppError::BadRequest("namespace contains a NUL byte".into()));
     }
     Ok(())
 }
@@ -1333,6 +1402,53 @@ pub struct RecallRequest {
     /// [`ScoringWeights`].
     #[serde(default)]
     pub scoring_weights: Option<ScoringWeights>,
+    /// How to order results. Omitted → [`RecallSort::Relevance`], today's
+    /// behaviour. See [`RecallSort`].
+    #[serde(default)]
+    pub sort: RecallSort,
+}
+
+/// Result ordering mode for `/api/recall`.
+///
+/// Distinct from [`ScoringWeights`], which only re-ranks the rows the vector
+/// search already returned. `sort` decides how many rows are fetched in the
+/// first place — which is the half that matters, because the candidate set is
+/// the cosine top-N and no amount of re-weighting can surface a row pgvector
+/// never returned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecallSort {
+    /// Pure semantic relevance — the cosine order, unchanged. Default, so an
+    /// omitted field leaves every existing caller byte-identical.
+    #[default]
+    Relevance,
+    /// Newest-among-matches: over-fetch semantic candidates, order them by
+    /// write-time descending, then truncate to `limit`.
+    ///
+    /// Semantic similarity is the candidate *generator* and write-time decides
+    /// the order, so a newest record worded less literally than an older one
+    /// still wins. A recency *weight* cannot guarantee that — it has to
+    /// out-score the semantic gap before it reorders anything, and at a
+    /// 30-day half-life two records days apart barely differ.
+    Recent,
+}
+
+impl RecallSort {
+    /// How many rows to pull from `search_similar` to serve `limit` results.
+    ///
+    /// `Recent` needs a wider net than it returns: the newest row is often a
+    /// mediocre semantic match, so it sits deep in the cosine ordering. 5x
+    /// covers the reported failures without turning recall into a table scan,
+    /// and the 50-row ceiling bounds the cost.
+    ///
+    /// Never returns less than `limit`. A naive `min(limit * 5, 50)`
+    /// under-fetches once `limit` passes 50 and hands the caller a short page.
+    pub fn candidate_limit(self, limit: usize) -> usize {
+        match self {
+            RecallSort::Relevance => limit,
+            RecallSort::Recent => limit.saturating_mul(5).min(50).max(limit),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -1363,6 +1479,26 @@ pub struct RecallResult {
     /// shape byte-identical to today for default-weights requests.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<f64>,
+    /// Write-time of the memory, from `vector_entries.created_at` — threaded
+    /// `SearchHit` → `HydratedMemory` → here by the recall handler's
+    /// `zip_search_hit_fields_onto_hydrated`.
+    ///
+    /// Present so a caller can order and verify the returned set by
+    /// write-time rather than re-ranking on a date it has to parse back out
+    /// of the memory text (WALM-383). Note this is the *write* time, not any
+    /// event time the text itself may describe.
+    ///
+    /// This alone does not make "newest wins" correct: the candidate set is
+    /// the cosine top-`limit` from `search_similar`, so the newest row can be
+    /// missing from `results` entirely and no client-side sort recovers it.
+    /// The server-side recency mode that over-fetches is still open.
+    ///
+    /// `None` only when the hydrated record had no matching `SearchHit`,
+    /// which shouldn't happen on the recall path. `skip_serializing_if`
+    /// then omits the field rather than sending a fabricated date — for a
+    /// newest-wins caller a wrong timestamp is worse than a missing one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1693,16 +1829,15 @@ pub struct RestoreResponse {
     pub total: usize,
     pub namespace: String,
     pub owner: String,
-    /// True when this restore is known-incomplete: either more on-chain
-    /// blobs were missing locally than `limit` allowed this call to
-    /// restore, or the sidecar's raw on-chain candidate fetch (bounded
-    /// per owner, shared across all of the owner's namespaces, hard-capped
-    /// independent of `limit`) hit its own cap before this namespace's
-    /// blobs were even filtered out of that set — the second
-    /// case can be `true` even when `total == 0` for this namespace,
-    /// since a cap hit elsewhere can starve this namespace's fetch
-    /// entirely. Raising `limit` only helps with the first case; past the
-    /// sidecar's cap, only a cursor/pagination-based restore would.
+    /// True when this restore is known-incomplete: more on-chain blobs were
+    /// missing locally than `limit` allowed this call to restore, or the
+    /// sidecar's owner-wide candidate fetch hit its cap *and* raising
+    /// `limit` can still expand that fetch (`limit < 20`, cap = min(limit*5,
+    /// 100)) — including `total == 0` in that window, because other
+    /// namespaces can starve this one. Once the sidecar cap is saturated
+    /// (`limit >= 20`), truncation follows this call's missing-blob page,
+    /// not on-chain `total`, so a fully restored namespace does not loop
+    /// (WALM-431 / GH #762).
     pub truncated: bool,
 }
 
@@ -1770,6 +1905,10 @@ pub struct HealthResponse {
     /// This is sidecar liveness, not a guarantee that remember/analyze will
     /// succeed. `status` stays `"ok"` while the relayer process is up.
     pub write_ready: bool,
+    /// Write-path admission: `"ok"` or `"paused"`. `"paused"` when
+    /// `WRITES_PAUSED` is set; write routes then return HTTP 503.
+    /// Distinct from `write_ready`. `/health` stays HTTP 200.
+    pub writes: String,
 }
 
 /// prompt version constants surfaced on `/health`. See the
@@ -1949,6 +2088,9 @@ pub enum AppError {
     /// silently-dropped turn into one retried with exponential backoff —
     /// closing the bench-completion gap diagnosed during the LME v2 run.
     UpstreamUnavailable(String),
+    /// Operator write pause (`WRITES_PAUSED`). HTTP 503 with a stable
+    /// client-visible message, distinct from transient upstream failures.
+    WritesPaused(String),
 }
 
 impl std::fmt::Display for AppError {
@@ -1963,6 +2105,7 @@ impl std::fmt::Display for AppError {
             AppError::RateLimited(msg) => write!(f, "Rate Limited: {}", msg),
             AppError::QuotaExceeded(msg) => write!(f, "Quota Exceeded: {}", msg),
             AppError::UpstreamUnavailable(msg) => write!(f, "Upstream Unavailable: {}", msg),
+            AppError::WritesPaused(msg) => write!(f, "Writes Paused: {}", msg),
         }
     }
 }
@@ -1994,6 +2137,9 @@ impl axum::response::IntoResponse for AppError {
             AppError::Conflict(msg) => (axum::http::StatusCode::CONFLICT, msg.clone()),
             AppError::RateLimited(msg) => (axum::http::StatusCode::TOO_MANY_REQUESTS, msg.clone()),
             AppError::QuotaExceeded(msg) => (axum::http::StatusCode::PAYMENT_REQUIRED, msg.clone()),
+            AppError::WritesPaused(msg) => {
+                (axum::http::StatusCode::SERVICE_UNAVAILABLE, msg.clone())
+            }
             AppError::UpstreamUnavailable(msg) => {
                 // log the upstream details server-side, return
                 // 503 so the SDK / harness will retry per their
@@ -2031,6 +2177,7 @@ impl AppError {
             AppError::RateLimited(_) => "rate_limited",
             AppError::QuotaExceeded(_) => "quota_exceeded",
             AppError::UpstreamUnavailable(_) => "upstream_unavailable",
+            AppError::WritesPaused(_) => "writes_paused",
         }
     }
 }
@@ -2159,6 +2306,7 @@ mod tests {
             trusted_proxy_hops: 0,
             allowed_origins: String::new(),
             benchmark_mode: false,
+            writes_paused: false,
             enable_memory_deletion: false,
             enable_security_delete: false,
             legacy_db_url: None,
@@ -2798,7 +2946,10 @@ mod tests {
     #[test]
     fn auth_clock_drift_accepts_exact_ceiling() {
         with_auth_clock_drift_env(Some("900"), || {
-            assert_eq!(configured_auth_clock_drift_secs(), MAX_AUTH_CLOCK_DRIFT_SECS);
+            assert_eq!(
+                configured_auth_clock_drift_secs(),
+                MAX_AUTH_CLOCK_DRIFT_SECS
+            );
         });
     }
 
@@ -2806,25 +2957,62 @@ mod tests {
     fn auth_clock_drift_rejects_just_over_ceiling() {
         // Pin the exact inclusive boundary: 900 accepted, 901 falls back.
         with_auth_clock_drift_env(Some("901"), || {
-            assert_eq!(configured_auth_clock_drift_secs(), DEFAULT_AUTH_CLOCK_DRIFT_SECS);
+            assert_eq!(
+                configured_auth_clock_drift_secs(),
+                DEFAULT_AUTH_CLOCK_DRIFT_SECS
+            );
         });
     }
 
     #[test]
     fn auth_clock_drift_falls_back_when_env_exceeds_cap() {
         with_auth_clock_drift_env(Some("3600"), || {
-            assert_eq!(configured_auth_clock_drift_secs(), DEFAULT_AUTH_CLOCK_DRIFT_SECS);
+            assert_eq!(
+                configured_auth_clock_drift_secs(),
+                DEFAULT_AUTH_CLOCK_DRIFT_SECS
+            );
         });
     }
 
     #[test]
     fn auth_clock_drift_falls_back_on_negative_or_garbage() {
         with_auth_clock_drift_env(Some("-5"), || {
-            assert_eq!(configured_auth_clock_drift_secs(), DEFAULT_AUTH_CLOCK_DRIFT_SECS);
+            assert_eq!(
+                configured_auth_clock_drift_secs(),
+                DEFAULT_AUTH_CLOCK_DRIFT_SECS
+            );
         });
         with_auth_clock_drift_env(Some("not-a-number"), || {
-            assert_eq!(configured_auth_clock_drift_secs(), DEFAULT_AUTH_CLOCK_DRIFT_SECS);
+            assert_eq!(
+                configured_auth_clock_drift_secs(),
+                DEFAULT_AUTH_CLOCK_DRIFT_SECS
+            );
         });
+    }
+
+    // ── require_owner_token_secret_len — empty disables, short panics ────
+
+    #[test]
+    fn owner_token_secret_empty_stays_disabled() {
+        assert_eq!(require_owner_token_secret_len(String::new()), "");
+    }
+
+    #[test]
+    #[should_panic(expected = "OWNER_TOKEN_SECRET must be at least 32 bytes; got 11")]
+    fn owner_token_secret_rejects_test_secret() {
+        let _ = require_owner_token_secret_len("test-secret".into());
+    }
+
+    #[test]
+    #[should_panic(expected = "OWNER_TOKEN_SECRET must be at least 32 bytes; got 31")]
+    fn owner_token_secret_rejects_31_bytes() {
+        let _ = require_owner_token_secret_len("a".repeat(MIN_OWNER_TOKEN_SECRET_LEN - 1));
+    }
+
+    #[test]
+    fn owner_token_secret_accepts_32_bytes() {
+        let secret = "a".repeat(MIN_OWNER_TOKEN_SECRET_LEN);
+        assert_eq!(require_owner_token_secret_len(secret.clone()), secret);
     }
 
     #[test]
@@ -3010,6 +3198,17 @@ mod tests {
         assert!(validate_namespace(&"n".repeat(MAX_NAMESPACE_BYTES + 1)).is_err());
     }
 
+    #[test]
+    fn namespace_validation_rejects_nul_bytes() {
+        assert!(validate_namespace("default\0evil").is_err());
+        assert!(validate_namespace("normal-ns_01").is_ok());
+        // Other control characters stay accepted: Postgres stores them without
+        // complaint, and this validator also gates recall/ask/stats/forget, so
+        // rejecting them would strand namespaces written before the NUL check.
+        assert!(validate_namespace("has\nnewline").is_ok());
+        assert!(validate_namespace("has\ttab").is_ok());
+    }
+
     // ── HealthResponse.prompt_versions wire shape ────────────────
 
     #[test]
@@ -3027,11 +3226,13 @@ mod tests {
                 ask: "ask.v1".to_string(),
             },
             write_ready: true,
+            writes: "ok".to_string(),
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["prompt_versions"]["extract"], "extract.v1");
         assert_eq!(json["prompt_versions"]["ask"], "ask.v1");
         assert_eq!(json["write_ready"], true);
+        assert_eq!(json["writes"], "ok");
         assert_eq!(
             json["apiVersion"],
             crate::compatibility::RELAYER_API_VERSION
@@ -3041,5 +3242,19 @@ mod tests {
             json["minSupportedSdk"]["typescript"],
             crate::compatibility::MIN_TYPESCRIPT_SDK_VERSION
         );
+    }
+
+    #[tokio::test]
+    async fn writes_paused_maps_to_503_with_stable_message() {
+        assert_eq!(writes_health_status(false), "ok");
+        assert_eq!(writes_health_status(true), "paused");
+        assert!(reject_if_writes_paused(false).is_ok());
+        let err = reject_if_writes_paused(true).expect_err("paused writes");
+        assert_eq!(err.kind(), "writes_paused");
+        let resp = axum::response::IntoResponse::into_response(err);
+        assert_eq!(resp.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], WRITES_PAUSED_ERROR);
     }
 }
