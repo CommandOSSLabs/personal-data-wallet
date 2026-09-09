@@ -318,13 +318,42 @@ fn postgres_storage_dedup_key(sui_network: &str) -> (String, String) {
 /// True when Postgres (or Neon) refused a write because the disk / project
 /// size cap is exhausted. Matches the prod Neon message
 /// `could not extend file because project size limit (3072 MB) has been exceeded`
-/// plus vanilla `no space left on device` and SQLSTATE `53100` (disk_full).
+/// plus vanilla `no space left on device`. sqlx 0.8 `Display` is message-only,
+/// so SQLSTATE `53100` is matched via `DatabaseError::code` when the typed
+/// error is in hand — not as a substring of the message.
 pub fn is_postgres_storage_exhausted(msg: &str) -> bool {
     let lower = msg.to_ascii_lowercase();
     lower.contains("could not extend file")
         || lower.contains("project size limit")
-        || lower.contains("53100")
         || lower.contains("no space left on device")
+}
+
+pub fn sqlx_error_is_postgres_storage_exhausted(err: &sqlx::Error) -> bool {
+    if let Some(db) = err.as_database_error() {
+        if db.code().as_deref() == Some("53100") {
+            return true;
+        }
+        if is_postgres_storage_exhausted(db.message()) {
+            return true;
+        }
+    }
+    is_postgres_storage_exhausted(&err.to_string())
+}
+
+pub async fn maybe_alert_postgres_storage_exhausted(state: &crate::types::AppState, err: &str) {
+    if !is_postgres_storage_exhausted(err) {
+        return;
+    }
+    let alert = PostgresStorageExhaustedAlert {
+        sui_network: state.config.sui_network.clone(),
+        error: err.to_string(),
+    };
+    if let Err(alert_err) = state.alerts.notify_postgres_storage_exhausted(alert).await {
+        tracing::warn!(
+            "failed to send Slack alert for Postgres storage exhaustion: {}",
+            alert_err
+        );
+    }
 }
 
 /// Read a dedup window (seconds) from `env_var`, falling back to `default`
@@ -1424,11 +1453,26 @@ mod tests {
         assert!(is_postgres_storage_exhausted(
             "ERROR: could not extend file \"base/16384/12345\": No space left on device"
         ));
-        assert!(is_postgres_storage_exhausted("sqlstate 53100 disk_full"));
+        assert!(!is_postgres_storage_exhausted("sqlstate 53100 disk_full"));
         assert!(!is_postgres_storage_exhausted(
             "duplicate key value violates unique constraint"
         ));
         assert!(!is_postgres_storage_exhausted("Storage quota exceeded"));
+    }
+
+    #[test]
+    fn sqlx_error_is_postgres_storage_exhausted_matches_sqlstate() {
+        let disk_full = sqlx::Error::Database(Box::new(FakePgError {
+            message: "the wording changed in a future postgres",
+            code: Some("53100"),
+        }));
+        assert!(sqlx_error_is_postgres_storage_exhausted(&disk_full));
+
+        let other = sqlx::Error::Database(Box::new(FakePgError {
+            message: "duplicate key value violates unique constraint",
+            code: Some("23505"),
+        }));
+        assert!(!sqlx_error_is_postgres_storage_exhausted(&other));
     }
 
     #[test]
@@ -1459,9 +1503,51 @@ mod tests {
             ("mainnet".to_string(), "postgres-storage".to_string())
         );
 
-        let manager = AlertManager::from_env(reqwest::Client::new());
-        assert!(!manager.should_suppress_postgres_storage("mainnet"));
-        assert!(manager.should_suppress_postgres_storage("mainnet"));
-        assert!(!manager.should_suppress_postgres_storage("testnet"));
+        // Do not read POSTGRES_STORAGE_ALERT_DEDUP_SECS: a real env value
+        // would change the window (or make the second fire miss the window).
+        let dedup = AlertDedup::new(POSTGRES_STORAGE_ALERT_DEDUP_DEFAULT);
+        assert!(!dedup.should_suppress(postgres_storage_dedup_key("mainnet")));
+        assert!(dedup.should_suppress(postgres_storage_dedup_key("mainnet")));
+        assert!(!dedup.should_suppress(postgres_storage_dedup_key("testnet")));
+    }
+
+    #[derive(Debug)]
+    struct FakePgError {
+        message: &'static str,
+        code: Option<&'static str>,
+    }
+
+    impl std::fmt::Display for FakePgError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.message)
+        }
+    }
+
+    impl std::error::Error for FakePgError {}
+
+    impl sqlx::error::DatabaseError for FakePgError {
+        fn message(&self) -> &str {
+            self.message
+        }
+
+        fn kind(&self) -> sqlx::error::ErrorKind {
+            sqlx::error::ErrorKind::Other
+        }
+
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+            self.code.map(std::borrow::Cow::Borrowed)
+        }
+
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
     }
 }

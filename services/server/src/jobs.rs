@@ -873,6 +873,7 @@ async fn insert_vector_and_mark_remember_done(
         .await
     {
         let msg = format!("insert_vector failed: {}", e);
+        crate::alerts::maybe_alert_postgres_storage_exhausted(state, &msg).await;
         let classified = WalletJobError::classify_sidecar_error(&msg);
         update_remember_job_after_wallet_error(state.db.pool(), remember_job_id, &classified, &msg)
             .await;
