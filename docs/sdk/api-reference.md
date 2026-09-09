@@ -263,7 +263,7 @@ Rebuild missing indexed entries for one namespace from Walrus. Incremental — o
 {
   restored: number;   // Entries newly indexed
   skipped: number;    // On-chain blobs already in the local success index
-  failed?: number;    // Permanent decrypt/UTF-8 failures (defaults to 0)
+  failed: number;     // Permanent decrypt/UTF-8 failures (defaults to 0)
   total: number;      // Total blobs found on-chain
   namespace: string;
   owner: string;

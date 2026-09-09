@@ -879,9 +879,10 @@ export class MemWal {
      *   download → decrypt → embed → DB insert pipeline this call.
      * - `skipped` — on-chain blobs already in the local success index
      *   (no work needed). Does not include permanent decrypt/UTF-8 failures.
-     * - `failed` — permanent decrypt/UTF-8 failures: the owner+namespace
-     *   negative cache plus any new permanent failures this call. Transient
-     *   download/decrypt/embed errors are not counted here and may be retried.
+     * - `failed` — permanent decrypt/UTF-8 failures on this on-chain page:
+     *   negative-cache hits plus any new permanent failures this call.
+     *   Transient download/decrypt/embed errors are not counted here; when
+     *   a page yields only those, `truncated` is true so the caller retries.
      * - `total` — on-chain blobs the relayer saw for `(owner, namespace)`
      *   before the limit was applied.
      *

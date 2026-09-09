@@ -365,7 +365,7 @@ Cross-namespace and cross-owner reads are not just filtered out of results — t
 |---|---|---|
 | `restored` | Blobs the relayer just rebuilt this call | Pulled from Walrus → SEAL decrypted → re-embedded → inserted as a new row |
 | `skipped` | On-chain blobs already in the local **success** index | No work needed; relayer left them as-is. Does not include decrypt/UTF-8 failures. |
-| `failed` | Permanent decrypt/UTF-8 failures | Negative cache for this owner+namespace plus new permanent failures this call. Older relayers omit the field; SDKs default it to `0`. |
+| `failed` | Permanent decrypt/UTF-8 failures | On-chain blobs in this page that are negative-cached, plus new permanent failures this call. Older relayers omit the field; SDKs default it to `0`. |
 | `total` | All on-chain blobs the relayer saw for `(owner, namespace)` | Before the limit was applied |
 | `namespace` | Echo of the request | |
 | `owner` | Resolved owner address | |
@@ -373,7 +373,7 @@ Cross-namespace and cross-owner reads are not just filtered out of results — t
 
 `truncated=true` means this restore is **known-retryable-incomplete**: more missing blobs than `limit` allowed this call to restore, **or** the sidecar's owner-wide candidate fetch hit its cap **and** raising `limit` can still expand that fetch (`limit < 20`). Once the sidecar cap is saturated (`limit >= 20`, cap pinned at 100), truncation follows this call's missing-blob page length, not onchain `total`. A fully restored namespace does not loop. `truncated=false` is **not** proof the sidecar saw every onchain blob; blobs beyond the owner-wide sidecar candidate cap can still be missing. WALM-451 tracks a `sourceCapped` field for that case. Relayers older than WALM-319 omit `truncated`; SDKs default it to `false`.
 
-Permanent decrypt or invalid-UTF-8 failures count in `failed`, not `skipped`. Transient download/decrypt/embed errors are still not counted in `restored`, `skipped`, or `failed` and may be retried. `restored + skipped + failed` is therefore a lower bound on inspected blobs, not a strict equality with `total`.
+Permanent decrypt or invalid-UTF-8 failures count in `failed`, not `skipped`. Transient download/decrypt/embed errors are still not counted in `restored`, `skipped`, or `failed` and may be retried (`truncated=true` when a page yields only those). `restored + skipped + failed` therefore never exceeds `total`, and falls short of it whenever transient errors leave blobs uncounted.
 
 #### Default and limit
 

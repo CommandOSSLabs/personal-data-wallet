@@ -908,11 +908,12 @@ class MemWal:
         * ``skipped`` — on-chain blobs already present in the local success
           index (no work needed). Does not include permanent decrypt/UTF-8
           failures.
-        * ``failed`` — permanent decrypt/UTF-8 failures: the owner+namespace
-          negative cache plus any new permanent failures this call.
-          Transient download/decrypt/embed errors are not counted here and
-          may be retried. Defaults to ``0`` when talking to a relayer older
-          than COMG-719 that omits the field.
+        * ``failed`` — permanent decrypt/UTF-8 failures on this on-chain page:
+          negative-cache hits plus any new permanent failures this call.
+          Transient download/decrypt/embed errors are not counted here; when
+          a page yields only those, ``truncated`` is true so the caller
+          retries. Defaults to ``0`` when talking to a relayer older than
+          COMG-719 that omits the field.
         * ``total`` — count of on-chain blobs the relayer saw for
           ``(owner, namespace)`` before the limit was applied.
         * ``truncated`` — True when this restore is known-incomplete (limit

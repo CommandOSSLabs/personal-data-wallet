@@ -1826,9 +1826,10 @@ pub struct RestoreRequest {
 pub struct RestoreResponse {
     pub restored: usize,
     pub skipped: usize,
-    /// Permanent decrypt/UTF-8 failures for this owner+namespace: the
-    /// `restore_failed_blobs` negative cache plus any new permanent
-    /// failures recorded in this call. Additive JSON field (COMG-719).
+    /// Permanent decrypt/UTF-8 failures on this on-chain page: negative-cache
+    /// hits plus any new permanent failures this call. Transient download,
+    /// decrypt, or embed errors are not counted here. Additive JSON field
+    /// (COMG-719 / WALM-480).
     pub failed: usize,
     pub total: usize,
     pub namespace: String,
@@ -1841,7 +1842,8 @@ pub struct RestoreResponse {
     /// namespaces can starve this one. Once the sidecar cap is saturated
     /// (`limit >= 20`), truncation follows this call's missing-blob page,
     /// not on-chain `total`, so a fully restored namespace does not loop
-    /// (WALM-431 / GH #762).
+    /// (WALM-431 / GH #762). Also true when an inspected page produced only
+    /// transients (download/decrypt/embed) so the caller retries (WALM-480).
     pub truncated: bool,
 }
 
