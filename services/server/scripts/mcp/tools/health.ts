@@ -18,7 +18,7 @@ export function registerHealthTool(
         {
             ...TOOL_METADATA.memwal_health,
             description:
-                "Quick connectivity check for Walrus Memory. Calls the relayer's lightweight health endpoint (no search, no decryption) and returns its status, version, and the relayer URL that answered (use it to confirm which network — prod / staging / dev / local — this client is bound to). Use this to confirm the server is reachable — do NOT use memwal_recall for health checks, which is a full and slow retrieval.",
+                "Quick connectivity check for Walrus Memory. Calls the relayer's lightweight health endpoint (no search, no decryption) and returns its status and version, plus the relayer origin when the deployment publishes one (use it to confirm which network — prod / staging / dev / local — this client is bound to). Use this to confirm the server is reachable — do NOT use memwal_recall for health checks, which is a full and slow retrieval.",
             inputSchema: {},
         },
         wrapTool<Record<string, never>>(session, "memwal_health", async () => {
@@ -30,10 +30,12 @@ export function registerHealthTool(
                     : extra.write_ready === true
                       ? " write_ready=true"
                       : "";
-            // WALM-390: name the relayer that actually answered. A config on
-            // the wrong network is otherwise invisible here.
-            const relayerNote = session.relayerUrl
-                ? ` relayer=${session.relayerUrl}`
+            // Only a deployment-supplied public origin, never `relayerUrl`
+            // — that one is the address this process dials, which is loopback
+            // unless overridden. Printing loopback as the network is how a
+            // client bound to the wrong relayer reads as correctly configured.
+            const relayerNote = session.publicRelayerUrl
+                ? ` relayer=${session.publicRelayerUrl}`
                 : "";
             return {
                 content: [

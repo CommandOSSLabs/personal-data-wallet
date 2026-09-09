@@ -28,8 +28,8 @@ interface ParsedArgs {
     webUrl?: string;
     label?: string;
     namespace?: string;
-    /** Args parseArgs did not recognise, in the order seen. WALM-390: these
-     *  used to be dropped on the floor; main() now names them on stderr. */
+    /** Args parseArgs did not recognise, in the order seen. For a flag
+     *  written `--key=value`, only `--key` is recorded — see parseArgs. */
     unknown: string[];
 }
 
@@ -41,6 +41,10 @@ const ENV_PRESETS: Record<string, { relayer: string; web: string }> = {
     staging: { relayer: "https://relayer-staging.memory.walrus.xyz", web: "https://staging.memory.walrus.xyz" },
     local: { relayer: "http://127.0.0.1:8000", web: "http://localhost:5173" },
 };
+
+/** Bare words that are commands rather than values. An unknown flag must not
+ *  swallow one as its argument. */
+const POSITIONALS = new Set(["login"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
     const out: ParsedArgs = { help: false, logout: false, forceLogin: false, unknown: [] };
@@ -92,19 +96,30 @@ export function parseArgs(argv: string[]): ParsedArgs {
                 else if (a?.startsWith("--label=")) out.label = a.split("=", 2)[1];
                 else if (a?.startsWith("--namespace=")) out.namespace = a.split("=", 2)[1];
                 else if (a?.startsWith("--ns=")) out.namespace = a.split("=", 2)[1];
-                // WALM-390: anything still unmatched is a typo, or a flag
-                // from a newer build. Record it. Swallowing it here is what
-                // let `--prod` look supported for months while doing nothing.
-                // Values of KNOWN value-taking flags never reach this branch
-                // — `next()` already consumed them.
+                // Anything still unmatched is a typo, or a flag from a newer
+                // build. Values of KNOWN value-taking flags never reach this
+                // branch — `next()` already consumed them.
                 else if (a !== undefined) {
-                    out.unknown.push(a);
-                    // An unknown flag may take a value too. Consume a
-                    // following non-flag token as that value so `--namesapce
-                    // work` warns once about `--namesapce` rather than twice,
-                    // the second naming the user's data. Keeps a mistyped
-                    // secret (`--tokenn hunter2`) out of stderr and the logs.
-                    if (a.startsWith("-") && argv[i + 1] !== undefined && !argv[i + 1].startsWith("-")) {
+                    // Record the key only. A mistyped value-taking flag written
+                    // `--tokenn=hunter2` would otherwise put the user's secret
+                    // on stderr, which is the one place this warning must not
+                    // put it.
+                    const eq = a.indexOf("=");
+                    out.unknown.push(eq === -1 ? a : a.slice(0, eq));
+                    // An unknown flag may take its value as the next token, so
+                    // consume one — `--namesapce work` should warn once about
+                    // `--namesapce`, not a second time naming the user's data.
+                    // POSITIONALS are exempt: they are commands, not values, and
+                    // swallowing one would turn `memwal-mcp --typo login` into a
+                    // run that never logs in.
+                    const value = argv[i + 1];
+                    if (
+                        a.startsWith("-") &&
+                        eq === -1 &&
+                        value !== undefined &&
+                        !value.startsWith("-") &&
+                        !POSITIONALS.has(value)
+                    ) {
                         i++;
                     }
                 }
@@ -117,9 +132,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
     const args = parseArgs(argv);
 
-    // WALM-390: name what we could not parse. Runs before the --help branch
-    // so `memwal-mcp --typo --help` still calls the typo out. Warn, never
-    // exit: an unknown flag from a newer config must not brick the server.
+    // Runs before the --help branch so `memwal-mcp --typo --help` still calls
+    // the typo out. Warn, never exit: an unknown flag from a newer config must
+    // not brick the server.
     for (const flag of args.unknown) {
         log.warn("cli.unrecognised_arg", { arg: flag });
         note(
@@ -288,11 +303,10 @@ function printHelp(): void {
 }
 
 /** The `--help` body. Exported so tests can assert it stays in step with the
- *  flags parseArgs actually accepts — WALM-390 was reported precisely because
- *  it had drifted. */
+ *  flags parseArgs actually accepts. */
 export function helpText(): string {
     // Rendered from ENV_PRESETS rather than retyped, so a new preset cannot
-    // ship undocumented the way --prod did.
+    // ship undocumented.
     const presetLines = Object.entries(ENV_PRESETS).flatMap(([name, urls]) => [
         `  ${`--${name}`.padEnd(33)}relayer: ${urls.relayer}`,
         `  ${"".padEnd(33)}web:     ${urls.web}`,
@@ -334,7 +348,8 @@ export function helpText(): string {
         ...presetLines,
         "",
         "                                   An explicit --relayer or --web-url",
-        "                                   overrides the preset it follows.",
+        "                                   wins over a preset, whichever",
+        "                                   order they are written in.",
         "",
         "Environment (equivalent to options):",
         "  MEMWAL_SERVER_URL                same as --relayer",

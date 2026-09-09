@@ -3,10 +3,10 @@ import test from "node:test";
 
 import { helpText, parseArgs } from "../dist/index.js";
 
-// WALM-390: an unrecognised flag used to fall through parseArgs' default
-// branch and vanish. A typo'd `--namesapce` still wrote to the relayer's
-// "default" namespace with nothing on stderr to explain why. parseArgs now
-// collects what it did not understand so main() can name it.
+// An unrecognised flag used to fall through parseArgs' default branch and
+// vanish: a typo'd `--namesapce` still wrote to the relayer's "default"
+// namespace with nothing on stderr to explain why. parseArgs now collects what
+// it did not understand so main() can name it.
 
 test("parseArgs collects a typo'd flag instead of dropping it", () => {
     const args = parseArgs(["--namesapce", "work"]);
@@ -36,6 +36,31 @@ test("a known flag after an unknown flag's value still applies", () => {
     const args = parseArgs(["--typo", "value", "--ns", "work"]);
     assert.deepEqual(args.unknown, ["--typo"]);
     assert.equal(args.namespace, "work");
+});
+
+test("an unknown flag does not swallow the `login` command", () => {
+    // `login` is a command, not a value. Consuming it turned
+    // `memwal-mcp --typo login` into a run that never logged in.
+    const args = parseArgs(["--typo", "login"]);
+    assert.deepEqual(args.unknown, ["--typo"]);
+    assert.equal(args.forceLogin, true, "`login` was swallowed as a flag value");
+});
+
+test("an unknown `--key=value` flag reports the key and never the value", () => {
+    // The warning goes to stderr, so a mistyped secret must not survive into it.
+    const args = parseArgs(["--tokenn=hunter2"]);
+    assert.deepEqual(args.unknown, ["--tokenn"]);
+    assert.ok(
+        !args.unknown.some((u) => u.includes("hunter2")),
+        "the flag's value reached the warning",
+    );
+});
+
+test("an unknown `--key=value` flag does not also swallow the next token", () => {
+    // Its value is already attached, so the following token is someone else's.
+    const args = parseArgs(["--tokenn=hunter2", "login"]);
+    assert.deepEqual(args.unknown, ["--tokenn"]);
+    assert.equal(args.forceLogin, true);
 });
 
 test("parseArgs treats no known flag as unknown", () => {
@@ -74,9 +99,8 @@ test("env presets still resolve both URLs (regression guard)", () => {
     assert.deepEqual(args.unknown, []);
 });
 
-// WALM-390 item 2: `--prod` read as unsupported to anyone checking --help,
-// which is how the bug got reported. Help must list every preset the parser
-// honours — and stay listing them as presets are added.
+// Help must list every preset the parser honours, and stay listing them as
+// presets are added.
 
 test("--help documents every network preset the parser accepts", () => {
     const help = helpText();
@@ -88,4 +112,15 @@ test("--help documents every network preset the parser accepts", () => {
     // The URLs a preset resolves to are what tell you which network you're on.
     assert.ok(help.includes("https://relayer.dev.memwal.ai"));
     assert.ok(help.includes("http://127.0.0.1:8000"));
+});
+
+test("--help does not promise that flag order decides a preset override", () => {
+    // Preset application is `??=`, so an explicit URL wins from either side.
+    // Help used to say the flag overrides "the preset it follows".
+    const help = helpText();
+    assert.ok(!help.includes("the preset it follows"), "help still implies order matters");
+    const before = parseArgs(["--relayer", "https://custom.example", "--prod"]);
+    const after = parseArgs(["--prod", "--relayer", "https://custom.example"]);
+    assert.equal(before.relayerUrl, "https://custom.example");
+    assert.equal(after.relayerUrl, "https://custom.example");
 });
