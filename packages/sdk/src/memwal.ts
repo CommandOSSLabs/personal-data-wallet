@@ -125,10 +125,10 @@ interface SignedRequestOptions {
     /** Caller-owned cancellation, honoured alongside `timeoutMs`. */
     signal?: AbortSignal;
     /**
-     * WALM-598: deadline for the signed request itself. The clock starts
-     * after the preflights resolve, so this is never charged for a slow
-     * `/version`, `/health` or `/config`. Omit (or pass 0) for no deadline —
-     * which is what every route other than recall does today.
+     * Deadline for the signed request itself. The clock starts after the
+     * preflights resolve, so this is never charged for a slow `/version`,
+     * `/health` or `/config`. Omit (or pass 0) for no deadline — which is what
+     * every route other than recall does today (WALM-598).
      */
     timeoutMs?: number;
 }
@@ -204,10 +204,9 @@ export class MemWal {
     private namespace: string;
     private accountId: string;
     /**
-     * WALM-598: recall's abort budget, and the independent per-round-trip
-     * budget for the unauthenticated preflights that precede it. Kept
-     * separate so a slow `/version`, `/health` or `/config` can no longer
-     * be charged against the recall request it precedes.
+     * Recall's abort budget, and the independent per-round-trip budget for the
+     * unauthenticated preflights that precede it. Separate so a slow
+     * `/version`, `/health` or `/config` is never charged against recall.
      */
     private recallTimeoutMs: number;
     private preflightTimeoutMs: number;
@@ -694,13 +693,8 @@ export class MemWal {
         const limit = options.topK ?? options.limit ?? 10;
         const resolvedNamespace = options.namespace ?? this.namespace;
 
-        // WALM-598: this budget is handed to `signedRequest`, which starts the
-        // clock on the `/api/recall` fetch itself — after `ensureCompatibleRelayer`
-        // (`/version`, falling back to `/health`) and `buildSealSession`
-        // (`/config` + Sui RPC) have already resolved. Those preflights carry
-        // their own independent deadlines, so a relayer whose `/health` p50 had
-        // crept to ~9s can no longer eat most of recall's window and make a
-        // perfectly healthy recall surface an `AbortError` (GH #438).
+        // The clock starts on the `/api/recall` fetch itself, after the
+        // preflights resolve on their own deadlines.
         const timeoutMs = options.timeoutMs ?? this.recallTimeoutMs;
         const result = await this.signedRequest<RecallResult>("POST", "/api/recall", {
             query,
@@ -1095,10 +1089,8 @@ export class MemWal {
     }
 
     private async fetchCompatibilityMetadata(): Promise<RelayerVersionMetadata> {
-        // WALM-598: both round-trips get their own bounded budget. They run
-        // inside whatever signed request triggered the compatibility probe, so
-        // leaving them untimed let a stalled relayer silently drain that
-        // caller's deadline (and, with no signal at all, hang indefinitely).
+        // Both round-trips run inside whatever signed request triggered the
+        // probe, so each needs its own budget rather than that caller's.
         const versionRes = await fetchWithDeadline(
             `${this.serverUrl}/version`,
             { method: "GET" },
@@ -1158,8 +1150,7 @@ export class MemWal {
 
     private async fetchServerConfig(): Promise<ServerConfig> {
         if (this.serverConfig) return this.serverConfig;
-        // WALM-598: bounded like the other preflights — this one is awaited
-        // inside `buildSealSession`, itself awaited inside a caller's budget.
+        // Awaited inside `buildSealSession`, itself inside a caller's budget.
         const res = await fetchWithDeadline(
             `${this.serverUrl}/config`,
             { method: "GET" },
@@ -1430,12 +1421,8 @@ export class MemWal {
         if (options.includeDelegateKey !== false) {
             headers["x-seal-session"] = await this.buildSealSession();
         }
-        // WALM-598: the caller's deadline starts HERE, not at the top of the
-        // call. Everything above — `ensureCompatibleRelayer()` (`/version` ->
-        // `/health`) and `buildSealSession()` (`/config`, dynamic imports, a
-        // Sui RPC round-trip for `SessionKey.create`) — is preflight work that
-        // used to run inside the caller's budget while being unabortable
-        // itself. Each of those now carries its own independent deadline.
+        // The caller's deadline starts HERE, not at the top of the call:
+        // everything above is preflight work on its own deadline (WALM-598).
         const res = await fetchWithDeadline(
             url,
             {
