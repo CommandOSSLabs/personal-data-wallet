@@ -246,6 +246,27 @@ describe('Dashboard namespaces pagination', () => {
         expect(within(card).queryByRole('button', { name: 'Next page' })).toBeNull()
     })
 
+    it('steps back when a continuation page comes back empty', async () => {
+        const user = userEvent.setup()
+        // The namespaces behind cursor-1 raced past the relayer snapshot, so the
+        // second page is empty. That is not a fresh empty account.
+        mocks.apiGet.mockImplementation(async (_k: string, _u: string, path: string) => {
+            if (!path.includes('/namespaces')) return {}
+            if (path.includes('updated_after=cursor-1')) return page('b', 0, false)
+            return page('a', 15, true, 'cursor-1')
+        })
+
+        const card = await namespacesCard()
+        await within(card).findByText('a-0')
+        await user.click(within(card).getByRole('button', { name: 'Next page' }))
+
+        // Back on page 1, with its rows — not the first-load empty copy.
+        await waitFor(() => expect(nsCalls().at(-1)).not.toContain('updated_after'))
+        await within(card).findByText('a-0')
+        expect(within(card).queryByText(/No indexed namespaces yet/)).toBeNull()
+        expect(within(card).getByRole('button', { name: 'Previous page' })).toBeDisabled()
+    })
+
     it('keeps the error state and hides the pagination footer', async () => {
         mocks.apiGet.mockImplementation(async (_k: string, _u: string, path: string) => {
             if (path.includes('/namespaces')) throw new Error('relayer down')

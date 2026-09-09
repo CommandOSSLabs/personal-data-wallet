@@ -477,34 +477,46 @@ export default function Dashboard({
         setNamespacesError('')
         try {
             const owner = address.toLowerCase()
-            const qs = new URLSearchParams({ limit: String(namespacesPageSize) })
-            const cursor = namespacesCursors.current[page]
-            if (cursor) qs.set('updated_after', cursor)
-            const path = `/v1/owners/${owner}/namespaces?${qs.toString()}`
-            const data = await apiGet(
-                delegateKey,
-                config.memwalServerUrl.replace(/\/+$/, ''),
-                path,
-                effectiveAccountObjectId,
-            ) as {
-                namespaces?: { name?: string; memory_count?: number }[]
-                next_cursor?: string | null
-                has_more?: boolean
-            }
-            if (gen !== namespacesFetchGen.current) return
-            const rows: { name: string; memory_count: number }[] = []
-            for (const ns of data.namespaces ?? []) {
-                if (typeof ns.name === 'string') {
-                    rows.push({ name: ns.name, memory_count: Number(ns.memory_count ?? 0) })
+            let target = page
+            for (;;) {
+                const qs = new URLSearchParams({ limit: String(namespacesPageSize) })
+                const cursor = namespacesCursors.current[target]
+                if (cursor) qs.set('updated_after', cursor)
+                const path = `/v1/owners/${owner}/namespaces?${qs.toString()}`
+                const data = await apiGet(
+                    delegateKey,
+                    config.memwalServerUrl.replace(/\/+$/, ''),
+                    path,
+                    effectiveAccountObjectId,
+                ) as {
+                    namespaces?: { name?: string; memory_count?: number }[]
+                    next_cursor?: string | null
+                    has_more?: boolean
                 }
+                if (gen !== namespacesFetchGen.current) return
+                const rows: { name: string; memory_count: number }[] = []
+                for (const ns of data.namespaces ?? []) {
+                    if (typeof ns.name === 'string') {
+                        rows.push({ name: ns.name, memory_count: Number(ns.memory_count ?? 0) })
+                    }
+                }
+                // Trust has_more + next_cursor, never rows.length: the relayer clamps limit.
+                const nextCursor = data.has_more ? (data.next_cursor ?? null) : null
+                namespacesCursors.current = namespacesCursors.current.slice(0, target + 1)
+                if (nextCursor) namespacesCursors.current[target + 1] = nextCursor
+                if (rows.length === 0 && target > 0) {
+                    // A continuation page can come back empty when namespaces move past
+                    // the relayer's snapshot_at while we page. Drop the cursor that opened
+                    // it and land on a real page instead of the first-load empty state.
+                    namespacesCursors.current.length = target
+                    target -= 1
+                    continue
+                }
+                setNamespaces(rows)
+                setNamespacesPage(target)
+                setNamespacesHasMore(Boolean(nextCursor))
+                return
             }
-            // Trust has_more + next_cursor, never rows.length: the relayer clamps limit.
-            const nextCursor = data.has_more ? (data.next_cursor ?? null) : null
-            namespacesCursors.current = namespacesCursors.current.slice(0, page + 1)
-            if (nextCursor) namespacesCursors.current[page + 1] = nextCursor
-            setNamespaces(rows)
-            setNamespacesPage(page)
-            setNamespacesHasMore(Boolean(nextCursor))
         } catch (err) {
             if (gen !== namespacesFetchGen.current) return
             console.error('Failed to list namespaces:', err)
@@ -514,7 +526,6 @@ export default function Dashboard({
         }
     }, [delegateKey, effectiveAccountObjectId, address, namespacesPageSize])
 
-    // Restart the walk at the first page with no leftover cursor. Also used by Refresh.
     const refreshNamespaces = useCallback(() => {
         namespacesCursors.current = [undefined]
         setNamespaces([])
@@ -523,7 +534,6 @@ export default function Dashboard({
         void fetchNamespacesPage(0)
     }, [fetchNamespacesPage])
 
-    // Changing account, delegate key, or page size restarts the walk.
     useEffect(() => {
         refreshNamespaces()
     }, [refreshNamespaces])
@@ -1141,7 +1151,9 @@ const result = await generateText({
                                 : namespacesError
                                     ? namespacesError
                                     : namespaces.length === 0
-                                        ? 'No indexed namespaces yet (or none the relayer can see for this account)'
+                                        ? namespacesPage > 0
+                                            ? 'This page is empty — go back for the namespaces already listed'
+                                            : 'No indexed namespaces yet (or none the relayer can see for this account)'
                                         : namespacesIsPaginated
                                             ? `Showing ${namespacesRangeStart}–${namespacesRangeEnd} · ${namespacesPageMemories} ${namespacesPageMemories === 1 ? 'memory' : 'memories'} on this page`
                                             : `${namespacesPageMemories} memories across ${namespaces.length} ${namespaces.length === 1 ? 'namespace' : 'namespaces'}`

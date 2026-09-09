@@ -8505,7 +8505,6 @@ h1, h2, h3 {
   border-bottom: 0;
 }
 
-/* Namespaces pagination footer — sits below the table it controls. */
 .dash-page .dashboard-pagination {
   display: flex;
   align-items: center;
