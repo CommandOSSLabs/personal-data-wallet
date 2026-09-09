@@ -15,7 +15,7 @@
  * Re-auth requires an explicit `memwal-mcp login` from the user.
  */
 import type { MemWalCredentials } from "./auth.js";
-import { clearCreds, credsPath } from "./auth.js";
+import { clearCreds, credsPath, loadCreds } from "./auth.js";
 import { TOOL_DEFINITIONS } from "./auth-required.js";
 import {
     clientInfoHeaders,
@@ -661,9 +661,15 @@ async function handleLocalLogin(
 
     return {
         isError: false,
-        // Signed in already: this flow REPLACES the stored delegate key, which
-        // the shared prompt calls out.
-        text: loginPrompt({ url, credentialsPath: credsPath(), signedIn: true }),
+        // Read from disk, never assumed from the mode. The bridge usually runs
+        // with credentials, but `memwal_logout` in this same session deletes
+        // them and login is intercepted before the signed-out guard — claiming
+        // "already signed in" there tells the user logout did not take.
+        text: loginPrompt({
+            url,
+            credentialsPath: credsPath(),
+            signedIn: loadCreds() !== null,
+        }),
     };
 }
 
@@ -716,20 +722,6 @@ function handleLocalLogout(): { text: string; isError: boolean } {
 }
 
 /**
- * Open the SSE bridge and forward stdio ↔ relayer until stdin closes.
- *
- * On SSE drop (idle timeout in the Rust proxy / undici keep-alive / network
- * blip), we transparently reopen the stream — the relayer issues a fresh
- * sessionId, we route subsequent POSTs there. stdin stays open the whole
- * time, so the MCP client (Cursor / Claude Desktop / etc.) never sees the
- * reconnection.
- *
- * Two tools (`memwal_login`, `memwal_logout`) are intercepted LOCALLY and
- * never forwarded to the relayer — they manipulate the local credentials
- * file directly. They appear in `tools/list` by splicing them into the
- * relayer's response on the way back to the client.
- */
-/**
  * A completed sign-in waiting to be reported to the client.
  *
  * Set when credentials are adopted — either mid-session via `adoptCredentials`
@@ -775,6 +767,20 @@ function applyPendingLoginSuccess(value: RpcMessage): void {
     log.info("bridge.login_success_notice_attached", { accountId: pending.accountId });
 }
 
+/**
+ * Open the SSE bridge and forward stdio ↔ relayer until stdin closes.
+ *
+ * On SSE drop (idle timeout in the Rust proxy / undici keep-alive / network
+ * blip), we transparently reopen the stream — the relayer issues a fresh
+ * sessionId, we route subsequent POSTs there. stdin stays open the whole
+ * time, so the MCP client (Cursor / Claude Desktop / etc.) never sees the
+ * reconnection.
+ *
+ * Two tools (`memwal_login`, `memwal_logout`) are intercepted LOCALLY and
+ * never forwarded to the relayer — they manipulate the local credentials
+ * file directly. They appear in `tools/list` by splicing them into the
+ * relayer's response on the way back to the client.
+ */
 export async function runBridge(
     initialCreds: MemWalCredentials,
     config: BridgeConfig,

@@ -14,7 +14,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -201,6 +201,101 @@ function spawnSignedOut(base, credsDir) {
         stdio: ["pipe", "pipe", "pipe"],
     });
 }
+
+/** Credentials on disk, so the real bridge runs instead of the auth-required
+ *  stub. Same account the callback below reports, keeping this a plain key
+ *  rotation rather than an account switch. */
+function seedCreds(credsDir, relayerUrl) {
+    // Flat, not `.memwal/` — `spawnSignedOut` sets MEMWAL_CREDS_DIR, which the
+    // CLI uses as the credentials directory itself.
+    const path = join(credsDir, "credentials.json");
+    mkdirSync(credsDir, { recursive: true });
+    writeFileSync(
+        path,
+        JSON.stringify({
+            delegatePrivateKey: "a".repeat(64),
+            delegatePublicKeyHex: "b".repeat(64),
+            delegateAddress: `0x${"4".repeat(64)}`,
+            walletAddress: `0x${"2".repeat(64)}`,
+            accountId: `0x${"1".repeat(64)}`,
+            packageId: `0x${"3".repeat(64)}`,
+            relayerUrl,
+            label: "Existing MCP",
+            createdAt: new Date(0).toISOString(),
+            version: 1,
+        }),
+        { mode: 0o600 },
+    );
+}
+
+/**
+ * The re-login path: already signed in, so `memwal_login` is answered by the
+ * bridge's `handleLocalLogin` and the callback lands in `adoptCredentials` —
+ * a different pair of surfaces from the signed-out hand-off the tests above
+ * drive. A regression that dropped either one would pass every one of them.
+ */
+test("re-signing in while already signed in is confirmed on both surfaces", async (t) => {
+    const { server, base, closeSse } = await startAnsweringRelayer();
+    const credsDir = mkdtempSync(join(tmpdir(), "memwal-success-relogin-"));
+    seedCreds(credsDir, base);
+    const child = spawnSignedOut(base, credsDir);
+    const { send, waitFor } = attachStdio(child);
+
+    t.after(() => {
+        child.kill("SIGKILL");
+        closeSse();
+        server.close();
+        rmSync(credsDir, { recursive: true, force: true });
+    });
+
+    send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05" } });
+    await waitFor((m) => m.id === 1 && m.result);
+
+    send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "memwal_login" } });
+    const login = await waitFor((m) => m.id === 2 && m.result);
+    assert.equal(login.result.isError, false);
+
+    // Credentials really are on disk here, so this is the one case where the
+    // replacement warning is true and must appear.
+    assert.match(
+        login.result.content[0].text,
+        /already signed in/i,
+        "a stored key IS about to be replaced; the prompt has to say so",
+    );
+
+    await completeSignIn(login.result.content[0].text, base);
+
+    const announced = await waitFor(
+        (m) =>
+            m.method === "notifications/message" &&
+            String(m.params?.data).includes("sign-in complete"),
+    );
+    assert.match(String(announced.params.data), /0x1{4}/, "should name the account signed in as");
+
+    send({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "memwal_recall", arguments: { query: "after re-login" } },
+    });
+    const after = await waitFor((m) => m.id === 3 && m.result);
+    const text = after.result.content[0].text;
+    assert.match(text, /Signed in to Walrus Memory/, "the re-login should carry the banner too");
+    assert.match(text, /UPSTREAM_RECALL_RESULT/, "prefixed onto the real result, not instead of it");
+
+    send({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: { name: "memwal_recall", arguments: { query: "one banner only" } },
+    });
+    const second = await waitFor((m) => m.id === 4 && m.result);
+    assert.doesNotMatch(
+        second.result.content[0].text,
+        /Signed in to Walrus Memory/,
+        "the banner is a one-shot on the re-login path as well",
+    );
+});
 
 test("a completed sign-in is confirmed on the next tool call", async (t) => {
     const { server, base, closeSse } = await startAnsweringRelayer();

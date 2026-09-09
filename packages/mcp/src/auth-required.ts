@@ -23,7 +23,7 @@
  */
 import { credsPath, loadCreds, type MemWalCredentials } from "./auth.js";
 import { rememberInitializeClientInfo } from "./client-info.js";
-import { loginPrompt, loginSuccessNotification } from "./messages.js";
+import { loginFailureNotice, loginPrompt, loginSuccessNotification } from "./messages.js";
 import { log } from "./logger.js";
 import { startOrReuseLoginFlow, resolveLoginTimeoutMs } from "./login.js";
 import { AUTH_REQUIRED_INSTRUCTIONS } from "./instructions.js";
@@ -204,24 +204,6 @@ const LOGIN_INSTRUCTION = [
  * already returned the URL by then, so this is the only place left to say so. */
 let lastLoginFailure: string | null = null;
 
-/** Prefix explaining that a sign-in was attempted and did not complete. */
-function loginFailureNotice(): string {
-    if (!lastLoginFailure) return "";
-    return [
-        "⚠️ A sign-in was started but never completed, so there are still no credentials.",
-        "",
-        `Reason: ${lastLoginFailure}`,
-        "",
-        "The unused key from this attempt may already be registered on your account. Remove it",
-        "from the dashboard if you are not using it. Sign in again and open the new link",
-        "straight away. A retry only helps once the MCP client is left running through the",
-        "wallet prompt.",
-        "",
-        "---",
-        "",
-    ].join("\n");
-}
-
 function writeStdoutMessage(msg: RpcMessage): void {
     process.stdout.write(JSON.stringify(msg) + "\n");
 }
@@ -359,7 +341,15 @@ async function handleLoginToolCall(
     log.info("memwal_login.tool.url_ready", { url });
     return {
         isError: false,
-        text: loginPrompt({ url, credentialsPath: credsPath(), signedIn: false }),
+        // Read from disk rather than assuming the stub only runs signed out: a
+        // completed callback writes credentials before the hand-off, so a
+        // second `memwal_login` in that window really would replace a stored
+        // key and must say so.
+        text: loginPrompt({
+            url,
+            credentialsPath: credsPath(),
+            signedIn: loadCreds() !== null,
+        }),
     };
 }
 
@@ -483,7 +473,7 @@ function handleAuthLine(
             id,
             result: {
                 content: [
-                    { type: "text", text: `${loginFailureNotice()}${LOGIN_INSTRUCTION}` },
+                    { type: "text", text: `${loginFailureNotice(lastLoginFailure)}${LOGIN_INSTRUCTION}` },
                 ],
                 isError: true,
             },

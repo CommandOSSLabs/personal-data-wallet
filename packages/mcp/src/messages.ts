@@ -74,10 +74,10 @@ function shortId(id: string): string {
 /**
  * Banner prefixed onto the first tool result after a sign-in completes.
  *
- * Deliberately a ONE-SHOT, unlike {@link loginFailureNotice}'s repeat-until-
- * fixed behaviour: a failed sign-in is a state that persists until the user
- * acts, but a successful one is an event. Repeating it on every recall would
- * be noise on top of every result the user asked for.
+ * Deliberately a ONE-SHOT, unlike {@link loginFailureNotice}, which repeats
+ * until the user fixes it: a failed sign-in is a state that persists until
+ * they act, but a successful one is an event. Repeating it on every recall
+ * would be noise on top of every result the user asked for.
  */
 export function loginSuccessNotice(info: LoginSuccessInfo): string {
     return [
@@ -105,4 +105,32 @@ export function loginSuccessNotification(info: LoginSuccessInfo): string {
         `Walrus Memory sign-in complete — account ${shortId(info.accountId)}, ` +
         `credentials saved to ${info.credentialsPath}.`
     );
+}
+
+/**
+ * Prefix explaining that a sign-in was attempted and did not complete.
+ *
+ * Repeats on every refused tool call, unlike {@link loginSuccessNotice}: this
+ * describes a state the user is still in, and the tool call that started the
+ * sign-in returned its URL long before the failure was known, so there is no
+ * earlier surface left to report it on.
+ *
+ * `reason` null — no attempt on record — yields the empty string, so callers
+ * can prefix unconditionally.
+ */
+export function loginFailureNotice(reason: string | null): string {
+    if (!reason) return "";
+    return [
+        "⚠️ A sign-in was started but never completed, so there are still no credentials.",
+        "",
+        `Reason: ${reason}`,
+        "",
+        "The unused key from this attempt may already be registered on your account. Remove it",
+        "from the dashboard if you are not using it. Sign in again and open the new link",
+        "straight away. A retry only helps once the MCP client is left running through the",
+        "wallet prompt.",
+        "",
+        "---",
+        "",
+    ].join("\n");
 }
