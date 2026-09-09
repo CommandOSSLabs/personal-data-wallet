@@ -177,7 +177,7 @@ The motivating use is rebuilding local credentials: a client that holds a workin
 }
 ```
 
-**Mainnet only, when the caller cannot send `x-account-id`.** Recovering a lost account id is the one case where the client has no id to send, so authentication has to find it by scanning the `AccountRegistry` for the delegate key. That scan runs over Sui JSON-RPC, which testnet no longer serves, so testnet requires the `x-account-id` hint for delegate-key authentication and rejects the request with `401` when it is absent, including this one. A caller that already knows its account id can use this route on either network; a caller recovering one cannot use it on testnet.
+**Mainnet only, when the caller cannot send `x-account-id`.** Recovering a lost account id is the one case where the client has no id to send, so authentication has to find it by scanning the `AccountRegistry` for the delegate key. That scan runs over Sui JSON-RPC, which Testnet no longer serves, so Testnet requires the `x-account-id` hint for delegate-key authentication and rejects the request with `401` when it is absent, including this one. A caller that already knows its account id can use this route on either network; a caller recovering one cannot use it on Testnet.
 
 ### `POST /api/remember`
 

@@ -28,15 +28,16 @@ questions:
   - What changed in the MemWal MCP changelog?
   - When was the automatic memory plugin added to MemWal MCP?
 answer: >-
-  The latest MCP package release is 0.0.13. `memwal_restore` reports `failed` and retries the same page when truncation is a download or embed blip, instead of always telling the agent to raise `limit`. Version 0.0.12 forwards the MCP client's initialize.clientInfo to the relayer so sidecar logs can name the coding agent (Claude Code, Codex, Cursor, and others) on each session and tool call, and it resolves the credential directory on every access so MEMWAL_CREDS_DIR can override it.
+  The latest MCP package release is 0.0.13. It saves the delegate keypair before the sign-in URL reaches the browser and reclaims it on the next start, so a login interrupted after the on-chain registration no longer loses a key the user already paid for. `memwal_restore` reports `failed` and retries the same page when truncation is a download or embed blip, instead of always telling the agent to raise `limit`. Version 0.0.12 forwards the MCP client's initialize.clientInfo to the relayer so sidecar logs can name the coding agent (Claude Code, Codex, Cursor, and others) on each session and tool call, and it resolves the credential directory on every access so MEMWAL_CREDS_DIR can override it.
 ---
 
 ## 0.0.13
 
-This release reports restore `failed` counts and retries the same page when truncation is a transient download or embed blip.
+This release saves the delegate keypair before sign-in hands a URL to the browser and reclaims it on the next start, and it reports restore `failed` counts and retries the same page when truncation is a transient download or embed blip.
 
 ### Fixed
 
+- Persist the delegate keypair before the sign-in URL is handed to the browser, and reclaim it on the next start. The browser's on-chain `add_delegate_key` is paid and irreversible, and it happens before the callback that saved the private half, so a client that died in that window destroyed the only copy of a key the user had already paid for and left an orphaned registration nobody could use. (#793) Signing out discards the pending record along with the credentials, a second sign-in against the same relayer reuses the stranded key rather than minting over it, and a sign-in that cannot write the record fails instead of publishing a URL it cannot back. Reclaiming works on Mainnet; Testnet requires an account-id hint the recovering client does not have.
 - `memwal_restore` reports `failed` and retries the same page when `truncated` is a download/embed blip (`restored=0` and `skipped+failed < total`), instead of always telling the agent to raise `limit` (WALM-480).
 
 ## 0.0.12
