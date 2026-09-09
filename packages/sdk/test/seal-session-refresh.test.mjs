@@ -156,11 +156,28 @@ test("sealSessionBuildError survives non-Error throws and redacts sidecar URLs",
     assert.equal(err.status, 503);
 });
 
-test("sealSessionExpiredError says 'expired' and keeps the server's real status", () => {
+test("sealSessionExpiredError is terminal for retry helpers and keeps the wire status on cause", () => {
     const err = sealSessionExpiredError(500, "Session key has expired");
     assert.match(err.message, /SEAL session expired/);
-    assert.equal(err.status, 500);
+    // 400, not 500: the rebuild already failed, so withRetry and the
+    // `status >= 500` job poll must stop instead of retrying clock skew.
+    assert.equal(err.status, 400);
     assert.equal(err.serverCode, "SEAL_SESSION_EXPIRED");
+    assert.equal(err.cause.status, 500);
+    assert.equal(err.cause.body, "Session key has expired");
+});
+
+test("sealSessionBuildError tags an unresolvable peer import 400 so withRetry stops", () => {
+    // The dynamic import throws before buildSealSessionInner's own checks run.
+    for (const message of [
+        "Cannot find package '@mysten/seal' imported from /app/node_modules/.../utils.js",
+        "Cannot find module '@mysten/sui/keypairs/ed25519'",
+        "The requested module '@mysten/seal' does not provide an export named 'SessionKey'",
+    ]) {
+        const err = sealSessionBuildError(new Error(message));
+        assert.equal(err.status, 400, message);
+        assert.equal(err.serverCode, "SEAL_SESSION_UNAVAILABLE", message);
+    }
 });
 
 // ------------------------------------------------------------
@@ -360,7 +377,8 @@ test("a persistently rejected session stops after one retry instead of looping",
 
     await assert.rejects(c.signedRequest("POST", "/api/recall", { query: "x" }), (err) => {
         assert.match(err.message, /SEAL session expired/);
-        assert.equal(err.status, 500);
+        assert.equal(err.status, 400);
+        assert.equal(err.cause.status, 500);
         assert.equal(err.serverCode, "SEAL_SESSION_EXPIRED");
         return true;
     });

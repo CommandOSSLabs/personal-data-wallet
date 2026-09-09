@@ -536,12 +536,23 @@ export type SealSessionError = Error & {
  * These fail identically on every attempt, so they are tagged 400 to stop the
  * documented `withRetry` helper (`docs/sdk/production-readiness.md`) from
  * burning its budget on them.
+ *
+ * The peer deps are loaded through dynamic `import()`, so the common
+ * missing-package case never reaches the hand-written checks below — it throws
+ * out of the import itself. Those resolver messages are matched here too.
  */
 const SEAL_SESSION_PERMANENT_MARKERS = [
     "not found in @mysten/sui",
     "ensure @mysten/sui",
     "get /config response",
     "get /config requires",
+    // Node ESM / CJS resolution, bundlers, and a package that resolves but no
+    // longer exports what we import.
+    "cannot find package",
+    "cannot find module",
+    "err_module_not_found",
+    "failed to resolve module specifier",
+    "does not provide an export named",
 ];
 
 /** ASCII control characters, stripped from error text before it is surfaced. */
@@ -585,9 +596,11 @@ export function sealSessionBuildError(cause: unknown): SealSessionError {
  * Build the error surfaced when the server rejected our SEAL session as
  * expired *and* a single rebuild-and-retry did not fix it.
  *
- * `status` is the server's real status — nothing is fabricated — but the
- * message and `serverCode` name the actual cause instead of leaving the caller
- * with a generic sanitized relayer error.
+ * Tagged 400, not the server's status: the rebuild already happened and failed,
+ * so this is terminal. Leaving the wire status (typically 500) on `.status`
+ * would make the documented `withRetry` helper and `waitForRememberJob`'s
+ * `status >= 500` poll loop keep retrying a clock-skew failure that cannot
+ * resolve itself. The real response is preserved on `.cause`.
  */
 export function sealSessionExpiredError(status: number, rawBody: string): SealSessionError {
     const err = new Error(
@@ -597,8 +610,8 @@ export function sealSessionExpiredError(status: number, rawBody: string): SealSe
             "https://docs.wal.app/walrus-memory/troubleshooting/overview",
     ) as SealSessionError;
     err.name = "MemWalSealSessionError";
-    err.status = status;
+    err.status = 400;
     err.serverCode = "SEAL_SESSION_EXPIRED";
-    err.cause = rawBody;
+    err.cause = { status, body: rawBody };
     return err;
 }
