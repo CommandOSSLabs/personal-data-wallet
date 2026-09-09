@@ -52,17 +52,25 @@ function unwrapJsonRpcFields(value: unknown): unknown {
     return value
 }
 
+const MISSING_OBJECT_CODES = new Set(['notexists', 'dynamicfieldnotfound', 'notfound', 'not_found'])
+
 /** RPC 404 / NotExists — the object is not readable yet, not a fatal setup failure. */
 export function isMissingObjectError(error: unknown): boolean {
-    const status =
-        error && typeof error === 'object' && 'status' in error
-            ? Number((error as { status: unknown }).status)
-            : undefined
-    if (status === 404) return true
+    if (error && typeof error === 'object') {
+        const rec = error as { status?: unknown; code?: unknown }
+        if (Number(rec.status) === 404) return true
+        // gRPC Code.NotFound is 5; protobuf-ts RpcError uses 'NOT_FOUND'.
+        if (rec.code === 404 || rec.code === 5) return true
+        if (typeof rec.code === 'string' && MISSING_OBJECT_CODES.has(rec.code.toLowerCase())) return true
+    }
     const message = error instanceof Error ? error.message : String(error)
     // Do not match a bare "not found" — that also hits JSON-RPC's
     // "Method not found" deprecation error on public fullnodes.
-    return /unexpected status code:\s*404|status code:\s*404|notExists|dynamicFieldNotFound|object not found/i.test(message)
+    // gRPC ObjectNotFoundError is "Object {id} not found" (optional
+    // " with version {n}"). JSON-RPC ObjectError is "Object {id} does not exist".
+    return /unexpected status code:\s*404|status code:\s*404|notExists|dynamicFieldNotFound|dynamic field not found|object(?:\s+\S+)*\s+not found|object(?:\s+\S+)+\s+does not exist/i.test(
+        message,
+    )
 }
 
 /** Fetch a Move object's fields as a flat JS object, regardless of client transport. */
@@ -241,8 +249,16 @@ export async function pollAccountIdForOwner(
     const attempts = options?.attempts ?? 6
     const sleep = options?.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
     for (let i = 0; i < attempts; i++) {
-        const accountId = await fetchAccountIdForOwner(suiClient, registryId, ownerAddress)
-        if (accountId) return accountId
+        try {
+            const accountId = await fetchAccountIdForOwner(suiClient, registryId, ownerAddress)
+            if (accountId) return accountId
+        } catch (error) {
+            // Known miss: treat as unreadability and keep polling.
+            // Unrecognized throw: still spend the remaining attempts so a
+            // miss variant that slips past isMissingObjectError cannot abort
+            // the first try. Fail closed only on the last attempt.
+            if (!isMissingObjectError(error) && i === attempts - 1) throw error
+        }
         if (i < attempts - 1) {
             await sleep(ACCOUNT_LOOKUP_RETRY_MS[Math.min(i, ACCOUNT_LOOKUP_RETRY_MS.length - 1)])
         }

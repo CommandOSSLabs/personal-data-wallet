@@ -45,6 +45,37 @@ describe('gRPC Sui client compatibility', () => {
         expect(request.name.type).toBe('address')
         expect(request.name.bcs).toEqual(new Uint8Array(32).fill(0).map((_, i) => i === 31 ? 1 : 0))
     })
+
+    it('returns null when gRPC getObject throws Object {id} not found', async () => {
+        const objectId = `0x${'ab'.repeat(32)}`
+        const client = new SuiGrpcClient({ network: 'testnet', baseUrl: 'https://provider.example/grpc' })
+        vi.spyOn(client, 'getObject').mockRejectedValue(new Error(`Object ${objectId} not found`))
+
+        await expect(fetchObjectJson(client, objectId)).resolves.toBeNull()
+    })
+
+    it('retries when gRPC getDynamicField throws Object {id} not found', async () => {
+        const fieldId = `0x${'cd'.repeat(32)}`
+        const accountBytes = new Uint8Array(32).fill(0x11)
+        const client = new SuiGrpcClient({ network: 'testnet', baseUrl: 'https://provider.example/grpc' })
+        vi.spyOn(client, 'getObject').mockResolvedValue({
+            object: { json: { accounts: { id: '0xtable-grpc-miss' } } },
+        } as never)
+        let lookups = 0
+        vi.spyOn(client, 'getDynamicField').mockImplementation(async () => {
+            lookups += 1
+            if (lookups < 3) throw new Error(`Object ${fieldId} not found`)
+            return { dynamicField: { value: { bcs: accountBytes } } } as never
+        })
+
+        await expect(
+            pollAccountIdForOwner(client, '0xregistry-grpc-df', '0x1', {
+                attempts: 4,
+                sleep: async () => undefined,
+            }),
+        ).resolves.toBe(`0x${'11'.repeat(32)}`)
+        expect(lookups).toBe(3)
+    })
 })
 
 describe('JSON-RPC registry lookup', () => {
@@ -127,6 +158,77 @@ describe('JSON-RPC registry lookup', () => {
         ).resolves.toBe('0xaccount-ready')
         expect(lookups).toBe(3)
     })
+
+    it('returns null on a gRPC Object {id} not found miss', async () => {
+        const client = {
+            async getObject() {
+                throw new Error('Object 0xabc not found')
+            },
+        }
+
+        await expect(fetchObjectJson(client, '0xabc')).resolves.toBeNull()
+    })
+
+    it('retries a gRPC Object {id} not found miss then returns the account id', async () => {
+        let lookups = 0
+        const client = {
+            async getObject() {
+                return { data: { content: { fields: { accounts: { fields: { id: { id: '0xtable5' } } } } } } }
+            },
+            async getDynamicFieldObject() {
+                lookups += 1
+                if (lookups < 3) {
+                    throw new Error('Object 0xtable5 not found')
+                }
+                return { data: { content: { fields: { value: '0xaccount-grpc-ready' } } } }
+            },
+        }
+
+        await expect(
+            pollAccountIdForOwner(client, '0xregistry-grpc-retry', '0xowner', {
+                attempts: 4,
+                sleep: async () => undefined,
+            }),
+        ).resolves.toBe('0xaccount-grpc-ready')
+        expect(lookups).toBe(3)
+    })
+
+    it('retries an unrecognized lookup throw instead of aborting on the first attempt', async () => {
+        let lookups = 0
+        const client = {
+            async getObject() {
+                return { data: { content: { fields: { accounts: { fields: { id: { id: '0xtable6' } } } } } } }
+            },
+            async getDynamicFieldObject() {
+                lookups += 1
+                if (lookups < 3) throw new Error('Could not load object')
+                return { data: { content: { fields: { value: '0xaccount-unrecognized' } } } }
+            },
+        }
+
+        await expect(
+            pollAccountIdForOwner(client, '0xregistry-unrecognized', '0xowner', {
+                attempts: 4,
+                sleep: async () => undefined,
+            }),
+        ).resolves.toBe('0xaccount-unrecognized')
+        expect(lookups).toBe(3)
+    })
+
+    it('rethrows a non-miss after the attempt budget is spent', async () => {
+        const client = {
+            async getObject() {
+                throw new Error('ECONNRESET')
+            },
+        }
+
+        await expect(
+            pollAccountIdForOwner(client, '0xregistry-fatal', '0xowner', {
+                attempts: 2,
+                sleep: async () => undefined,
+            }),
+        ).rejects.toThrow('ECONNRESET')
+    })
 })
 
 describe('isMissingObjectError', () => {
@@ -135,6 +237,13 @@ describe('isMissingObjectError', () => {
         expect(isMissingObjectError(new Error('notExists'))).toBe(true)
         expect(isMissingObjectError(new Error('dynamicFieldNotFound'))).toBe(true)
         expect(isMissingObjectError(new Error('object not found'))).toBe(true)
+        expect(isMissingObjectError(new Error('Object 0xabc not found'))).toBe(true)
+        expect(isMissingObjectError(new Error(`Object 0x${'ab'.repeat(32)} not found`))).toBe(true)
+        expect(isMissingObjectError(new Error('Object 0xabc with version 1 not found'))).toBe(true)
+        expect(isMissingObjectError(new Error('Object 0xabc does not exist'))).toBe(true)
+        expect(isMissingObjectError(new Error('Dynamic field not found for object 0xparent'))).toBe(true)
+        expect(isMissingObjectError(Object.assign(new Error('Object 0xabc does not exist'), { code: 'notExists' }))).toBe(true)
+        expect(isMissingObjectError(Object.assign(new Error('not found'), { code: 'NOT_FOUND' }))).toBe(true)
     })
 
     it('does not treat JSON-RPC Method not found as a missing object', () => {
@@ -143,6 +252,7 @@ describe('isMissingObjectError', () => {
                 new Error('Method not found. JSON-RPC on public fullnodes has been deprecated.'),
             ),
         ).toBe(false)
+        expect(isMissingObjectError(Object.assign(new Error('Method not found'), { code: -32601 }))).toBe(false)
     })
 })
 
