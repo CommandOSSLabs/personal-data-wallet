@@ -262,10 +262,50 @@ Rebuild missing indexed entries for one namespace from Walrus. Incremental — o
 ```ts
 {
   restored: number;   // Entries newly indexed
-  skipped: number;    // Entries already in DB
+  skipped: number;    // On-chain blobs already in the local success index
+  failed: number;     // Permanent decrypt/UTF-8 failures (defaults to 0)
   total: number;      // Total blobs found on-chain
   namespace: string;
   owner: string;
+}
+```
+
+### `listNamespaces(options?): Promise<NamespacesResult>`
+
+List the namespaces this account holds memories in. Returns metadata only, with no blob fetch or decryption.
+
+Recall is similarity-ranked and needs a namespace to search, so an agent connecting to an unfamiliar account would otherwise have to guess names or fall back to `"default"`.
+
+- `options.cursor`: The previous page's `next_cursor`, to continue a walk or poll incrementally
+- `options.limit`: Page size; the relayer defaults to `100` and clamps to `500`
+
+**Returns:**
+
+```ts
+{
+  namespaces: Array<{
+    id: string;
+    name: string;
+    memory_count: number;
+    storage_used: number;   // bytes
+    updated_at: string;     // MAX(updated_at) across the namespace
+  }>;
+  next_cursor: string | null;
+  has_more: boolean;
+  snapshot_version: number;
+}
+```
+
+Paginate on `has_more`, not on page length. The relayer clamps `limit`, so a caller asking for more than the cap gets exactly the cap back and would wrongly conclude it was done.
+
+```ts
+let cursor: string | undefined;
+let more = true;
+while (more) {
+  const page = await memwal.listNamespaces({ cursor });
+  for (const ns of page.namespaces) console.log(ns.name, ns.memory_count);
+  cursor = page.next_cursor ?? undefined;
+  more = page.has_more;
 }
 ```
 

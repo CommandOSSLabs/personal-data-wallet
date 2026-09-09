@@ -505,7 +505,7 @@ export class MemWalManual {
                 tx.moveCall({
                     target: `${this.config.sealPolicyPackageId ?? this.config.packageId}::account::seal_approve`,
                     arguments: [
-                        tx.pure("vector<u8>", idBytes),
+                        tx.pure.vector("u8", idBytes),
                         tx.object(this.config.registryId),
                         tx.object(this.config.accountId),
                     ],
@@ -889,14 +889,23 @@ export class MemWalManual {
             const clockDriftError = clockDriftErrorFromResponse(res);
             if (clockDriftError) throw clockDriftError;
 
-            const { message: sanitized, serverCode } = sanitizeServerError(res.status, raw);
+            const { message: sanitized, serverCode } = sanitizeServerError(
+                res.status,
+                raw,
+                res.headers.get("x-auth-error"),
+            );
             const err = new Error(sanitized) as Error & {
                 status?: number;
                 serverCode?: string;
+                retryAfterSeconds?: number;
                 cause?: string;
             };
             err.status = res.status;
             if (serverCode) err.serverCode = serverCode;
+            const retryAfter = Number(res.headers.get("retry-after"));
+            if (Number.isFinite(retryAfter) && retryAfter > 0) {
+                err.retryAfterSeconds = retryAfter;
+            }
             err.cause = raw;
             throw err;
         }
@@ -923,6 +932,11 @@ export class MemWalManual {
         // Relayers older than WALM-319 omit `truncated` entirely — treat
         // "not present" as "not known to be truncated" rather than drop
         // the field or require every relayer version to send it.
-        return { ...result, truncated: result.truncated ?? false };
+        // Relayers older than COMG-719 omit `failed`; default to 0.
+        return {
+            ...result,
+            truncated: result.truncated ?? false,
+            failed: result.failed ?? 0,
+        };
     }
 }

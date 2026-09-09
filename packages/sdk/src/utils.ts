@@ -304,20 +304,29 @@ export function redactInternalUrls(text: string): string {
 export function sanitizeServerError(
     status: number,
     rawBody: string,
+    authError?: string | null,
 ): { message: string; raw: string; serverCode?: string } {
     // Number() so a string "401" (some MCP / HTTP paths) still hits this branch.
     if (Number(status) === 401) {
-        // Empty body = no-session / bare relayer 401. Non-empty keeps
-        // the AUTH_REJECTED triage (wrong key / account / network).
-        const empty = !String(rawBody ?? "").trim();
         return {
-            message: empty
-                ? "Walrus Memory isn't signed in. Call the memwal_login tool, then retry."
-                : "401 from relayer: typically wrong private key, key not registered on this account, " +
-                  "account ID mismatch, or staging/mainnet mismatch. Check .env.local and dashboard credentials. " +
-                  "Full troubleshooting: https://docs.wal.app/walrus-memory/troubleshooting/overview#401-auth_rejected-errors",
+            message:
+                "401 from relayer: typically wrong private key, key not registered on this account, " +
+                "account ID mismatch, or staging/mainnet mismatch. Check .env.local and dashboard credentials. " +
+                "Full troubleshooting: https://docs.wal.app/walrus-memory/troubleshooting/overview#401-auth_rejected-errors",
             raw: rawBody,
             serverCode: "AUTH_REJECTED",
+        };
+    }
+
+    // Auth-path 503 only: Sui could not be consulted (WALM-429). Other
+    // relayer 503s (Redis, rate limiter, LLM) keep the generic sanitizer
+    // so they are not mislabeled as a credential-verification failure.
+    if (Number(status) === 503 && authError === "AUTH_UPSTREAM_UNAVAILABLE") {
+        return {
+            message:
+                "Walrus Memory temporarily cannot verify credentials (upstream unavailable). Retry; this is not a sign-in failure.",
+            raw: rawBody,
+            serverCode: "AUTH_UPSTREAM_UNAVAILABLE",
         };
     }
 

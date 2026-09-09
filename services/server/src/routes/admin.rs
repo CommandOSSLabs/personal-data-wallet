@@ -129,7 +129,8 @@ pub async fn stats(
 /// here means only "the server process is up," not "your delegate
 /// key/account ID are valid." A caller preflighting credentials before a
 /// signed call should not treat this as a substitute for that call
-/// succeeding.
+/// succeeding. `WRITES_PAUSED` does not change this status: `/health`
+/// stays HTTP 200 with `writes: "paused"` while write routes return 503.
 pub async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok".to_string(),
@@ -149,6 +150,7 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> 
             ask: ASK_SYSTEM_PROMPT_VERSION.to_string(),
         },
         write_ready: sidecar_write_ready(&state).await,
+        writes: writes_health_status(state.config.writes_paused),
     })
 }
 
@@ -544,6 +546,85 @@ fn clamp_restore_limit(limit: usize) -> usize {
     limit.clamp(1, 100)
 }
 
+/// Count restore `skipped` / `failed` over the on-chain page.
+///
+/// `skipped` is on-chain blobs already in the local **success** index
+/// (`existing_blob_ids`). Negative-cached blob IDs are not skipped.
+///
+/// `failed` is on-chain blobs in `failed_blob_ids` (the owner+namespace
+/// negative cache). Both counts share `on_chain_blob_ids` as their domain,
+/// so neither can exceed `total`. New permanent failures this call are
+/// added by the caller after inspection.
+fn restore_skip_fail_counts(
+    on_chain_blob_ids: &[String],
+    existing_blob_ids: &[String],
+    failed_blob_ids: &[String],
+) -> (usize, usize) {
+    let existing_set: std::collections::HashSet<&str> =
+        existing_blob_ids.iter().map(|s| s.as_str()).collect();
+    let failed_set: std::collections::HashSet<&str> =
+        failed_blob_ids.iter().map(|s| s.as_str()).collect();
+    let skipped = on_chain_blob_ids
+        .iter()
+        .filter(|id| existing_set.contains(id.as_str()))
+        .count();
+    let failed = on_chain_blob_ids
+        .iter()
+        .filter(|id| failed_set.contains(id.as_str()))
+        .count();
+    (skipped, failed)
+}
+
+/// Force `truncated` when an inspected page produced only transients
+/// (download / SEAL infra / embed). Permanent failures are counted in
+/// `failed` and must not be retried; embed failures are not negative-cached.
+fn restore_truncated_after_page(
+    truncated: bool,
+    restored: usize,
+    newly_failed: usize,
+    transient_unresolved: usize,
+) -> bool {
+    truncated || (restored == 0 && newly_failed == 0 && transient_unresolved > 0)
+}
+
+enum RestoreDecrypt {
+    Ok(String, String),
+    PermanentFail,
+    TransientFail,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RestoreFailStage {
+    InvalidUtf8,
+    Decrypt,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RestoreFailClass {
+    Permanent,
+    Transient,
+}
+
+/// Classify a restore decrypt/UTF-8 failure. Swapping permanent/transient
+/// here would negative-cache blobs during a SEAL infra blip.
+fn restore_fail_class(stage: RestoreFailStage, decrypt_err: Option<&str>) -> RestoreFailClass {
+    match stage {
+        RestoreFailStage::InvalidUtf8 => RestoreFailClass::Permanent,
+        RestoreFailStage::Decrypt => match decrypt_err {
+            Some(err) if seal::DecryptOutcome::permanent_from_error(err) => {
+                RestoreFailClass::Permanent
+            }
+            _ => RestoreFailClass::Transient,
+        },
+    }
+}
+
+enum RestoreDownload {
+    Ok(String, Vec<u8>),
+    Expired,
+    Transient,
+}
+
 /// POST /api/restore
 ///
 /// Restore a namespace from Walrus:
@@ -647,6 +728,7 @@ async fn restore_unbounded(
         return Ok(Json(RestoreResponse {
             restored: 0,
             skipped: 0,
+            failed: 0,
             total: 0,
             namespace: namespace.clone(),
             owner: owner.clone(),
@@ -659,18 +741,18 @@ async fn restore_unbounded(
     // (GH #501 / WALM-299 negative cache — see `db.record_restore_failure`).
     // A foreign/attacker blob that already failed SEAL decrypt or UTF-8
     // validation for this owner+namespace is never re-downloaded and
-    // re-decrypt-attempted on a later call; it's already correctly reported
-    // as "skipped", same as any other missing-but-excluded blob.
+    // re-decrypt-attempted on a later call; it counts as `failed`, not
+    // `skipped` (COMG-719 / GH #399).
     let existing_blob_ids = state.db.get_blobs_by_namespace(owner, namespace).await?;
     let failed_blob_ids = state.db.get_failed_blob_ids(owner, namespace).await?;
-    let existing_set: std::collections::HashSet<&str> = existing_blob_ids
+    let exclude_set: std::collections::HashSet<&str> = existing_blob_ids
         .iter()
         .map(|s| s.as_str())
         .chain(failed_blob_ids.iter().map(|s| s.as_str()))
         .collect();
     let all_missing: Vec<String> = all_blob_ids
         .iter()
-        .filter(|id| !existing_set.contains(id.as_str()))
+        .filter(|id| !exclude_set.contains(id.as_str()))
         .cloned()
         .collect();
     // Apply limit — query-blobs' on-chain ordering is unspecified (the
@@ -691,12 +773,15 @@ async fn restore_unbounded(
         missing_blob_ids.len(),
         limit,
     );
-    let skipped = total - missing_blob_ids.len();
+    let (skipped, failed) =
+        restore_skip_fail_counts(&all_blob_ids, &existing_blob_ids, &failed_blob_ids);
     tracing::info!(
-        "restore: total={} on-chain, existing={}, negative-cached={}, missing={} (limited to {}, truncated={}, source_capped={}) for ns={}",
+        "restore: total={} on-chain, existing={}, negative-cached={}, skipped={}, failed={}, missing={} (limited to {}, truncated={}, source_capped={}) for ns={}",
         total,
         existing_blob_ids.len(),
         failed_blob_ids.len(),
+        skipped,
+        failed,
         missing_blob_ids.len(),
         limit,
         truncated,
@@ -708,6 +793,7 @@ async fn restore_unbounded(
         return Ok(Json(RestoreResponse {
             restored: 0,
             skipped,
+            failed,
             total,
             namespace: namespace.clone(),
             owner: owner.clone(),
@@ -738,7 +824,7 @@ async fn restore_unbounded(
                 )
                 .await
                 {
-                    Ok(data) => Some((blob_id, data)),
+                    Ok(data) => RestoreDownload::Ok(blob_id, data),
                     Err(AppError::BlobNotFound(msg)) => {
                         tracing::warn!("restore: blob expired, skipping: {}", msg);
                         cleanup_expired_blob(
@@ -748,11 +834,11 @@ async fn restore_unbounded(
                             &namespace_for_cleanup,
                         )
                         .await;
-                        None
+                        RestoreDownload::Expired
                     }
                     Err(e) => {
                         tracing::warn!("restore: download failed for {}: {}", blob_id, e);
-                        None
+                        RestoreDownload::Transient
                     }
                 }
             }
@@ -763,11 +849,19 @@ async fn restore_unbounded(
     // OOM when restoring large namespaces. join_all() with hundreds of blobs
     // would spawn all downloads simultaneously → memory spike.
     // We use buffer_unordered(10) to cap parallelism at 10 concurrent downloads.
-    let downloaded: Vec<(String, Vec<u8>)> = stream::iter(download_tasks)
+    let download_results: Vec<RestoreDownload> = stream::iter(download_tasks)
         .buffer_unordered(10)
-        .filter_map(|opt| async move { opt })
         .collect()
         .await;
+    let mut downloaded = Vec::with_capacity(download_results.len());
+    let mut transient_unresolved = 0usize;
+    for result in download_results {
+        match result {
+            RestoreDownload::Ok(blob_id, data) => downloaded.push((blob_id, data)),
+            RestoreDownload::Transient => transient_unresolved += 1,
+            RestoreDownload::Expired => {}
+        }
+    }
 
     // Preserve encrypted blob sizes so restored rows still contribute to storage quota.
     let blob_sizes: std::collections::HashMap<String, i64> = downloaded
@@ -776,9 +870,11 @@ async fn restore_unbounded(
         .collect();
 
     if downloaded.is_empty() {
+        let truncated = restore_truncated_after_page(truncated, 0, 0, transient_unresolved);
         return Ok(Json(RestoreResponse {
             restored: 0,
             skipped,
+            failed,
             total,
             namespace: namespace.clone(),
             owner: owner.clone(),
@@ -793,7 +889,7 @@ async fn restore_unbounded(
     );
 
     // Step 4: SEAL decrypt with bounded concurrency (3 at a time).
-    let decrypt_results: Vec<Option<(String, String)>> = stream::iter(downloaded)
+    let decrypt_results: Vec<RestoreDecrypt> = stream::iter(downloaded)
         .map(|(blob_id, encrypted_data)| {
             let http_client = &state.http_client;
             let sidecar_url = state.config.sidecar_url.clone();
@@ -820,23 +916,33 @@ async fn restore_unbounded(
                 .await
                 {
                     Ok(plaintext) => match String::from_utf8(plaintext) {
-                        Ok(text) => Some((blob_id, text)),
+                        Ok(text) => RestoreDecrypt::Ok(blob_id, text),
                         Err(e) => {
                             tracing::warn!("restore: invalid UTF-8 for {}: {}", blob_id, e);
                             // Decrypt already succeeded here, so invalid UTF-8
                             // is inherently deterministic for this blob — always
                             // safe to negative-cache (GH #501 / WALM-299).
-                            if let Err(db_err) = db
-                                .record_restore_failure(&owner, &namespace, &blob_id, "invalid_utf8")
-                                .await
-                            {
-                                tracing::warn!(
-                                    "restore: failed to record invalid-UTF-8 negative cache for {}: {}",
-                                    blob_id,
-                                    db_err
-                                );
+                            match restore_fail_class(RestoreFailStage::InvalidUtf8, None) {
+                                RestoreFailClass::Permanent => {
+                                    if let Err(db_err) = db
+                                        .record_restore_failure(
+                                            &owner,
+                                            &namespace,
+                                            &blob_id,
+                                            "invalid_utf8",
+                                        )
+                                        .await
+                                    {
+                                        tracing::warn!(
+                                            "restore: failed to record invalid-UTF-8 negative cache for {}: {}",
+                                            blob_id,
+                                            db_err
+                                        );
+                                    }
+                                    RestoreDecrypt::PermanentFail
+                                }
+                                RestoreFailClass::Transient => RestoreDecrypt::TransientFail,
                             }
-                            None
                         }
                     },
                     Err(e) => {
@@ -847,24 +953,30 @@ async fn restore_unbounded(
                         // rate limit) must keep being retried; caching those
                         // could permanently and wrongly blacklist a
                         // legitimate blob during an infra blip.
-                        if seal::DecryptOutcome::permanent_from_error(&e.to_string()) {
-                            if let Err(db_err) = db
-                                .record_restore_failure(
-                                    &owner,
-                                    &namespace,
-                                    &blob_id,
-                                    "decrypt_permanent",
-                                )
-                                .await
-                            {
-                                tracing::warn!(
-                                    "restore: failed to record decrypt-permanent negative cache for {}: {}",
-                                    blob_id,
-                                    db_err
-                                );
+                        match restore_fail_class(
+                            RestoreFailStage::Decrypt,
+                            Some(&e.to_string()),
+                        ) {
+                            RestoreFailClass::Permanent => {
+                                if let Err(db_err) = db
+                                    .record_restore_failure(
+                                        &owner,
+                                        &namespace,
+                                        &blob_id,
+                                        "decrypt_permanent",
+                                    )
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        "restore: failed to record decrypt-permanent negative cache for {}: {}",
+                                        blob_id,
+                                        db_err
+                                    );
+                                }
+                                RestoreDecrypt::PermanentFail
                             }
+                            RestoreFailClass::Transient => RestoreDecrypt::TransientFail,
                         }
-                        None
                     }
                 }
             }
@@ -873,7 +985,22 @@ async fn restore_unbounded(
         .collect()
         .await;
 
-    let decrypted_texts: Vec<(String, String)> = decrypt_results.into_iter().flatten().collect();
+    let newly_failed = decrypt_results
+        .iter()
+        .filter(|r| matches!(r, RestoreDecrypt::PermanentFail))
+        .count();
+    transient_unresolved += decrypt_results
+        .iter()
+        .filter(|r| matches!(r, RestoreDecrypt::TransientFail))
+        .count();
+    let failed = failed + newly_failed;
+    let decrypted_texts: Vec<(String, String)> = decrypt_results
+        .into_iter()
+        .filter_map(|r| match r {
+            RestoreDecrypt::Ok(blob_id, text) => Some((blob_id, text)),
+            RestoreDecrypt::PermanentFail | RestoreDecrypt::TransientFail => None,
+        })
+        .collect();
     tracing::info!(
         "restore: decrypted {}/{} blobs",
         decrypted_texts.len(),
@@ -908,7 +1035,10 @@ async fn restore_unbounded(
         .collect();
 
     // Step 6: Insert only new entries (no delete!)
+    transient_unresolved += decrypted_texts.len().saturating_sub(results.len());
     let restored = results.len();
+    let truncated =
+        restore_truncated_after_page(truncated, restored, newly_failed, transient_unresolved);
     for (blob_id, vector) in &results {
         let id = uuid::Uuid::new_v4().to_string();
         let blob_size = blob_sizes.get(blob_id).copied().unwrap_or_else(|| {
@@ -955,9 +1085,10 @@ async fn restore_unbounded(
     }
 
     tracing::info!(
-        "restore complete: restored={} skipped={} total={} owner={} ns={}",
+        "restore complete: restored={} skipped={} failed={} total={} owner={} ns={}",
         restored,
         skipped,
+        failed,
         total,
         owner,
         namespace
@@ -966,6 +1097,7 @@ async fn restore_unbounded(
     Ok(Json(RestoreResponse {
         restored,
         skipped,
+        failed,
         total,
         namespace: namespace.clone(),
         owner: owner.clone(),
@@ -1138,12 +1270,129 @@ mod tests {
         let resp = RestoreResponse {
             restored: 5,
             skipped: 2,
+            failed: 0,
             total: 20,
             namespace: "ns".to_string(),
             owner: "0xabc".to_string(),
             truncated: true,
         };
         assert!(resp.truncated);
+    }
+
+    #[test]
+    fn restore_response_serializes_failed_field() {
+        let resp = RestoreResponse {
+            restored: 5,
+            skipped: 2,
+            failed: 3,
+            total: 20,
+            namespace: "ns".to_string(),
+            owner: "0xabc".to_string(),
+            truncated: false,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["failed"], 3);
+        assert_eq!(json["skipped"], 2);
+        assert!(json.get("failed").is_some());
+    }
+
+    #[test]
+    fn restore_skip_fail_counts_excludes_negative_cache_from_skipped() {
+        let on_chain = vec!["a", "b", "c", "d"]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>();
+        let existing = vec!["a", "b"]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>();
+        let failed = vec!["c".to_string()];
+
+        let (skipped, failed_count) =
+            super::restore_skip_fail_counts(&on_chain, &existing, &failed);
+
+        assert_eq!(skipped, 2, "skipped is on-chain success index only");
+        assert_eq!(failed_count, 1, "failed is page ∩ negative cache");
+    }
+
+    #[test]
+    fn restore_skip_fail_counts_does_not_count_off_chain_existing() {
+        let on_chain = vec!["a".to_string()];
+        let existing = vec!["a".to_string(), "ghost".to_string()];
+        let none: Vec<String> = vec![];
+
+        let (skipped, failed_count) = super::restore_skip_fail_counts(&on_chain, &existing, &none);
+
+        assert_eq!(skipped, 1);
+        assert_eq!(failed_count, 0);
+    }
+
+    #[test]
+    fn restore_skip_fail_counts_intersects_failed_with_page() {
+        let on_chain = vec!["a".to_string(), "b".to_string()];
+        let none: Vec<String> = vec![];
+        let failed = vec![
+            "old-fail".to_string(),
+            "a".to_string(),
+            "also-old".to_string(),
+        ];
+
+        let (skipped, failed_count) = super::restore_skip_fail_counts(&on_chain, &none, &failed);
+
+        assert_eq!(skipped, 0);
+        assert_eq!(
+            failed_count, 1,
+            "historical cache still skips re-download, but failed counts only this page"
+        );
+        assert!(failed_count <= on_chain.len());
+    }
+
+    #[test]
+    fn restore_truncated_after_page_signals_retry_on_transients_only() {
+        // Embedder down / download blip: inspected page yielded neither a
+        // restore nor a permanent failure. source_capped=false would otherwise
+        // leave truncated=false and the caller would not retry (WALM-480).
+        assert!(super::restore_truncated_after_page(false, 0, 0, 10));
+        assert!(super::restore_truncated_after_page(false, 0, 0, 1));
+        assert!(super::restore_truncated_after_page(true, 5, 0, 0));
+        assert!(!super::restore_truncated_after_page(false, 1, 0, 9));
+        assert!(!super::restore_truncated_after_page(false, 0, 10, 0));
+        assert!(!super::restore_truncated_after_page(false, 0, 1, 9));
+        assert!(!super::restore_truncated_after_page(false, 0, 0, 0));
+    }
+
+    #[test]
+    fn restore_fail_class_pins_permanent_vs_transient() {
+        use super::{restore_fail_class, RestoreFailClass, RestoreFailStage};
+
+        assert_eq!(
+            restore_fail_class(RestoreFailStage::InvalidUtf8, None),
+            RestoreFailClass::Permanent,
+            "invalid UTF-8 is deterministic for the blob"
+        );
+        assert_eq!(
+            restore_fail_class(RestoreFailStage::Decrypt, Some("InvalidCiphertext")),
+            RestoreFailClass::Permanent
+        );
+        assert_eq!(
+            restore_fail_class(
+                RestoreFailStage::Decrypt,
+                Some(
+                    "seal decrypt failed: seal/decrypt failed during fetch_keys: \
+                     NoAccessError: user does not have access to one or more of \
+                     the requested keys (traceId=abc123, timeoutMs=10000)"
+                )
+            ),
+            RestoreFailClass::Permanent
+        );
+        assert_eq!(
+            restore_fail_class(
+                RestoreFailStage::Decrypt,
+                Some("TimeoutError: The operation was aborted due to timeout")
+            ),
+            RestoreFailClass::Transient,
+            "SEAL infra blips must not be negative-cached"
+        );
     }
 
     // ── /api/forget + /api/stats empty-namespace validation ─────────────

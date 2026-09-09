@@ -80,7 +80,11 @@ These routes require no authentication.
 
 ### `GET /health`
 
-Service liveness check. `status` is `"ok"` when the relayer process is up. `write_ready` is `true` when the encryption sidecar process answered its own `/health` (cached a few seconds). A write outage can still return HTTP 200 with `write_ready: false`. `write_ready: true` is sidecar liveness, not a guarantee that remember or analyze succeed.
+Service liveness check. `status` is `"ok"` when the relayer process is up. HTTP 200 means the process is running, not that writes are accepted.
+
+`writes` is `"ok"` or `"paused"`. `"paused"` when `WRITES_PAUSED` is set (`1` / `true` / `yes`); empty or unset is `"ok"`. That flag is write-path admission, not a health-only signal: `POST /api/remember`, `/api/remember/manual`, `/api/remember/bulk`, and `/api/analyze` then return HTTP 503 with `{"error":"writes are paused"}`. `/health` itself stays HTTP 200 with `status: "ok"` and `writes: "paused"`, so clients can distinguish an intentional pause from an integrator bug. Reads (`recall`, `restore`, remember job status) stay available.
+
+`write_ready` is `true` when the encryption sidecar process answered its own `/health` (cached a few seconds). That is sidecar liveness only, not a write-pause flag and not a guarantee that remember or analyze succeed. A sidecar outage can still return HTTP 200 with `write_ready: false`. Use `writes`, not `write_ready`, for the pause signal.
 
 **Response:**
 
@@ -107,7 +111,8 @@ Service liveness check. `status` is `"ok"` when the relayer process is up. `writ
     "extract": "extract.v1",
     "ask": "ask.v1"
   },
-  "write_ready": true
+  "write_ready": true,
+  "writes": "ok"
 }
 ```
 
@@ -477,12 +482,15 @@ Rebuild missing vector entries for one namespace. Queries onchain blobs by owner
 {
   "restored": 3,
   "skipped": 7,
+  "failed": 0,
   "total": 10,
   "namespace": "demo",
   "owner": "0x...",
   "truncated": false
 }
 ```
+
+`skipped` is onchain blobs already in the local success index. `failed` is permanent decrypt/UTF-8 failures on this onchain page (negative-cache hits plus new permanent failures this call), so it never exceeds `total`. Transient download, decrypt, or embed errors are not counted in `failed`; when a page yields only those, `truncated` is true so the caller retries.
 
 `truncated=true` means this restore is **known-retryable-incomplete**: more missing blobs than `limit` allowed this call to restore, **or** the sidecar's owner-wide candidate fetch hit its cap **and** raising `limit` can still expand that fetch (`limit < 20`). Once the sidecar cap is saturated (`limit >= 20`, cap pinned at 100), truncation follows this call's missing-blob page length, not onchain `total`. A fully restored namespace does not loop. `truncated=false` is **not** proof the sidecar saw every onchain blob; blobs beyond the owner-wide sidecar candidate cap can still be missing. WALM-451 tracks a `sourceCapped` field for that case ([WALM-451](https://linear.app/mysten-labs/issue/WALM-451)). Relayers older than WALM-319 omit `truncated`; SDKs default it to `false`.
 

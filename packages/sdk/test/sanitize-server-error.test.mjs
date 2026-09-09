@@ -3,36 +3,67 @@ import test from "node:test";
 
 import { sanitizeServerError } from "../dist/utils.js";
 
-const LOGIN =
-    "Walrus Memory isn't signed in. Call the memwal_login tool, then retry.";
+const AUTH_REJECTED =
+    "401 from relayer: typically wrong private key, key not registered on this account, " +
+    "account ID mismatch, or staging/mainnet mismatch. Check .env.local and dashboard credentials. " +
+    "Full troubleshooting: https://docs.wal.app/walrus-memory/troubleshooting/overview#401-auth_rejected-errors";
 
-test("empty-body 401 points at memwal_login instead of <no message>", () => {
+test("empty-body 401 uses AUTH_REJECTED troubleshooting instead of memwal_login", () => {
     const { message, serverCode } = sanitizeServerError(401, "");
     assert.equal(serverCode, "AUTH_REJECTED");
-    assert.equal(message, LOGIN);
+    assert.equal(message, AUTH_REJECTED);
     assert.doesNotMatch(message, /<no message>/);
+    assert.doesNotMatch(message, /memwal_login/);
 });
 
-test("string status \"401\" with an empty body uses the login hint", () => {
+test("string status \"401\" with an empty body uses AUTH_REJECTED troubleshooting", () => {
     const { message, serverCode } = sanitizeServerError("401", "   ");
     assert.equal(serverCode, "AUTH_REJECTED");
-    assert.equal(message, LOGIN);
+    assert.equal(message, AUTH_REJECTED);
     assert.doesNotMatch(message, /<no message>/);
+    assert.doesNotMatch(message, /memwal_login/);
 });
 
 test("non-empty 401 keeps the AUTH_REJECTED troubleshooting URL", () => {
     const { message, serverCode } = sanitizeServerError(401, "auth rejected");
     assert.equal(serverCode, "AUTH_REJECTED");
-    assert.match(
-        message,
-        /docs\.wal\.app\/walrus-memory\/troubleshooting\/overview/,
-    );
+    assert.equal(message, AUTH_REJECTED);
     assert.doesNotMatch(message, /memwal_login/);
 });
 
 test("non-401 empty bodies still use the <no message> placeholder", () => {
     const { message } = sanitizeServerError(500, "");
     assert.equal(message, "Walrus Memory server error (500): <no message>");
+});
+
+test("auth 503 is retryable credential-verification unavailability, not a login hint", () => {
+    const { message, serverCode } = sanitizeServerError(
+        503,
+        "upstream unavailable",
+        "AUTH_UPSTREAM_UNAVAILABLE",
+    );
+    assert.equal(serverCode, "AUTH_UPSTREAM_UNAVAILABLE");
+    assert.match(message, /not a sign-in failure/);
+    assert.doesNotMatch(message, /memwal_login/);
+});
+
+test("non-auth 503 keeps a generic retryable body, not credential copy", () => {
+    const { message, serverCode } = sanitizeServerError(
+        503,
+        "Rate limiter temporarily unavailable",
+    );
+    assert.equal(serverCode, undefined);
+    assert.match(message, /Rate limiter temporarily unavailable/);
+    assert.doesNotMatch(message, /cannot verify credentials/);
+    assert.doesNotMatch(message, /memwal_login/);
+});
+
+test("empty-body 503 without the auth header is generic", () => {
+    const { message, serverCode } = sanitizeServerError(503, "");
+    assert.equal(serverCode, undefined);
+    assert.equal(message, "Walrus Memory server error (503): <no message>");
+    assert.doesNotMatch(message, /memwal_login/);
+    assert.doesNotMatch(message, /isn't signed in/);
 });
 
 test("localhost sidecar URLs are stripped from error text", () => {

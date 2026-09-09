@@ -404,10 +404,57 @@ export interface RecallManualHit {
     distance: number;
 }
 
+/** One namespace in a `listNamespaces()` page. Mirrors the relayer wire shape. */
+export interface NamespaceSummary {
+    id: string;
+    name: string;
+    memory_count: number;
+    storage_used: number;
+    /**
+     * `MAX(updated_at)` across the namespace's memories — the same value the
+     * keyset cursor is built from, surfaced so callers can tell *what*
+     * changed rather than only that their watermark moved.
+     */
+    updated_at: string;
+}
+
+/** Result from listNamespaces() */
+export interface NamespacesResult {
+    namespaces: NamespaceSummary[];
+    /**
+     * Watermark to hand back as `cursor` on the next call. Populated on every
+     * page, including the last, so a caller that has finished syncing still
+     * has a checkpoint to poll from later.
+     */
+    next_cursor: string | null;
+    /**
+     * Authoritative "keep paginating" signal. Do NOT infer this from page
+     * length: the server silently clamps `limit`, so a caller asking for more
+     * than the cap gets exactly the cap back and would wrongly conclude it
+     * was done.
+     */
+    has_more: boolean;
+    snapshot_version: number;
+}
+
+/** Options for listNamespaces() */
+export interface ListNamespacesOptions {
+    /** Previous page's `next_cursor`, to continue a walk or poll incrementally. */
+    cursor?: string;
+    /** Page size. Server defaults to 100 and clamps to 500. */
+    limit?: number;
+}
+
 /** Result from restore() */
 export interface RestoreResult {
     restored: number;
     skipped: number;
+    /**
+     * Permanent decrypt/UTF-8 failures on this on-chain page: negative-cache
+     * hits plus any new permanent failures this call. Relayers older than
+     * COMG-719 omit this field; the SDK defaults it to `0`.
+     */
+    failed: number;
     total: number;
     namespace: string;
     owner: string;
@@ -418,7 +465,8 @@ export interface RestoreResult {
      * `limit` can still expand that fetch (`limit < 20`). Once the cap is
      * saturated, truncation follows this call's missing-blob page, not
      * on-chain `total`, so a fully restored namespace does not loop
-     * (WALM-431 / GH #762).
+     * (WALM-431 / GH #762). Also true when an inspected page produced only
+     * transients (download/decrypt/embed) so the caller retries (WALM-480).
      *
      * `truncated=false` is not proof the sidecar saw every on-chain blob.
      * Blobs beyond the owner-wide sidecar candidate cap can still be

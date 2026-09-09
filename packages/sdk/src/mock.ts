@@ -18,6 +18,8 @@ import type {
     RememberJobStatus,
     RememberResult,
     RestoreResult,
+    NamespacesResult,
+    ListNamespacesOptions,
 } from "./types.js";
 import { applyTokenBudget, estimateTokens } from "./tokens.js";
 
@@ -44,6 +46,14 @@ interface MockMemory {
     namespace: string;
     sequence: number;
 }
+
+/**
+ * Fixed base for synthesised namespace timestamps. `MockMemory` carries no
+ * clock, so `updated_at` is derived from insertion order instead — keeping
+ * mock runs reproducible while preserving the real relayer's property that
+ * later writes sort later.
+ */
+const MOCK_NAMESPACE_EPOCH_MS = Date.UTC(2026, 0, 1);
 
 const MOCK_VERSION: RelayerVersionMetadata = {
     relayerVersion: "memwal-mock",
@@ -367,10 +377,74 @@ export class MemWalMock {
         return {
             restored: 0,
             skipped: 0,
+            failed: 0,
             total: 0,
             namespace,
             owner: this.owner,
             truncated: false,
+        };
+    }
+
+    async listNamespaces(options: ListNamespacesOptions = {}): Promise<NamespacesResult> {
+        const grouped = new Map<string, { count: number; bytes: number; sequence: number }>();
+        for (const memory of this.memories) {
+            const entry = grouped.get(memory.namespace) ?? { count: 0, bytes: 0, sequence: 0 };
+            entry.count += 1;
+            entry.bytes += new TextEncoder().encode(memory.text).length;
+            entry.sequence = Math.max(entry.sequence, memory.sequence);
+            grouped.set(memory.namespace, entry);
+        }
+
+        const all = [...grouped.entries()]
+            .map(([name, entry]) => ({
+                id: `mock-ns-${name}`,
+                name,
+                memory_count: entry.count,
+                storage_used: entry.bytes,
+                updated_at: new Date(
+                    MOCK_NAMESPACE_EPOCH_MS + entry.sequence * 1000
+                ).toISOString(),
+            }))
+            .sort((a, b) =>
+                a.updated_at === b.updated_at
+                    ? a.name.localeCompare(b.name)
+                    : a.updated_at.localeCompare(b.updated_at)
+            );
+
+        // Match the relayer's URL_SAFE_NO_PAD JSON cursor and snapshot walk.
+        const cursor: { updated_at: string; namespace: string; snapshot_at?: string | null } | null =
+            options.cursor === undefined ? null : JSON.parse(new TextDecoder().decode(
+                Uint8Array.from(
+                    atob(options.cursor.replace(/-/g, "+").replace(/_/g, "/")),
+                    (char) => char.charCodeAt(0),
+                ),
+            ));
+        const snapshotAt = cursor?.snapshot_at ?? new Date(
+            MOCK_NAMESPACE_EPOCH_MS + this.sequence * 1000,
+        ).toISOString();
+        const remaining = all.filter((ns) =>
+            Date.parse(ns.updated_at) <= Date.parse(snapshotAt) &&
+            (!cursor || Date.parse(ns.updated_at) > Date.parse(cursor.updated_at) ||
+                (Date.parse(ns.updated_at) === Date.parse(cursor.updated_at) &&
+                    ns.name > cursor.namespace))
+        );
+        const page = remaining.slice(0, options.limit ?? remaining.length);
+        const hasMore = remaining.length > page.length;
+        const last = page.at(-1);
+        const watermark = last ? { updated_at: last.updated_at, namespace: last.name } : cursor;
+        const nextCursor = watermark ? btoa(Array.from(new TextEncoder().encode(JSON.stringify({
+            updated_at: watermark.updated_at,
+            namespace: watermark.namespace,
+            snapshot_at: hasMore ? snapshotAt : null,
+        })), (byte) => String.fromCharCode(byte)).join(""))
+            .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : null;
+
+        return {
+            namespaces: page,
+            next_cursor: nextCursor,
+            has_more: hasMore,
+            // Matches the live relayer's current wire-format version.
+            snapshot_version: 2,
         };
     }
 

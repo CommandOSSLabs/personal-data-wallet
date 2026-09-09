@@ -754,6 +754,7 @@ pub async fn remember(
     Extension(auth): Extension<AuthInfo>,
     Json(body): Json<RememberRequest>,
 ) -> Result<(StatusCode, Json<RememberAcceptedResponse>), AppError> {
+    reject_if_writes_paused(state.config.writes_paused)?;
     if body.text.is_empty() {
         return Err(AppError::BadRequest("Text cannot be empty".into()));
     }
@@ -1245,6 +1246,7 @@ pub async fn remember_bulk(
     Extension(auth): Extension<AuthInfo>,
     Json(body): Json<RememberBulkRequest>,
 ) -> Result<(StatusCode, Json<RememberBulkAcceptedResponse>), AppError> {
+    reject_if_writes_paused(state.config.writes_paused)?;
     // ── Validate ──────────────────────────────────────────────────────────
     if body.items.is_empty() {
         return Err(AppError::BadRequest("items cannot be empty".into()));
@@ -1419,6 +1421,7 @@ pub async fn remember_manual(
     Extension(auth): Extension<AuthInfo>,
     Json(body): Json<RememberManualRequest>,
 ) -> Result<Json<RememberManualResponse>, AppError> {
+    reject_if_writes_paused(state.config.writes_paused)?;
     if body.encrypted_data.is_empty() {
         return Err(AppError::BadRequest(
             "encrypted_data cannot be empty".into(),
@@ -2090,6 +2093,7 @@ mod tests {
             trusted_proxy_hops: 0,
             allowed_origins: String::new(),
             benchmark_mode: false,
+            writes_paused: false,
             enable_memory_deletion: false,
             enable_security_delete: false,
             legacy_db_url: None,
