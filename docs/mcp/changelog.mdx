@@ -28,8 +28,16 @@ questions:
   - What changed in the MemWal MCP changelog?
   - When was the automatic memory plugin added to MemWal MCP?
 answer: >-
-  The latest MCP package release is 0.0.12. It forwards the MCP client's initialize.clientInfo to the relayer so sidecar logs can name the coding agent (Claude Code, Codex, Cursor, and others) on each session and tool call, and it resolves the credential directory on every access so MEMWAL_CREDS_DIR can override it. Version 0.0.11 makes memwal_logout cut the running bridge session so memory tools stop after sign-out.
+  The latest MCP package release is 0.0.13. `memwal_restore` reports `failed` and retries the same page when truncation is a download or embed blip, instead of always telling the agent to raise `limit`. Version 0.0.12 forwards the MCP client's initialize.clientInfo to the relayer so sidecar logs can name the coding agent (Claude Code, Codex, Cursor, and others) on each session and tool call, and it resolves the credential directory on every access so MEMWAL_CREDS_DIR can override it.
 ---
+
+## 0.0.13
+
+This release reports restore `failed` counts and retries the same page when truncation is a transient download or embed blip.
+
+### Fixed
+
+- `memwal_restore` reports `failed` and retries the same page when `truncated` is a download/embed blip (`restored=0` and `skipped+failed < total`), instead of always telling the agent to raise `limit` (WALM-480).
 
 ## 0.0.12
 

@@ -1,5 +1,11 @@
 # @mysten-incubation/memwal
 
+## 0.1.7
+
+### Added
+
+- `restore()` results include `failed` (required like `truncated`; SDK defaults omitted to `0`) for permanent decrypt/UTF-8 failures instead of folding them into `skipped` or dropping them silently.
+
 ## 0.1.6
 
 ### Added
