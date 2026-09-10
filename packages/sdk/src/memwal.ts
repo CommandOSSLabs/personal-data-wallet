@@ -616,10 +616,13 @@ export class MemWal {
                 if (status.status === "failed" || status.status === "not_found") {
                     // Spread first: a blob id an earlier `uploaded` poll folded
                     // in is the caller's only handle on a write that may have
-                    // landed. Do not reset it to "".
+                    // landed. Do not reset it to "". `mark_remember_job_failed`
+                    // leaves `blob_id` in place, so the failing poll itself can
+                    // also be the first one to carry it.
                     results[slot.idx] = {
                         ...results[slot.idx],
                         id: slot.jobId,
+                        blob_id: status.blob_id || results[slot.idx].blob_id,
                         status: "failed",
                         namespace,
                         error:
