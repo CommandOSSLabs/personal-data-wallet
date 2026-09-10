@@ -678,7 +678,7 @@ function handleLocalLogout(): { text: string; isError: boolean } {
         // Kept out of `clearCreds()` so only a deliberate sign-out discards a
         // key that may still be reclaimable. `clearCreds` is exported, and a
         // 401 deliberately does NOT wipe credentials (see the relayer-401
-        // handling below), so the two are not the same decision.
+        // handling above), so the two are not the same decision.
         clearPendingLogin();
         log.info("memwal_logout.bridge.success", {
             removedPath: cleared.removedPath ?? null,

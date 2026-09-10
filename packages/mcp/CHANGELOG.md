@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Persist the delegate keypair before the sign-in URL is handed to the browser, and reclaim it on the next start. The browser's on-chain `add_delegate_key` is paid and irreversible, and it happens before the callback that saved the private half, so a client that died in that window destroyed the only copy of a key the user had already paid for and left an orphaned registration nobody could use. (#793) Signing out discards the pending record along with the credentials, a second sign-in against the same relayer reuses the stranded key rather than minting over it, and a sign-in that cannot write the record fails instead of publishing a URL it cannot back. Reclaiming works on Mainnet; Testnet requires an account-id hint the recovering client does not have.
+- Persist the delegate keypair before sign-in hands the URL to the browser, and reclaim it on the next start. The browser's onchain `add_delegate_key` costs gas and is irreversible, and it happens before the callback that saves the private half, so a client that died in that window destroyed the only copy of a key the user had already paid for and left an orphaned registration nobody could use. (#793) Signing out discards the pending record along with the credentials, a second sign-in against the same relayer reuses the stranded key rather than minting over it, and a sign-in that cannot write the record fails instead of publishing a URL it cannot back. Reclaiming works on Mainnet; Testnet requires an account-id hint the recovering client does not have.
 - `memwal_restore` reports `failed` and retries the same page when `truncated` is a download/embed blip (`restored=0` and `skipped+failed < total`), instead of always telling the agent to raise `limit` (WALM-480).
 
 ## 0.0.12
