@@ -1232,6 +1232,17 @@ export class MemWal {
             );
         }
 
+        // A present-but-too-old @mysten/seal resolves, so the import above does
+        // not throw; `SessionKey` is just undefined and the failure would
+        // surface as a TypeError from `.create()` and be retried as transient.
+        // Name it here so it classifies as permanent alongside Ed25519Keypair.
+        if (typeof SessionKey !== "function") {
+            throw new Error(
+                "Required SessionKey export not found in @mysten/seal. " +
+                "Ensure @mysten/sui >=2.5.0 and @mysten/seal >=1.1.0 are installed."
+            );
+        }
+
         const keypair = Ed25519Keypair.fromSecretKey(this.privateKey);
 
         // SessionKey accepts either transport through the shared core client

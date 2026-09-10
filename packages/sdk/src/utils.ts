@@ -540,6 +540,11 @@ export type SealSessionError = Error & {
  * The peer deps are loaded through dynamic `import()`, so the common
  * missing-package case never reaches the hand-written checks below — it throws
  * out of the import itself. Those resolver messages are matched here too.
+ *
+ * A package that resolves but is too old does NOT throw from the import: the
+ * import is a namespace import, so a missing export is just `undefined`.
+ * `buildSealSessionInner()` guards `Ed25519Keypair` and `SessionKey` explicitly
+ * and produces the "not found in @mysten/..." messages above.
  */
 const SEAL_SESSION_PERMANENT_MARKERS = [
     "not found in @mysten/sui",
@@ -552,7 +557,6 @@ const SEAL_SESSION_PERMANENT_MARKERS = [
     "cannot find module",
     "err_module_not_found",
     "failed to resolve module specifier",
-    "does not provide an export named",
 ];
 
 /** ASCII control characters, stripped from error text before it is surfaced. */

@@ -172,7 +172,10 @@ test("sealSessionBuildError tags an unresolvable peer import 400 so withRetry st
     for (const message of [
         "Cannot find package '@mysten/seal' imported from /app/node_modules/.../utils.js",
         "Cannot find module '@mysten/sui/keypairs/ed25519'",
-        "The requested module '@mysten/seal' does not provide an export named 'SessionKey'",
+        // A too-old but resolvable package cannot throw a named-export error
+        // here: buildSealSessionInner namespace-imports and guards the symbol,
+        // so it is this hand-written message that reaches the classifier.
+        "Required SessionKey export not found in @mysten/seal. Ensure @mysten/sui >=2.5.0 and @mysten/seal >=1.1.0 are installed.",
     ]) {
         const err = sealSessionBuildError(new Error(message));
         assert.equal(err.status, 400, message);
