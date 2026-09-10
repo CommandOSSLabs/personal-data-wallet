@@ -155,7 +155,7 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> 
 }
 
 const WRITE_READY_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(2);
-const WRITE_READY_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(300);
+const WRITE_READY_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 /// Neon refuses `smgrextend` once cluster size is at the cap; treat less
 /// than 1MB remaining as not writable so `/health` trips before the next
 /// page allocation fails.
@@ -199,9 +199,10 @@ async fn sidecar_write_ready(state: &std::sync::Arc<AppState>) -> bool {
 }
 
 /// Self-hosted Postgres without `neon.max_cluster_size` stays ready (sidecar
-/// still applies). Missing `public.pg_cluster_size` and probe/pool failures
-/// fail open at `warn` (timeout at `debug`) so CI `wait-for-relayer` and a
-/// flapping pool do not look like a write outage.
+/// still applies). Missing `public.pg_cluster_size` falls back to
+/// `sum(pg_database_size)` against that GUC. Other probe/pool failures fail
+/// open at `warn` so CI `wait-for-relayer` and a flapping pool do not look
+/// like a write outage. Timeouts also fail open, at `warn` (cached 2s).
 async fn postgres_write_ready(state: &std::sync::Arc<AppState>) -> bool {
     match tokio::time::timeout(
         WRITE_READY_PROBE_TIMEOUT,
@@ -218,7 +219,7 @@ async fn postgres_write_ready(state: &std::sync::Arc<AppState>) -> bool {
             true
         }
         Err(_) => {
-            tracing::debug!("postgres write-ready probe timed out");
+            tracing::warn!("postgres write-ready probe timed out");
             true
         }
     }
@@ -248,15 +249,60 @@ async fn probe_postgres_write_ready(pool: &sqlx::PgPool) -> Result<bool, sqlx::E
         return Ok(true);
     };
 
-    // Neon gates smgrextend on cluster size (WAL/history/other DBs), not
-    // pg_database_size of this database. `CREATE EXTENSION neon` (relocatable,
-    // no schema in neon.control) puts `pg_cluster_size` in `public`. Qualify
-    // for empty search_path through PgBouncer.
-    let used_bytes: i64 = sqlx::query_scalar("SELECT public.pg_cluster_size()::bigint")
-        .fetch_one(pool)
-        .await?;
-
+    let used_bytes = cluster_used_bytes(pool).await?;
     Ok(postgres_can_accept_writes(used_bytes, max_bytes))
+}
+
+/// Neon gates smgrextend on cluster size (WAL/history/other DBs), not
+/// `pg_database_size` of this database. `CREATE EXTENSION neon` (relocatable,
+/// no schema in neon.control) puts `pg_cluster_size` in `public`. Qualify
+/// for empty search_path through PgBouncer. Do not `CREATE EXTENSION neon`
+/// in migrations — that breaks local/CI vanilla Postgres. If the function
+/// is missing, fall back to `sum(pg_database_size)` vs the same GUC.
+static PG_CLUSTER_SIZE_MISSING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+async fn cluster_used_bytes(pool: &sqlx::PgPool) -> Result<i64, sqlx::Error> {
+    if PG_CLUSTER_SIZE_MISSING.load(std::sync::atomic::Ordering::Relaxed) {
+        return sum_database_size_bytes(pool).await;
+    }
+    match sqlx::query_scalar::<_, i64>("SELECT public.pg_cluster_size()::bigint")
+        .fetch_one(pool)
+        .await
+    {
+        Ok(n) => Ok(n),
+        Err(e) if pg_cluster_size_unavailable(&e) => {
+            PG_CLUSTER_SIZE_MISSING.store(true, std::sync::atomic::Ordering::Relaxed);
+            tracing::warn!(
+                error = %e,
+                "public.pg_cluster_size() is missing; falling back to sum(pg_catalog.pg_database_size(datname)) vs neon.max_cluster_size"
+            );
+            sum_database_size_bytes(pool).await
+        }
+        Err(e) => Err(e),
+    }
+}
+
+async fn sum_database_size_bytes(pool: &sqlx::PgPool) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(SUM(pg_catalog.pg_database_size(datname)), 0)::bigint \
+         FROM pg_catalog.pg_database",
+    )
+    .fetch_one(pool)
+    .await
+}
+
+/// Postgres `undefined_function` (SQLSTATE 42883), including a missing
+/// `public.pg_cluster_size` when the `neon` extension is not installed.
+fn pg_cluster_size_unavailable(err: &sqlx::Error) -> bool {
+    let Some(db) = err.as_database_error() else {
+        return false;
+    };
+    if db.code().as_deref() == Some("42883") {
+        return true;
+    }
+    let msg = db.message().to_ascii_lowercase();
+    msg.contains("pg_cluster_size") && msg.contains("does not exist")
 }
 
 /// `None` = no cap (self-host / unset / unparseable / unlimited `-1`).
@@ -1152,6 +1198,81 @@ mod tests {
             max - super::POSTGRES_EXTEND_HEADROOM_BYTES - 1,
             max
         ));
+    }
+
+    #[test]
+    fn postgres_write_ready_probe_timeout_is_one_second() {
+        assert_eq!(
+            super::WRITE_READY_PROBE_TIMEOUT,
+            std::time::Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn missing_pg_cluster_size_falls_back_instead_of_fail_open() {
+        let missing = sqlx::Error::Database(Box::new(FakePgError {
+            message: "function public.pg_cluster_size() does not exist",
+            code: Some("42883"),
+        }));
+        assert!(super::pg_cluster_size_unavailable(&missing));
+
+        let missing_by_message = sqlx::Error::Database(Box::new(FakePgError {
+            message: "function public.pg_cluster_size() does not exist",
+            code: None,
+        }));
+        assert!(super::pg_cluster_size_unavailable(&missing_by_message));
+
+        let other = sqlx::Error::Database(Box::new(FakePgError {
+            message: "connection reset",
+            code: Some("08006"),
+        }));
+        assert!(!super::pg_cluster_size_unavailable(&other));
+
+        let disk_full = sqlx::Error::Database(Box::new(FakePgError {
+            message: "could not extend file because project size limit (3072 MB) has been exceeded",
+            code: Some("53100"),
+        }));
+        assert!(!super::pg_cluster_size_unavailable(&disk_full));
+    }
+
+    #[derive(Debug)]
+    struct FakePgError {
+        message: &'static str,
+        code: Option<&'static str>,
+    }
+
+    impl std::fmt::Display for FakePgError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.message)
+        }
+    }
+
+    impl std::error::Error for FakePgError {}
+
+    impl sqlx::error::DatabaseError for FakePgError {
+        fn message(&self) -> &str {
+            self.message
+        }
+
+        fn kind(&self) -> sqlx::error::ErrorKind {
+            sqlx::error::ErrorKind::Other
+        }
+
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+            self.code.map(std::borrow::Cow::Borrowed)
+        }
+
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
     }
 
     // ── /api/restore body.limit cap (GH #501 / WALM-299) ────────────────

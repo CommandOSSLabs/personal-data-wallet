@@ -28,14 +28,7 @@ impl VectorDb {
         let Some((alerts, network)) = &self.storage_alerts else {
             return;
         };
-        if crate::alerts::sqlx_error_is_postgres_storage_exhausted(err) {
-            crate::alerts::maybe_alert_postgres_storage_exhausted(
-                alerts,
-                network,
-                &err.to_string(),
-            )
-            .await;
-        }
+        crate::alerts::maybe_alert_sqlx_postgres_storage_exhausted(alerts, network, err).await;
     }
 }
 
@@ -1593,13 +1586,21 @@ impl VectorDb {
         .bind(end_epoch)
         .execute(&mut *tx)
         .await;
-        if let Err(ref e) = result {
-            self.maybe_alert_storage_exhausted(e).await;
+        if let Err(e) = result {
+            drop(tx);
+            self.maybe_alert_storage_exhausted(&e).await;
+            let result = Err(AppError::Internal(format!(
+                "Failed to insert vector: {}",
+                e
+            )));
+            crate::observability::observe_db(
+                "vector.insert",
+                db_status(&result),
+                started.elapsed(),
+            );
+            return result;
         }
-        let result =
-            result.map_err(|e| AppError::Internal(format!("Failed to insert vector: {}", e)));
-        crate::observability::observe_db("vector.insert", db_status(&result), started.elapsed());
-        result?;
+        crate::observability::observe_db("vector.insert", "ok", started.elapsed());
         sqlx::query("DELETE FROM memory_tombstones WHERE memory_id = $1")
             .bind(id)
             .execute(&mut *tx)

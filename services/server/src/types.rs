@@ -1902,10 +1902,12 @@ pub struct HealthResponse {
     /// no "version unknown" state for a running server.
     pub prompt_versions: PromptVersions,
     /// Whether the encryption sidecar answered `/health` AND Postgres can
-    /// accept writes (Neon `neon.max_cluster_size` cap). Self-hosted
-    /// Postgres without that GUC, or a missing `public.pg_cluster_size`,
-    /// is sidecar-only (probe fails open so CI `wait-for-relayer` does not
-    /// hang). `status` stays `"ok"` while the relayer process is up.
+    /// accept writes (Neon `neon.max_cluster_size` cap). Prefer
+    /// `public.pg_cluster_size()`; if that function is missing, fall back
+    /// to `sum(pg_database_size)` against the same GUC. Self-hosted
+    /// Postgres without the GUC is sidecar-only. Probe errors and timeouts
+    /// fail open so CI `wait-for-relayer` does not hang. `status` stays
+    /// `"ok"` while the relayer process is up.
     pub write_ready: bool,
     /// Write-path admission: `"ok"` or `"paused"`. `"paused"` when
     /// `WRITES_PAUSED` is set; write routes then return HTTP 503.
