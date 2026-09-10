@@ -14,19 +14,36 @@ import { walletSessionInsertSchema } from "@/shared/db/type";
 // x-session-id header via the tRPC context, so it can never be supplied as input.
 
 // ═══════════════════════════════════════════════════════════════
+// Shared Field Schemas
+// ═══════════════════════════════════════════════════════════════
+
+// Canonical Sui address: 0x + 64 hex. Reject malformed input at the boundary so
+// it never reaches normalizeSuiAddress (which would silently left-pad garbage
+// into a valid-looking-but-wrong address) or a DB lookup.
+export const suiAddressSchema = z
+  .string()
+  .regex(/^0x[0-9a-f]{64}$/i, "Invalid Sui address");
+
+// ═══════════════════════════════════════════════════════════════
 // Wallet Auth Inputs
 // ═══════════════════════════════════════════════════════════════
 
 /**
  * Input for wallet authentication
  * Derives field types from walletSessionInsertSchema
- * Uses client-friendly names (address/message instead of walletAddress/signedMessage)
+ * Uses client-friendly names (address instead of walletAddress)
+ *
+ * The caller does NOT supply the message that was signed: it proves ownership of
+ * `address` by signing a server-issued single-use challenge (issueWalletChallenge)
+ * and returning that challenge's id. Accepting a caller-chosen message would let
+ * anyone replay one captured {message, signature, address} triple into an
+ * unlimited number of 24-hour sessions.
  */
 export const connectWalletInput = z.object({
   walletType: walletSessionInsertSchema.shape.walletType.pipe(z.enum(["slush"])), // Subset validation
-  address: walletSessionInsertSchema.shape.walletAddress, // Maps to walletAddress in DB
-  signature: walletSessionInsertSchema.shape.signature,
-  message: walletSessionInsertSchema.shape.signedMessage, // Maps to signedMessage in DB
+  address: suiAddressSchema, // Maps to walletAddress in DB
+  challengeId: z.string().min(1),
+  signature: z.string().min(1),
 });
 
 export type ConnectWalletInput = z.infer<typeof connectWalletInput>;

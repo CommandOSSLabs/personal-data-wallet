@@ -1,5 +1,11 @@
 # @mysten-incubation/memwal-mcp
 
+## 0.0.13
+
+### Fixed
+
+- `memwal_restore` reports `failed` and retries the same page when `truncated` is a download/embed blip (`restored=0` and `skipped+failed < total`), instead of always telling the agent to raise `limit` (WALM-480).
+
 ## 0.0.12
 
 ### Added
