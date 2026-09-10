@@ -4,7 +4,10 @@
  * Common crypto and encoding helpers used across the SDK.
  */
 
-import type { ScoringWeights } from "./types.js";
+import type {
+    RememberJobTimeoutError as RememberJobTimeoutErrorType,
+    ScoringWeights,
+} from "./types.js";
 
 // ============================================================
 // SHA-256 (Isomorphic)
@@ -455,53 +458,41 @@ export async function delegateKeyToPublicKey(privateKeyHex: string): Promise<Uin
  * - `idempotencyKey` → replaying `rememberAndWait(text, ns, { idempotencyKey })`
  *   returns the original job instead of minting a second blob. This is the one
  *   that survives a process restart, which the SDK's in-memory key map does not.
+ *
+ * The type lives in `types.ts` as `RememberJobTimeoutError` so this and the
+ * WALM-597 / WALM-600 work describe one error rather than three.
  */
-export interface RememberTimeoutError extends Error {
-    name: "MemWalRememberTimeoutError";
-    /** Always 504, matching the pre-existing untyped shape. */
-    status: number;
-    /** The accepted job that was still running. Poll it to settle the write. */
-    jobId: string;
-    /** Budget that was exceeded, in milliseconds. */
-    timeoutMs: number;
-    /**
-     * The key this write was submitted under. Present whenever the SDK owns the
-     * submission (`rememberAndWait`); absent when polling a job id directly via
-     * `waitForRememberJob`, which never saw one.
-     */
-    idempotencyKey?: string;
-    /** Namespace the write targeted, for replaying it verbatim. */
-    namespace?: string;
-}
+export type { RememberJobTimeoutError } from "./types.js";
 
 /**
  * True when a write's outcome is unknown rather than failed. Callers should
- * branch on this before any retry: retrying a `RememberTimeoutError` without
- * its `idempotencyKey` is what mints the duplicate blob.
+ * branch on this before any retry: retrying a poll timeout without its
+ * `idempotencyKey` is what mints the duplicate blob.
+ *
+ * Detects on `status` + `jobId` rather than on `name`, so it matches the
+ * timeout whichever of the in-flight poll-timeout changes lands first.
  */
-export function isRememberTimeoutError(err: unknown): err is RememberTimeoutError {
-    return (
-        err instanceof Error &&
-        err.name === "MemWalRememberTimeoutError" &&
-        typeof (err as RememberTimeoutError).jobId === "string"
-    );
+export function isRememberJobTimeoutError(err: unknown): err is RememberJobTimeoutErrorType {
+    if (!(err instanceof Error)) return false;
+    const e = err as Error & { status?: number; jobId?: unknown };
+    return e.status === 504 && typeof e.jobId === "string";
 }
 
-export function rememberTimeoutError(
+export function rememberJobTimeoutError(
     jobId: string,
     timeoutMs: number,
     context: { idempotencyKey?: string; namespace?: string } = {},
-): RememberTimeoutError {
+): RememberJobTimeoutErrorType {
     const detail = [
         `job_id=${jobId}`,
         ...(context.idempotencyKey ? [`idempotency_key=${context.idempotencyKey}`] : []),
     ].join(", ");
     const err = new Error(
-        `remember job timed out after ${timeoutMs}ms (${detail}). The write may still ` +
+        `remember job timed out after ${timeoutMs}ms (${detail}). The write might still ` +
             `complete: poll waitForRememberJob("${jobId}") to settle it, or replay with the ` +
-            `same idempotencyKey. Do not retry without one — that mints a second blob.`,
-    ) as RememberTimeoutError;
-    err.name = "MemWalRememberTimeoutError";
+            `same idempotencyKey. Do not retry without one, that mints a second blob.`,
+    ) as RememberJobTimeoutErrorType;
+    err.name = "MemWalRememberJobTimeoutError";
     err.status = 504;
     err.jobId = jobId;
     err.timeoutMs = timeoutMs;

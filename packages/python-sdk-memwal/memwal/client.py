@@ -395,6 +395,7 @@ class MemWal:
         return RememberAcceptedResult(
             job_id=data["job_id"],
             status=data.get("status", "pending"),
+            idempotency_key=resolved_key,
         )
 
     # Alias for parity with TS SDK ``rememberAsync``.

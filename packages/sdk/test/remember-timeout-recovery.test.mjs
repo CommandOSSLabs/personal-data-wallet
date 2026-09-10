@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { MemWal } from "../dist/memwal.js";
-import { isRememberTimeoutError } from "../dist/utils.js";
+import { isRememberJobTimeoutError } from "../dist/utils.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -97,8 +97,8 @@ test("a congestion timeout is an unknown outcome carrying both recovery handles"
         }),
     );
 
-    assert.ok(isRememberTimeoutError(err), "callers must be able to detect this without duck-typing");
-    assert.equal(err.name, "MemWalRememberTimeoutError");
+    assert.ok(isRememberJobTimeoutError(err), "callers must be able to detect this without duck-typing");
+    assert.equal(err.name, "MemWalRememberJobTimeoutError");
     assert.equal(err.status, 504);
     assert.equal(err.jobId, JOB_ID);
     assert.equal(err.namespace, "drops");
@@ -106,6 +106,9 @@ test("a congestion timeout is an unknown outcome carrying both recovery handles"
     // The message has to point at recovery: this is what a caller sees in logs.
     assert.match(err.message, /poll waitForRememberJob/);
     assert.match(err.message, /mints a second blob/);
+    // The key belongs in the message too: after a restart the log line may be
+    // all a caller still has.
+    assert.ok(err.message.includes(err.idempotencyKey));
 });
 
 test("the job id settles the write with no second remember", async () => {
@@ -116,7 +119,7 @@ test("the job id settles the write with no second remember", async () => {
     const err = await rejection(
         client.rememberAndWait("wallet drop #42", undefined, { pollIntervalMs: 0, timeoutMs: 1 }),
     );
-    assert.ok(isRememberTimeoutError(err));
+    assert.ok(isRememberJobTimeoutError(err));
 
     const settled = await client.waitForRememberJob(err.jobId, {
         pollIntervalMs: 0,
@@ -222,7 +225,7 @@ test("isRememberTimeoutError does not fire on a genuine failure", async () => {
         }),
     );
 
-    assert.equal(isRememberTimeoutError(err), false, "a failed job is a known outcome");
+    assert.equal(isRememberJobTimeoutError(err), false, "a failed job is a known outcome");
     assert.equal(err.status, 500);
 });
 
@@ -233,7 +236,7 @@ test("waitForRememberJob called directly reports no key it never saw", async () 
         makeClient().waitForRememberJob(JOB_ID, { pollIntervalMs: 0, timeoutMs: 1 }),
     );
 
-    assert.ok(isRememberTimeoutError(err));
+    assert.ok(isRememberJobTimeoutError(err));
     assert.equal(err.jobId, JOB_ID);
     assert.equal(err.idempotencyKey, undefined);
 });

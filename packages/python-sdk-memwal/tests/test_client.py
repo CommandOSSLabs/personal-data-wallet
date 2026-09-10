@@ -445,6 +445,26 @@ class TestRememberTimeoutRecovery:
         assert keys == {err.idempotency_key}
 
     @respx.mock
+    async def test_remember_echoes_the_key_it_submitted_under(
+        self, memwal_client: MemWal
+    ) -> None:
+        """A split-API caller (remember + wait) needs the key too."""
+        mock_seal_session_prereqs()
+        respx.post(f"{_TEST_SERVER}/api/remember").mock(
+            return_value=httpx.Response(
+                202, json={"job_id": "job-1", "status": "pending"}
+            )
+        )
+
+        generated = await memwal_client.remember("wallet drop #42")
+        assert generated.idempotency_key
+
+        explicit = await memwal_client.remember(
+            "wallet drop #43", idempotency_key="caller-owned-key"
+        )
+        assert explicit.idempotency_key == "caller-owned-key"
+
+    @respx.mock
     async def test_direct_wait_reports_no_key_it_never_saw(
         self, memwal_client: MemWal
     ) -> None:

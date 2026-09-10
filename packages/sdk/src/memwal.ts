@@ -66,8 +66,8 @@ import {
     normalizeServerUrl,
     sanitizeServerError,
     redactInternalUrls,
-    rememberTimeoutError,
-    isRememberTimeoutError,
+    rememberJobTimeoutError,
+    isRememberJobTimeoutError,
     clockDriftErrorFromResponse,
     scoringWeightsToWire,
 } from "./utils.js";
@@ -373,7 +373,7 @@ export class MemWal {
         // Unknown outcome, not a failure: the relayer accepted this job and it
         // may still finish. The error carries the handles needed to settle it
         // without paying for a second write (WALM-595).
-        throw rememberTimeoutError(jobId, timeoutMs);
+        throw rememberJobTimeoutError(jobId, timeoutMs);
     }
 
     /**
@@ -399,12 +399,14 @@ export class MemWal {
             completed = await this.waitForRememberJob(accepted.job_id, opts);
         } catch (err) {
             // The in-memory key map below only helps a caller that retries in
-            // this same process. Put the key on the error too, so a service
-            // that restarts — the GH #658 report — can still replay this exact
-            // write instead of minting a duplicate.
-            if (isRememberTimeoutError(err)) {
-                err.idempotencyKey = idempotencyKey;
-                err.namespace = resolvedNamespace;
+            // this same process. Rebuild the timeout with the key, so a service
+            // that restarts can replay this exact write instead of minting a
+            // duplicate — and so the key is in the message, not just a field.
+            if (isRememberJobTimeoutError(err)) {
+                throw rememberJobTimeoutError(err.jobId, err.timeoutMs, {
+                    idempotencyKey,
+                    namespace: resolvedNamespace,
+                });
             }
             throw err;
         }
