@@ -166,6 +166,21 @@ const SIGNED_OUT_FAILURE = {
     errorMessage: SIGNED_OUT_TEXT,
 } as const;
 
+/** Reply for every request once the relayer has rejected the saved delegate
+ * key. An empty recall and a rejected key used to be indistinguishable to the
+ * agent — the queued call simply waited out the orphan sweeper and came back as
+ * "connection dropped, please retry", which is advice that cannot work. Name
+ * the cause and the way back in instead (GH #365 / WALM-602). */
+const UNAUTHORIZED_TEXT =
+    "❌ Walrus Memory rejected the saved credentials (HTTP 401). The delegate key may have been revoked or is no longer registered on this account. Call `memwal_login` to sign in again — saved credentials were NOT modified.";
+
+/** `failRequest` options for every credentials-rejected refusal, so one refused
+ * at handshake time and one refused on arrival afterwards read identically. */
+const UNAUTHORIZED_FAILURE = {
+    toolText: UNAUTHORIZED_TEXT,
+    errorMessage: UNAUTHORIZED_TEXT,
+} as const;
+
 /** The `tools/list` we serve LOCALLY at cold start: the memory tools (from the
  * same source as auth-required mode) plus the locally-handled login/logout
  * tools. We strip any locally-served name from the imported list first —
@@ -242,6 +257,18 @@ interface RpcMessage {
 interface InFlightEntry {
     msg: RpcMessage;
     startedAt: number;
+}
+
+/** The relayer rejected the saved delegate key (HTTP 401 on the handshake).
+ * Distinct from every other connect failure because retrying cannot fix it:
+ * the caller must re-authenticate. Carrying it as a type keeps the background
+ * connect loop from backing off forever on a key that will never be accepted,
+ * which left tool calls parked until the orphan sweeper's deadline (WALM-602). */
+class RelayerUnauthorizedError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "RelayerUnauthorizedError";
+    }
 }
 
 interface SseHandshakeResult {
@@ -340,7 +367,7 @@ async function openSseStream(
         // Auto-wiping the seed turns any one of those into a permanent
         // outage that forces re-login. Force-fail loud instead; the user
         // runs `memwal-mcp login` if they want to actually rotate.
-        throw new Error(
+        throw new RelayerUnauthorizedError(
             "Walrus Memory relayer rejected credentials (HTTP 401). " +
                 "Delegate key may have been revoked, the relayer may be " +
                 "rate-limiting, or a proxy may be interposed. Saved " +
@@ -768,6 +795,10 @@ export async function runBridge(
      * checks this alongside `stdinClosed`; `adoptCredentials` clears it when a
      * new login lands. */
     let loggedOut = false;
+    /** Set when the relayer 401s the handshake, cleared on the next successful
+     * connect. While set, requests fail fast with `UNAUTHORIZED_FAILURE` rather
+     * than parking in `pendingForward` behind a connect that cannot succeed. */
+    let credentialsRejected = false;
     /** Resolves once a post-logout `memwal_login` has published a fresh session
      * (or stdin closed). The server pump parks on this instead of exiting, so
      * signing back in resumes streaming without the user restarting their MCP
@@ -1463,6 +1494,17 @@ export async function runBridge(
                     return;
                 }
 
+                // Credentials rejected: same reasoning as `loggedOut` above.
+                // `memwal_login` returned locally already, so refusing here
+                // still leaves the user a way back in. Falling through would
+                // park the request in `pendingForward` behind a connect loop
+                // that keeps 401ing, and the client would learn nothing until
+                // the orphan sweeper's deadline — the WALM-602 symptom.
+                if (credentialsRejected) {
+                    failRequest(msg, "credentials rejected", UNAUTHORIZED_FAILURE);
+                    return;
+                }
+
                 // Fill in the configured default namespace for memory tool
                 // calls that didn't pass one. Mutates msg in place so the
                 // forwarded — and any replayed-on-reconnect — copy carries it.
@@ -1682,9 +1724,12 @@ export async function runBridge(
         }
     }
 
-    function failPendingForward(reason: string): void {
+    function failPendingForward(
+        reason: string,
+        opts: { toolText?: string; errorMessage?: string } = {},
+    ): void {
         const queued = pendingForward.splice(0, pendingForward.length);
-        for (const msg of queued) failRequest(msg, reason);
+        for (const msg of queued) failRequest(msg, reason, opts);
     }
 
     /** Close out requests that reached `inFlight` but were never delivered a
@@ -1780,6 +1825,10 @@ export async function runBridge(
                 sessionEpoch += 1;
                 sse = candidate;
                 firstConnectDone = true;
+                // A key that was rejected earlier is evidently accepted now
+                // (re-registered, or the 401 was a transient WAF/rate-limit
+                // false positive), so stop failing requests fast.
+                credentialsRejected = false;
                 note(`Connected. Bridging stdio MCP ↔ ${creds.relayerUrl}`);
                 log.info("bridge.connected", { relayer: creds.relayerUrl });
                 signalFirstConnect();
@@ -1789,6 +1838,16 @@ export async function runBridge(
                 const reason = err instanceof Error ? err.message : String(err);
                 attempt += 1;
                 log.error("bridge.initial_connect_failed", { err: reason, attempt });
+                // A rejected key will not start working on the next attempt, so
+                // answer everything queued instead of leaving it to the orphan
+                // sweeper. Keep looping: `memwal_login` re-registers a key on
+                // this same relayer, and the successful connect above clears the
+                // flag and resumes normal buffering.
+                if (err instanceof RelayerUnauthorizedError) {
+                    credentialsRejected = true;
+                    signalFirstConnect();
+                    failPendingForward("credentials rejected", UNAUTHORIZED_FAILURE);
+                }
                 if (stdinClosed) break;
                 const backoff = Math.min(15_000, 500 * Math.pow(2, attempt - 1));
                 await new Promise<void>((resolve) => {
