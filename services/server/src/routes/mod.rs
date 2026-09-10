@@ -82,16 +82,16 @@ pub async fn enqueue_wallet_job(
     {
         Ok(_) => Ok(wallet_index),
         Err(e) => {
-            // apalis.jobs is an extend-heavy write; at the Neon cap this can
-            // fail before insert_vector. Classifier is a string match.
-            let msg = format!("Failed to enqueue WalletJob: {}", e);
-            crate::alerts::maybe_alert_postgres_storage_exhausted(
+            crate::alerts::maybe_alert_sqlx_postgres_storage_exhausted(
                 &state.alerts,
                 &state.config.sui_network,
-                &msg,
+                &e,
             )
             .await;
-            Err(AppError::Internal(msg))
+            Err(AppError::Internal(format!(
+                "Failed to enqueue WalletJob: {}",
+                e
+            )))
         }
     }
 }

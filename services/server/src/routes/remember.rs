@@ -903,8 +903,6 @@ pub async fn remember(
     // stays `pending` → the guard takes the plain Upload path, no on-chain
     // reconcile round-trip on the happy path. (The 202 response is still
     // "running" for API compatibility — see below.)
-    // First write on this path. At the Neon project size cap this INSERT
-    // can be the smgrextend that fails (before insert_vector).
     let inserted = match sqlx::query(
         "INSERT INTO remember_jobs (id, owner, namespace, status, idempotency_key, request_fingerprint) VALUES ($1, $2, $3, 'pending', $4, $5)
          ON CONFLICT (owner, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING",
@@ -1308,8 +1306,6 @@ pub async fn remember_bulk(
     for item in body.items {
         let job_id = uuid::Uuid::new_v4().to_string();
 
-        // Same first-write as single remember: at the cap this INSERT can
-        // fail before insert_vector / enqueue.
         if let Err(e) = sqlx::query(
             // `pending` (not `running`) so a fresh job takes the plain Upload
             // path; only a retry of an in-flight job (worker-set `running`)

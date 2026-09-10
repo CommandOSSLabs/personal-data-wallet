@@ -1589,16 +1589,11 @@ impl VectorDb {
         if let Err(e) = result {
             drop(tx);
             self.maybe_alert_storage_exhausted(&e).await;
-            let result = Err(AppError::Internal(format!(
+            crate::observability::observe_db("vector.insert", "error", started.elapsed());
+            return Err(AppError::Internal(format!(
                 "Failed to insert vector: {}",
                 e
             )));
-            crate::observability::observe_db(
-                "vector.insert",
-                db_status(&result),
-                started.elapsed(),
-            );
-            return result;
         }
         crate::observability::observe_db("vector.insert", "ok", started.elapsed());
         sqlx::query("DELETE FROM memory_tombstones WHERE memory_id = $1")

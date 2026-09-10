@@ -200,9 +200,8 @@ async fn sidecar_write_ready(state: &std::sync::Arc<AppState>) -> bool {
 
 /// Self-hosted Postgres without `neon.max_cluster_size` stays ready (sidecar
 /// still applies). Missing `public.pg_cluster_size` falls back to
-/// `sum(pg_database_size)` against that GUC. Other probe/pool failures fail
-/// open at `warn` so CI `wait-for-relayer` and a flapping pool do not look
-/// like a write outage. Timeouts also fail open, at `warn` (cached 2s).
+/// `sum(pg_database_size)` against that GUC. Other probe/pool failures and
+/// timeouts fail open at `warn` so CI `wait-for-relayer` is not blocked.
 async fn postgres_write_ready(state: &std::sync::Arc<AppState>) -> bool {
     match tokio::time::timeout(
         WRITE_READY_PROBE_TIMEOUT,
@@ -253,15 +252,13 @@ async fn probe_postgres_write_ready(pool: &sqlx::PgPool) -> Result<bool, sqlx::E
     Ok(postgres_can_accept_writes(used_bytes, max_bytes))
 }
 
-/// Neon gates smgrextend on cluster size (WAL/history/other DBs), not
-/// `pg_database_size` of this database. `CREATE EXTENSION neon` (relocatable,
-/// no schema in neon.control) puts `pg_cluster_size` in `public`. Qualify
-/// for empty search_path through PgBouncer. Do not `CREATE EXTENSION neon`
-/// in migrations — that breaks local/CI vanilla Postgres. If the function
-/// is missing, fall back to `sum(pg_database_size)` vs the same GUC.
 static PG_CLUSTER_SIZE_MISSING: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// Neon gates smgrextend on cluster size, not this database's
+/// `pg_database_size`. Qualify `public.pg_cluster_size` for empty
+/// search_path through PgBouncer. Missing function (no `neon` extension)
+/// falls back to `sum(pg_database_size)` vs the same GUC.
 async fn cluster_used_bytes(pool: &sqlx::PgPool) -> Result<i64, sqlx::Error> {
     if PG_CLUSTER_SIZE_MISSING.load(std::sync::atomic::Ordering::Relaxed) {
         return sum_database_size_bytes(pool).await;
@@ -292,17 +289,10 @@ async fn sum_database_size_bytes(pool: &sqlx::PgPool) -> Result<i64, sqlx::Error
     .await
 }
 
-/// Postgres `undefined_function` (SQLSTATE 42883), including a missing
+/// Postgres `undefined_function` (SQLSTATE 42883) — missing
 /// `public.pg_cluster_size` when the `neon` extension is not installed.
 fn pg_cluster_size_unavailable(err: &sqlx::Error) -> bool {
-    let Some(db) = err.as_database_error() else {
-        return false;
-    };
-    if db.code().as_deref() == Some("42883") {
-        return true;
-    }
-    let msg = db.message().to_ascii_lowercase();
-    msg.contains("pg_cluster_size") && msg.contains("does not exist")
+    err.as_database_error().and_then(|db| db.code()).as_deref() == Some("42883")
 }
 
 /// `None` = no cap (self-host / unset / unparseable / unlimited `-1`).
@@ -1215,12 +1205,6 @@ mod tests {
             code: Some("42883"),
         }));
         assert!(super::pg_cluster_size_unavailable(&missing));
-
-        let missing_by_message = sqlx::Error::Database(Box::new(FakePgError {
-            message: "function public.pg_cluster_size() does not exist",
-            code: None,
-        }));
-        assert!(super::pg_cluster_size_unavailable(&missing_by_message));
 
         let other = sqlx::Error::Database(Box::new(FakePgError {
             message: "connection reset",

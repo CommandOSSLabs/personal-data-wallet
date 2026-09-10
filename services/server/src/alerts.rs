@@ -338,20 +338,8 @@ pub fn sqlx_error_is_postgres_storage_exhausted(err: &sqlx::Error) -> bool {
     is_postgres_storage_exhausted(&err.to_string())
 }
 
-/// Slack the cluster-wide disk / Neon size-cap incident when `err` matches
-/// the string classifier (enqueue / wrapped messages). SQLSTATE `53100`
-/// needs [`maybe_alert_sqlx_postgres_storage_exhausted`].
-pub async fn maybe_alert_postgres_storage_exhausted(
-    alerts: &AlertManager,
-    sui_network: &str,
-    err: &str,
-) {
-    if !is_postgres_storage_exhausted(err) {
-        return;
-    }
-    notify_postgres_storage_exhausted(alerts, sui_network, err).await;
-}
-
+/// Slack the cluster-wide disk / Neon size-cap incident when `err` is
+/// SQLSTATE `53100` or matches the string classifier.
 pub async fn maybe_alert_sqlx_postgres_storage_exhausted(
     alerts: &AlertManager,
     sui_network: &str,
@@ -360,10 +348,6 @@ pub async fn maybe_alert_sqlx_postgres_storage_exhausted(
     if !sqlx_error_is_postgres_storage_exhausted(err) {
         return;
     }
-    notify_postgres_storage_exhausted(alerts, sui_network, &err.to_string()).await;
-}
-
-async fn notify_postgres_storage_exhausted(alerts: &AlertManager, sui_network: &str, err: &str) {
     let alert = PostgresStorageExhaustedAlert {
         sui_network: sui_network.to_string(),
         error: err.to_string(),
@@ -1472,18 +1456,6 @@ mod tests {
         )));
         assert!(is_postgres_storage_exhausted(
             "ERROR: could not extend file \"base/16384/12345\": No space left on device"
-        ));
-        assert!(is_postgres_storage_exhausted(&format!(
-            "Failed to create job row: error returned from database: {prod}"
-        )));
-        assert!(is_postgres_storage_exhausted(&format!(
-            "Failed to create bulk job row: error returned from database: {prod}"
-        )));
-        assert!(is_postgres_storage_exhausted(&format!(
-            "Failed to enqueue WalletJob: {prod}"
-        )));
-        assert!(!is_postgres_storage_exhausted(
-            "Failed to create job row: duplicate key value violates unique constraint"
         ));
         assert!(!is_postgres_storage_exhausted("sqlstate 53100 disk_full"));
         assert!(!is_postgres_storage_exhausted(
