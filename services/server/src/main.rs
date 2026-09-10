@@ -808,12 +808,15 @@ async fn main() {
         }
     });
 
+    let alerts = Arc::new(AlertManager::from_env(http_client.clone()));
+
     // Initialize database (PostgreSQL + pgvector).
     // `Arc` so the MemoryEngine impl shares the same pool as the handlers.
     let db = Arc::new(
         VectorDb::new(&config.database_url)
             .await
-            .expect("Failed to connect to PostgreSQL"),
+            .expect("Failed to connect to PostgreSQL")
+            .with_storage_alerts(Arc::clone(&alerts), config.sui_network.clone()),
     );
     let security_delete_component_enabled = config.enable_security_delete
         || config.deletion_reconciler_enabled
@@ -987,8 +990,6 @@ async fn main() {
         Arc::new(LlmExtractor::new(http_client.clone(), Arc::clone(&config)));
     // CompositeRanker is stateless — one shared instance is fine.
     let ranker: Arc<dyn Ranker> = Arc::new(CompositeRanker);
-
-    let alerts = Arc::new(AlertManager::from_env(http_client.clone()));
 
     // General delegate-key verification and the boot-time SEAL policy check
     // share this independent gRPC client; security deletion owns a separate
