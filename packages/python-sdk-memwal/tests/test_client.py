@@ -386,6 +386,9 @@ class TestRememberTimeoutRecovery:
         assert err.namespace == "drops"
         assert err.idempotency_key
         assert "mints a second blob" in str(err)
+        # The key belongs in the message too, matching TS: after a restart the
+        # log line may be all a caller still has.
+        assert err.idempotency_key in str(err)
 
     @respx.mock
     async def test_replay_under_the_returned_key_reuses_the_job(

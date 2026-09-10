@@ -498,11 +498,16 @@ class MemWal:
             )
         except MemWalRememberJobTimeout as timeout:
             # The in-memory key map only helps a caller retrying in this same
-            # process. Put the key on the exception too, so a service that
-            # restarts can still replay this exact write (WALM-595).
-            timeout.idempotency_key = resolved_key
-            timeout.namespace = resolved_namespace
-            raise
+            # process. Re-raise with the key so a service that restarts can
+            # replay this exact write, and so the key is in ``str(err)`` and not
+            # only in a field: after a restart the log line may be all that is
+            # left (WALM-595).
+            raise MemWalRememberJobTimeout(
+                job_id=timeout.job_id,
+                timeout_ms=timeout.timeout_ms,
+                idempotency_key=resolved_key,
+                namespace=resolved_namespace,
+            ) from timeout
         if generated_key:
             self._pending_remember_keys.pop(request_identity, None)
         return result

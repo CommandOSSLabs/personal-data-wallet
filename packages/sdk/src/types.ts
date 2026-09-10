@@ -27,7 +27,6 @@ export interface MemWalConfig {
 // API Types
 // ============================================================
 
-/** Result from remember() / rememberAsync() */
 /**
  * Shape of the error thrown by `waitForRememberJob()` / `rememberAndWait()`
  * when polling gives up before the job reaches a terminal state.
@@ -53,6 +52,7 @@ export interface RememberJobTimeoutError extends Error {
     namespace?: string;
 }
 
+/** Result from remember() / rememberAsync() */
 export interface RememberAcceptedResult {
     job_id: string;
     status: string;
