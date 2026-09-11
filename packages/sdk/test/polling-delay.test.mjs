@@ -28,4 +28,6 @@ test("later polls cap at 1.5s even after ~20s of pending", () => {
         assert.equal(delay, 1875);
     }
     assert.equal(pollingDelayMs(5000, 15), 1875);
+    assert.equal(pollingDelayMs(400, 1), 500);
+    assert.equal(pollingDelayMs(400, 1), pollingDelayMs(400, 20));
 });

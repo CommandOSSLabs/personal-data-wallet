@@ -25,3 +25,5 @@ def test_later_polls_cap_at_1_5s_after_20s_pending(monkeypatch: pytest.MonkeyPat
         assert delay <= 2000
         assert delay == 1875
     assert _polling_delay_ms(5000, 15) == 1875
+    assert _polling_delay_ms(400, 1) == 500
+    assert _polling_delay_ms(400, 1) == _polling_delay_ms(400, 20)
