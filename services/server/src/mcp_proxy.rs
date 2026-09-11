@@ -175,7 +175,11 @@ async fn legacy_delegate_registered(
     let Some(pk) = public_key_from_delegate_hex(token) else {
         return McpAuthOutcome::Unauthorized(None);
     };
-    match crate::storage::sui::verify_delegate_key_onchain(
+    // Cached: this runs on the SSE handshake *and* on every JSON-RPC
+    // envelope, so an uncached read here is what turned one MCP tool call
+    // into ~10 fullnode `GetObject`s (WALM-618).
+    match crate::storage::sui::verify_delegate_key_cached(
+        &state.delegate_verify_cache,
         &state.http_client,
         &state.config.sui_rpc_url,
         state.sui_grpc_client.as_ref(),

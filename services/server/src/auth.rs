@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::owner_token_auth;
 use crate::storage::sui::{
-    find_account_by_delegate_key, verify_delegate_key_onchain, OnchainVerifyError,
+    find_account_by_delegate_key, verify_delegate_key_cached, OnchainVerifyError,
 };
 use crate::types::{AppState, AuthInfo};
 
@@ -446,7 +446,8 @@ async fn resolve_account(
         // fail closed with 503 so a revoked key cannot ride a 24h cache
         // through a Sui outage. Definitive misses evict.
         match cache_reverify_action(
-            verify_delegate_key_onchain(
+            verify_delegate_key_cached(
+                &state.delegate_verify_cache,
                 &state.http_client,
                 &state.config.sui_rpc_url,
                 state.sui_grpc_client.as_ref(),
@@ -494,7 +495,8 @@ async fn resolve_account(
         .as_deref()
         .or(state.config.memwal_account_id.as_deref())
     {
-        match verify_delegate_key_onchain(
+        match verify_delegate_key_cached(
+            &state.delegate_verify_cache,
             &state.http_client,
             &state.config.sui_rpc_url,
             state.sui_grpc_client.as_ref(),

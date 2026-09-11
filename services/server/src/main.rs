@@ -1167,6 +1167,7 @@ async fn main() {
         http_client,
         sui_grpc_client,
         delegate_keys_cache: crate::storage::sui::new_delegate_keys_cache(),
+        delegate_verify_cache: crate::storage::sui::new_delegate_verify_cache(),
         key_pool,
         alerts,
         engine,
@@ -1437,6 +1438,28 @@ async fn main() {
             if evicted > 0 {
                 tracing::debug!(
                     "delegate_keys_cache sweep: evicted {} stale entries ({} remaining)",
+                    evicted,
+                    before - evicted
+                );
+            }
+
+            // Same reasoning for the verify-result cache (WALM-618): its
+            // 30s TTL only gates trust-on-hit, so the map itself needs
+            // sweeping or it grows one entry per (account, delegate key)
+            // pair ever seen.
+            let mut verify_cache = delegate_cache_sweep_state
+                .delegate_verify_cache
+                .write()
+                .await;
+            let before = verify_cache.len();
+            verify_cache.retain(|_, v| {
+                v.verified_at.elapsed() < storage::sui::DELEGATE_VERIFY_CACHE_MAX_AGE
+            });
+            let evicted = before - verify_cache.len();
+            drop(verify_cache);
+            if evicted > 0 {
+                tracing::debug!(
+                    "delegate_verify_cache sweep: evicted {} stale entries ({} remaining)",
                     evicted,
                     before - evicted
                 );

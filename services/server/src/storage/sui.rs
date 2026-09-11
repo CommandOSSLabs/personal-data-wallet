@@ -251,6 +251,143 @@ pub async fn list_delegate_keys_cached(
     Ok(keys)
 }
 
+// ============================================================
+// Delegate key verification — short-TTL in-memory result cache
+// ============================================================
+//
+// Every authenticated path re-verified the delegate key on-chain on every
+// single request: `auth.rs::resolve_account` on each signed API call (the
+// Postgres `delegate_key_cache` only saves the registry *scan*, never the
+// `GetObject`), and `mcp_proxy.rs` on every MCP request — the SSE
+// handshake AND each JSON-RPC POST. One `memwal_remember` through MCP is
+// therefore ~10 `GetObject` calls: SSE open, initialize, tools/list,
+// tools/call, `POST /api/remember`, and one per status poll.
+//
+// Against a public fullnode that load throttles into `RpcError`, which is
+// (correctly) a 503 — and a 503 makes clients reconnect and poll again,
+// which issues more verifies. That feedback loop is the amplifier behind
+// WALM-618: ~200 uncached verify calls/min from stuck bridges, degrading
+// every other user on the instance.
+//
+// Caching the *positive* result for a short window collapses a burst of
+// requests carrying the same credentials into one on-chain read. Same
+// `Timed`-value shape as `DelegateKeysCache` above.
+
+/// How long a successful on-chain verification is trusted without
+/// re-reading the account object. Matches `DELEGATE_KEYS_CACHE_TTL`.
+///
+/// This is the upper bound on delegate-key revocation latency at the
+/// relayer: a key revoked on-chain keeps authenticating for at most this
+/// long. 30s is the same staleness the `/agents` listing already accepts,
+/// and is the deliberate trade for removing the retry amplifier.
+pub const DELEGATE_VERIFY_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Sweep threshold for the map itself, mirroring
+/// `DELEGATE_KEYS_CACHE_MAX_AGE`: the TTL above only gates whether a hit
+/// is *trusted*, so without a sweep every (account, key) pair ever seen
+/// stays resident for the life of the process.
+pub const DELEGATE_VERIFY_CACHE_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(600);
+
+#[derive(Clone)]
+pub struct TimedVerifiedOwner {
+    /// Owner address returned by the verification that populated this entry.
+    pub owner: String,
+    pub verified_at: std::time::Instant,
+}
+
+/// Keyed by `(account_object_id, public_key_bytes)` so one account's
+/// entry can never authenticate a different delegate key.
+///
+/// `expected_type_origin_package_id` is deliberately not part of the key:
+/// it comes from `Config::package_id`, which is fixed for the life of the
+/// process, so it cannot vary between a cache write and a later hit.
+pub type DelegateVerifyCache = std::sync::Arc<
+    tokio::sync::RwLock<std::collections::HashMap<(String, Vec<u8>), TimedVerifiedOwner>>,
+>;
+
+pub fn new_delegate_verify_cache() -> DelegateVerifyCache {
+    std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()))
+}
+
+/// Cached wrapper around `verify_delegate_key_onchain`.
+///
+/// A hit within `DELEGATE_VERIFY_CACHE_TTL` returns the recorded owner
+/// without touching the chain. Only successes are cached: a rejection is
+/// always a live read, so adding a delegate key (the tail of `login`)
+/// takes effect immediately rather than after a TTL. A definitive
+/// rejection also evicts any entry for that pair, so an observed revoke
+/// cannot be overtaken by a positive still inside its window.
+pub async fn verify_delegate_key_cached(
+    cache: &DelegateVerifyCache,
+    http_client: &reqwest::Client,
+    rpc_url: &str,
+    grpc_client: Option<&sui_rpc::Client>,
+    account_object_id: &str,
+    public_key_bytes: &[u8],
+    expected_type_origin_package_id: &str,
+) -> Result<String, OnchainVerifyError> {
+    let key = (account_object_id.to_string(), public_key_bytes.to_vec());
+
+    if let Some(cached) = cache
+        .read()
+        .await
+        .get(&key)
+        .filter(|c| c.verified_at.elapsed() < DELEGATE_VERIFY_CACHE_TTL)
+    {
+        return Ok(cached.owner.clone());
+    }
+
+    match verify_delegate_key_onchain(
+        http_client,
+        rpc_url,
+        grpc_client,
+        account_object_id,
+        public_key_bytes,
+        expected_type_origin_package_id,
+    )
+    .await
+    {
+        Ok(owner) => {
+            cache.write().await.insert(
+                key,
+                TimedVerifiedOwner {
+                    owner: owner.clone(),
+                    verified_at: std::time::Instant::now(),
+                },
+            );
+            Ok(owner)
+        }
+        Err(err) => {
+            if verify_cache_miss_action(&err) == VerifyCacheMissAction::Evict {
+                cache.write().await.remove(&key);
+            }
+            Err(err)
+        }
+    }
+}
+
+/// What a failed live verification means for any cached entry on the same
+/// `(account, key)` pair. Pure so the policy is testable without a chain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerifyCacheMissAction {
+    /// The rejection is definitive (revoked, deactivated, wrong object) —
+    /// drop the pair so a positive still inside its TTL cannot outlive the
+    /// revoke we just observed.
+    Evict,
+    /// An unavailable RPC proves nothing about the key, so leave the entry
+    /// alone. It is expired anyway — a live entry would have been served
+    /// before the call was made.
+    Keep,
+}
+
+pub fn verify_cache_miss_action(err: &OnchainVerifyError) -> VerifyCacheMissAction {
+    if err.is_unavailable() {
+        VerifyCacheMissAction::Keep
+    } else {
+        VerifyCacheMissAction::Evict
+    }
+}
+
 /// Parse the `delegate_keys` array out of a MemWalAccount's `fields` map.
 /// Pure function — no I/O — so it's unit-testable without a live chain.
 pub fn parse_delegate_keys(
@@ -1598,6 +1735,219 @@ mod tests {
             result.is_err(),
             "no cache entry exists yet, so this must attempt (and fail) the real RPC call"
         );
+    }
+
+    // ── verify_delegate_key_cached (WALM-618) ───────────────────────────
+    //
+    // Same no-mock-HTTP technique as the block above: a cache HIT returns
+    // before any network attempt (so it succeeds against an unreachable RPC
+    // URL), a MISS falls through to the real request (so it fails). That is
+    // exactly the branch the fix turns on — an uncached verify ran on every
+    // signed API call and every MCP envelope, ~10 fullnode reads per tool
+    // call, which is what the public fullnode was throttling.
+
+    fn sample_pk() -> Vec<u8> {
+        vec![7u8; 32]
+    }
+
+    async fn seed_verify_cache(
+        cache: &DelegateVerifyCache,
+        account_id: &str,
+        pk: &[u8],
+        age: std::time::Duration,
+    ) -> String {
+        let owner = "0xowner-from-cache".to_string();
+        cache.write().await.insert(
+            (account_id.to_string(), pk.to_vec()),
+            TimedVerifiedOwner {
+                owner: owner.clone(),
+                verified_at: std::time::Instant::now() - age,
+            },
+        );
+        owner
+    }
+
+    #[tokio::test]
+    async fn verify_delegate_key_cached_returns_cached_owner_within_ttl() {
+        let cache = new_delegate_verify_cache();
+        let account_id = "0xaccount-verify-fresh";
+        let pk = sample_pk();
+        let owner = seed_verify_cache(&cache, account_id, &pk, std::time::Duration::ZERO).await;
+
+        let client = reqwest::Client::new();
+        let result = verify_delegate_key_cached(
+            &cache,
+            &client,
+            unreachable_rpc_url(),
+            None,
+            account_id,
+            &pk,
+            "0xpkg",
+        )
+        .await;
+
+        assert_eq!(
+            result.ok(),
+            Some(owner),
+            "a fresh entry must be served without attempting the on-chain read"
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_delegate_key_cached_reverifies_after_ttl_expiry() {
+        let cache = new_delegate_verify_cache();
+        let account_id = "0xaccount-verify-stale";
+        let pk = sample_pk();
+        seed_verify_cache(
+            &cache,
+            account_id,
+            &pk,
+            DELEGATE_VERIFY_CACHE_TTL + std::time::Duration::from_secs(1),
+        )
+        .await;
+
+        let client = reqwest::Client::new();
+        let result = verify_delegate_key_cached(
+            &cache,
+            &client,
+            unreachable_rpc_url(),
+            None,
+            account_id,
+            &pk,
+            "0xpkg",
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "an expired entry must trigger a real re-verify (which fails against the \
+             unreachable RPC URL here) — Ok would mean a stale positive was served, i.e. \
+             revocation latency past the TTL"
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_delegate_key_cached_entry_is_scoped_to_account_and_key() {
+        let cache = new_delegate_verify_cache();
+        let account_id = "0xaccount-verify-scope";
+        let pk = sample_pk();
+        seed_verify_cache(&cache, account_id, &pk, std::time::Duration::ZERO).await;
+
+        let client = reqwest::Client::new();
+
+        let other_key = vec![9u8; 32];
+        assert!(
+            verify_delegate_key_cached(
+                &cache,
+                &client,
+                unreachable_rpc_url(),
+                None,
+                account_id,
+                &other_key,
+                "0xpkg",
+            )
+            .await
+            .is_err(),
+            "a different delegate key on the same account must not ride this entry"
+        );
+
+        assert!(
+            verify_delegate_key_cached(
+                &cache,
+                &client,
+                unreachable_rpc_url(),
+                None,
+                "0xsome-other-account",
+                &pk,
+                "0xpkg",
+            )
+            .await
+            .is_err(),
+            "the same delegate key on a different account must not ride this entry"
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_delegate_key_cached_keeps_entry_when_rpc_is_unavailable() {
+        let cache = new_delegate_verify_cache();
+        let account_id = "0xaccount-verify-unavailable";
+        let pk = sample_pk();
+        seed_verify_cache(
+            &cache,
+            account_id,
+            &pk,
+            DELEGATE_VERIFY_CACHE_TTL + std::time::Duration::from_secs(1),
+        )
+        .await;
+
+        let client = reqwest::Client::new();
+        let _ = verify_delegate_key_cached(
+            &cache,
+            &client,
+            unreachable_rpc_url(),
+            None,
+            account_id,
+            &pk,
+            "0xpkg",
+        )
+        .await;
+
+        assert!(
+            cache
+                .read()
+                .await
+                .contains_key(&(account_id.to_string(), pk.clone())),
+            "a transport failure is not a revoke, so it must not evict the pair"
+        );
+    }
+
+    #[test]
+    fn verify_cache_miss_action_evicts_only_on_a_definitive_rejection() {
+        for err in [
+            OnchainVerifyError::KeyNotFound("revoked".into()),
+            OnchainVerifyError::AccountDeactivated("deactivated".into()),
+            OnchainVerifyError::NotFound("missing object".into()),
+            OnchainVerifyError::WrongObjectType("lookalike".into()),
+        ] {
+            assert_eq!(
+                verify_cache_miss_action(&err),
+                VerifyCacheMissAction::Evict,
+                "{err}"
+            );
+        }
+        for err in [
+            OnchainVerifyError::RpcError("429 Too Many Requests".into()),
+            OnchainVerifyError::ScanCapExceeded("cap".into()),
+        ] {
+            assert_eq!(
+                verify_cache_miss_action(&err),
+                VerifyCacheMissAction::Keep,
+                "{err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn delegate_verify_cache_sweep_predicate_evicts_only_stale_entries() {
+        let cache = new_delegate_verify_cache();
+        seed_verify_cache(
+            &cache,
+            "0xstale",
+            &sample_pk(),
+            DELEGATE_VERIFY_CACHE_MAX_AGE + std::time::Duration::from_secs(1),
+        )
+        .await;
+        seed_verify_cache(&cache, "0xfresh", &sample_pk(), std::time::Duration::ZERO).await;
+
+        // Mirrors main.rs's sweep task body verbatim.
+        cache
+            .write()
+            .await
+            .retain(|_, v| v.verified_at.elapsed() < DELEGATE_VERIFY_CACHE_MAX_AGE);
+
+        let remaining = cache.read().await;
+        assert!(!remaining.contains_key(&("0xstale".to_string(), sample_pk())));
+        assert!(remaining.contains_key(&("0xfresh".to_string(), sample_pk())));
     }
 
     // ── DelegateKeysCache periodic sweep (nothing else ever removed a map
