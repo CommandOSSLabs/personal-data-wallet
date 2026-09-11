@@ -1,9 +1,3 @@
-/**
- * Typed SDK failures. `MemWalCompatibilityError` (HTTP 426) stays in
- * compatibility.ts; well-known remember-job and rate-limit failures live here
- * so callers can `instanceof` instead of duck-typing `err.status`.
- */
-
 function installErrorPrototype(error: Error, ctor: Function): void {
     error.name = ctor.name;
     Object.setPrototypeOf(error, ctor.prototype);

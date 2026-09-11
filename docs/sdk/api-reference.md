@@ -59,6 +59,8 @@ For the full config surface, see [Configuration](/reference/configuration).
 
 Submit one memory through the relayer. The method returns after the relayer creates a background job; embedding, SEAL encryption, Walrus upload, and vector indexing continue asynchronously.
 
+HTTP 429 throws `RateLimitError`. HTTP 426 throws `MemWalCompatibilityError`.
+
 **Returns:**
 
 ```ts
@@ -93,8 +95,6 @@ Poll a previously accepted remember job until it reaches `done`. Failed jobs thr
 Default `timeoutMs` is 60_000. If the job is still non-terminal at the deadline, this throws `RememberJobTimeoutError` (`status` 504).
 
 `waitForRememberJobs` uses a different timeout contract: leftover items resolve with `status: "timeout"` instead of throwing.
-
-Signed relayer requests that return HTTP 429 throw `RateLimitError`. HTTP 426 still throws `MemWalCompatibilityError`.
 
 ### `waitForRememberJobs(jobIds, namespaces?, opts?): Promise<RememberBulkResult>`
 
