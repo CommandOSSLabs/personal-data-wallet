@@ -6,6 +6,10 @@
 
 - `restore()` results include `failed` (default `0`) for permanent decrypt/UTF-8 failures instead of folding them into `skipped` or dropping them silently.
 
+### Fixed
+
+- Cap `wait_for_remember_job` / `wait_for_remember_jobs` poll delay at ~1.5s with an immediate first poll, instead of exponential backoff that climbed to 10s. `poll_interval_ms: 0` still means no wait. (WALM-623)
+
 ## 0.1.9
 
 ### Fixed
