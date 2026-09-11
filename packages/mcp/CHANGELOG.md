@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Answer tool calls with an auth error when the relayer rejects the saved delegate key, instead of parking them until the call deadline. A 401 on the SSE handshake was treated like any other connect failure, so the bridge retried a key that could never be accepted while the queued `memwal_recall` waited out the orphan sweeper — up to four minutes — and then came back as "the connection to the relayer dropped, please retry", advice that cannot work. The bridge now names the rejection and points at `memwal_login`, whether the key is rejected at startup or revoked mid-session, and refuses later requests immediately while it stays rejected. Any accepted handshake resumes normal buffering, so both a re-login and a transient WAF or rate-limit 401 recover on their own. Credentials are still never wiped automatically. (#365, WALM-602)
 - `memwal_restore` reports `failed` and retries the same page when `truncated` is a download/embed blip (`restored=0` and `skipped+failed < total`), instead of always telling the agent to raise `limit` (WALM-480).
 
 ## 0.0.12
