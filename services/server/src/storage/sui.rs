@@ -282,12 +282,6 @@ pub async fn list_delegate_keys_cached(
 /// and is the deliberate trade for removing the retry amplifier.
 pub const DELEGATE_VERIFY_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// Sweep threshold for the map itself, mirroring
-/// `DELEGATE_KEYS_CACHE_MAX_AGE`: the TTL above only gates whether a hit
-/// is *trusted*, so without a sweep every (account, key) pair ever seen
-/// stays resident for the life of the process.
-pub const DELEGATE_VERIFY_CACHE_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(600);
-
 #[derive(Clone)]
 pub struct TimedVerifiedOwner {
     /// Owner address returned by the verification that populated this entry.
@@ -295,8 +289,26 @@ pub struct TimedVerifiedOwner {
     pub verified_at: std::time::Instant,
 }
 
+impl TimedVerifiedOwner {
+    /// Whether this entry may still be served. Also the sweep predicate:
+    /// the TTL gates trust-on-hit, and an entry past it can never be
+    /// returned again, so there is nothing to keep it alive for. (The
+    /// `/agents` cache next door keeps a separate, longer
+    /// `DELEGATE_KEYS_CACHE_MAX_AGE` for its sweep; a second threshold
+    /// here would only hold dead entries in memory for no benefit.)
+    pub fn is_fresh(&self) -> bool {
+        self.verified_at.elapsed() < DELEGATE_VERIFY_CACHE_TTL
+    }
+}
+
 /// Keyed by `(account_object_id, public_key_bytes)` so one account's
 /// entry can never authenticate a different delegate key.
+///
+/// Only *successful* verifications are stored, so an entry always
+/// corresponds to a delegate key that is really registered on an account:
+/// the map is bounded by real accounts, not by what callers send. A
+/// rejection records nothing, which is also why an unregistered key
+/// cannot be used to grow this map.
 ///
 /// `expected_type_origin_package_id` is deliberately not part of the key:
 /// it comes from `Config::package_id`, which is fixed for the life of the
@@ -328,12 +340,7 @@ pub async fn verify_delegate_key_cached(
 ) -> Result<String, OnchainVerifyError> {
     let key = (account_object_id.to_string(), public_key_bytes.to_vec());
 
-    if let Some(cached) = cache
-        .read()
-        .await
-        .get(&key)
-        .filter(|c| c.verified_at.elapsed() < DELEGATE_VERIFY_CACHE_TTL)
-    {
+    if let Some(cached) = cache.read().await.get(&key).filter(|c| c.is_fresh()) {
         return Ok(cached.owner.clone());
     }
 
@@ -1928,26 +1935,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delegate_verify_cache_sweep_predicate_evicts_only_stale_entries() {
+    async fn delegate_verify_cache_sweep_drops_everything_past_its_ttl() {
         let cache = new_delegate_verify_cache();
         seed_verify_cache(
             &cache,
             "0xstale",
             &sample_pk(),
-            DELEGATE_VERIFY_CACHE_MAX_AGE + std::time::Duration::from_secs(1),
+            DELEGATE_VERIFY_CACHE_TTL + std::time::Duration::from_secs(1),
         )
         .await;
         seed_verify_cache(&cache, "0xfresh", &sample_pk(), std::time::Duration::ZERO).await;
 
-        // Mirrors main.rs's sweep task body verbatim.
-        cache
-            .write()
-            .await
-            .retain(|_, v| v.verified_at.elapsed() < DELEGATE_VERIFY_CACHE_MAX_AGE);
+        // Mirrors main.rs's sweep task body verbatim. The sweep threshold is
+        // the TTL itself, not a second longer one: an entry past the TTL can
+        // never be served again (`is_fresh` is the same predicate the lookup
+        // uses), so holding it would cost memory for nothing.
+        cache.write().await.retain(|_, v| v.is_fresh());
 
         let remaining = cache.read().await;
         assert!(!remaining.contains_key(&("0xstale".to_string(), sample_pk())));
         assert!(remaining.contains_key(&("0xfresh".to_string(), sample_pk())));
+    }
+
+    #[tokio::test]
+    async fn a_rejected_key_records_nothing_so_it_cannot_grow_the_map() {
+        // The MCP proxy takes `x-memwal-account-id` from an unauthenticated
+        // header and only checks that it is non-empty, and `/api/mcp/*` has no
+        // rate limit ahead of the verify. Caching rejections would therefore
+        // let an anonymous caller mint one entry per made-up account id. Only
+        // successes are stored, so the map stays bounded by real accounts.
+        let cache = new_delegate_verify_cache();
+        let client = reqwest::Client::new();
+        for i in 0..5 {
+            let _ = verify_delegate_key_cached(
+                &cache,
+                &client,
+                unreachable_rpc_url(),
+                None,
+                &format!("0xmade-up-{i}"),
+                &sample_pk(),
+                "0xpkg",
+            )
+            .await;
+        }
+        assert!(
+            cache.read().await.is_empty(),
+            "a failed verification must leave no entry behind"
+        );
     }
 
     // ── DelegateKeysCache periodic sweep (nothing else ever removed a map

@@ -1444,17 +1444,17 @@ async fn main() {
             }
 
             // Same reasoning for the verify-result cache (WALM-618): its
-            // 30s TTL only gates trust-on-hit, so the map itself needs
-            // sweeping or it grows one entry per (account, delegate key)
-            // pair ever seen.
+            // TTL only gates trust-on-hit, so the map itself needs sweeping
+            // or it grows one entry per (account, delegate key) pair ever
+            // seen. Unlike the cache above it sweeps on the TTL itself —
+            // an entry past it can never be served again, so a second,
+            // longer threshold would only hold dead entries in memory.
             let mut verify_cache = delegate_cache_sweep_state
                 .delegate_verify_cache
                 .write()
                 .await;
             let before = verify_cache.len();
-            verify_cache.retain(|_, v| {
-                v.verified_at.elapsed() < storage::sui::DELEGATE_VERIFY_CACHE_MAX_AGE
-            });
+            verify_cache.retain(|_, v| v.is_fresh());
             let evicted = before - verify_cache.len();
             drop(verify_cache);
             if evicted > 0 {
