@@ -212,7 +212,15 @@ interface RecallOptions {
   scoringWeights?: ScoringWeights; // sent as scoring_weights; omit to keep cosine order
 }
 
+interface ScoringWeights {
+  semantic?: number; // default 1
+  recency?: number; // default 0
+  recencyHalfLifeDays?: number; // default 30
+  importance?: number; // default 0
+}
+
 // `topK` and `limit` are aliases for the same value; if both are provided, `topK` takes precedence.
+// `sort: "recent"` is newest-wins (over-fetch then write-time). `scoringWeights` only re-ranks the cosine window.
 
 interface RememberBulkAcceptedResult {
   job_ids: string[];
