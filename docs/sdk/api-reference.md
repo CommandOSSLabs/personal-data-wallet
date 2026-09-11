@@ -88,11 +88,13 @@ Default `timeoutMs` is 60_000. Poll timeout throws `RememberJobTimeoutError`, th
 
 ### `waitForRememberJob(jobId, opts?): Promise<RememberResult>`
 
-Poll a previously accepted remember job until it reaches `done`. Failed or missing jobs throw.
+Poll a previously accepted remember job until it reaches `done`. Failed jobs throw `RememberJobFailedError` (`status` 500). Missing jobs throw `RememberJobNotFoundError` (`status` 404).
 
 Default `timeoutMs` is 60_000. If the job is still non-terminal at the deadline, this throws `RememberJobTimeoutError` (`status` 504).
 
 `waitForRememberJobs` uses a different timeout contract: leftover items resolve with `status: "timeout"` instead of throwing.
+
+Signed relayer requests that return HTTP 429 throw `RateLimitError`. HTTP 426 still throws `MemWalCompatibilityError`.
 
 ### `waitForRememberJobs(jobIds, namespaces?, opts?): Promise<RememberBulkResult>`
 
