@@ -59,6 +59,21 @@ test("manual.ts dropped the dead Walrus WASM client", () => {
     assert.equal(src.includes("_walrusClient"), false);
     assert.equal(src.includes("walrusUpload"), false);
     assert.equal(src.includes("via @mysten/walrus"), false);
+    assert.equal(src.includes("Walrus upload → register"), false);
+    assert.match(src, /embed → SEAL encrypt → relayer upload/);
+});
+
+test("package.json does not advertise @mysten/walrus", () => {
+    const pkg = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf8"));
+    assert.equal(pkg.peerDependencies["@mysten/walrus"], undefined);
+    assert.equal(pkg.peerDependenciesMeta?.["@mysten/walrus"], undefined);
+});
+
+test("MemWalManualConfig has no unused publisher or epochs knobs", () => {
+    const src = readFileSync(join(SRC, "types.ts"), "utf8");
+    assert.equal(src.includes("walrusEpochs"), false);
+    assert.equal(src.includes("walrusPublisherUrl"), false);
+    assert.equal(src.includes("walrusAggregatorUrl"), true);
 });
 
 test("walrusDownload fetches the aggregator over HTTP", async () => {

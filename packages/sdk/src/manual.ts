@@ -13,14 +13,14 @@
  *
  * const memwal = MemWalManual.create({
  *     key: process.env.MEMWAL_DELEGATE_KEY!,      // Ed25519 delegate key
- *     suiPrivateKey: process.env.SUI_PRIVATE_KEY!, // suiprivkey1... for SEAL + Walrus
+ *     suiPrivateKey: process.env.SUI_PRIVATE_KEY!, // suiprivkey1... for SEAL
  *     embeddingApiKey: process.env.OPENAI_API_KEY!,
  *     packageId: "0x...",
  *     accountId: "0x...",
  *     registryId: "0x...",
  * })
  *
- * // Remember — all client-side: embed → SEAL encrypt → Walrus upload → register
+ * // Remember — embed → SEAL encrypt → relayer upload
  * await memwal.rememberManual("I'm allergic to peanuts")
  *
  * // Recall — all client-side: embed → search → download → SEAL decrypt
