@@ -991,9 +991,13 @@ export async function runBridge(
                     });
                 });
             }
+            // Hoisted so the catch below can ask whether the credentials moved
+            // since the handshake that threw was opened — a 401 for a key a
+            // login has already replaced says nothing about the new one.
+            let openingGeneration = credentialGeneration;
             try {
                 while (!stdinClosed && !loggedOut) {
-                    const openingGeneration = credentialGeneration;
+                    openingGeneration = credentialGeneration;
                     const openingCreds = creds;
                     // Signed out between the guard above and here: the key is
                     // gone, so there is nothing to authorize a new session
@@ -1032,6 +1036,18 @@ export async function runBridge(
                     firstConnectDone = true;
                     activeCredentialGeneration = openingGeneration;
                     reconnectAttempt = 0;
+                    // An accepted handshake retires any earlier rejection —
+                    // `memwal_login` re-registers a key and lands here, not on
+                    // the background connect's publish path, so clearing only
+                    // there would leave every later request refused (WALM-602).
+                    credentialsRejected = false;
+                    // Usually a no-op: the pump is past `firstConnect` by the
+                    // time anything reconnects. It is NOT a no-op when this is
+                    // the first session to exist at all — a login after the
+                    // saved key was rejected — and without it the pump would
+                    // stay parked until the background connect's backoff
+                    // happened to expire, with nothing draining this stream.
+                    signalFirstConnect();
                     log.info("bridge.reconnected", {
                         relayer: openingCreds.relayerUrl,
                         replayCount: inFlight.size,
@@ -1110,6 +1126,23 @@ export async function runBridge(
                 log.error("bridge.reconnect_failed", {
                     err: err instanceof Error ? err.message : String(err),
                 });
+                // A key revoked mid-session lands here rather than on the
+                // background connect, and retrying cannot fix it either. Answer
+                // the replay set now instead of letting the orphan sweeper hand
+                // back "connection dropped, please retry" four minutes later —
+                // the same WALM-602 symptom, one path over.
+                //
+                // This does not strand the transient case: the server pump is
+                // still looping on the dead stream, so it keeps driving
+                // `reconnect()` on its own growing backoff, and the publish
+                // above clears the flag the moment a handshake is accepted.
+                if (
+                    err instanceof RelayerUnauthorizedError &&
+                    openingGeneration === credentialGeneration
+                ) {
+                    credentialsRejected = true;
+                    failInFlightRequests("credentials rejected", UNAUTHORIZED_FAILURE);
+                }
                 // Try again on the next stdin message rather than spinning.
             }
         })();
@@ -1405,11 +1438,12 @@ export async function runBridge(
                         id: msg.id,
                         result: buildLocalInitializeResult(msg.params),
                     });
-                    // Signed out: the local reply is the whole answer. We will
-                    // not forward upstream, so do not arm a suppression that no
-                    // reply can ever consume — a leaked arm would swallow the
-                    // real reply if the client later reuses this id.
-                    if (loggedOut) return;
+                    // Signed out, or the key was rejected: the local reply is the
+                    // whole answer. Both refuse further down instead of
+                    // forwarding, so do not arm a suppression that no reply can
+                    // ever consume — a leaked arm would swallow the real reply
+                    // if the client later reuses this id.
+                    if (loggedOut || credentialsRejected) return;
                     // Expect exactly one upstream reply to drop for this forward.
                     expectSuppressedReply(msg.id);
                     // Fall through: forward/buffer the initialize upstream too.
@@ -1737,8 +1771,11 @@ export async function runBridge(
      * closes mid-flush: items already shifted out of `pendingForward` and posted
      * to a torn-down session would otherwise hang, since no upstream reply is
      * coming. Idempotent w.r.t. ids already closed out (delete-then-skip). */
-    function failInFlightRequests(reason: string): void {
-        for (const entry of Array.from(inFlight.values())) failRequest(entry.msg, reason);
+    function failInFlightRequests(
+        reason: string,
+        opts: { toolText?: string; errorMessage?: string } = {},
+    ): void {
+        for (const entry of Array.from(inFlight.values())) failRequest(entry.msg, reason, opts);
     }
 
     /** Close out requests whose deadline has passed. Without this a reply lost
@@ -1841,11 +1878,27 @@ export async function runBridge(
                 // A rejected key will not start working on the next attempt, so
                 // answer everything queued instead of leaving it to the orphan
                 // sweeper. Keep looping: `memwal_login` re-registers a key on
-                // this same relayer, and the successful connect above clears the
-                // flag and resumes normal buffering.
-                if (err instanceof RelayerUnauthorizedError) {
+                // this same relayer, and whichever path publishes the next
+                // session clears the flag and resumes normal buffering.
+                //
+                // Do NOT signal `firstConnect` here. It means "a session
+                // exists", and none does — the pump would fall straight through
+                // its `break; // stdin closed before we ever connected`, win the
+                // shutdown race in `runBridge`, and `markStdinClosed()` would
+                // disable the very `reconnect()` the error text tells the user
+                // to reach via `memwal_login`. `failPendingForward` writes to
+                // stdout directly and needs no pump.
+                //
+                // Same staleness test as the publish path above: a 401 for the
+                // key a login already replaced says nothing about the new one,
+                // and latching the flag on it would refuse every request against
+                // a session that is live and fine.
+                if (
+                    err instanceof RelayerUnauthorizedError &&
+                    !sse &&
+                    openingGeneration === credentialGeneration
+                ) {
                     credentialsRejected = true;
-                    signalFirstConnect();
                     failPendingForward("credentials rejected", UNAUTHORIZED_FAILURE);
                 }
                 if (stdinClosed) break;

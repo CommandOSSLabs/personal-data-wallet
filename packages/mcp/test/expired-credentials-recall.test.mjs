@@ -11,9 +11,14 @@
  * exponential-backoff retry — so the queued tool call waits out the orphan
  * sweeper instead of being told the credentials were rejected.
  *
- * These two tests pin the distinction the ticket asks for:
- *   - rejected credentials  -> an auth error naming the way back in
- *   - valid creds, no hits  -> an ordinary empty result, NOT an error
+ * These tests pin the distinction the ticket asks for, and the way back out of
+ * it:
+ *   - rejected credentials       -> an auth error naming the way back in
+ *   - valid creds, no hits       -> an ordinary empty result, NOT an error
+ *   - still rejected             -> refused again, fast, with the bridge alive
+ *   - `memwal_login` afterwards  -> service restored, promptly
+ *   - revoked mid-session        -> the in-flight call answered, not orphaned
+ *   - transient 401 mid-session  -> recovers with no client intervention
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -308,4 +313,440 @@ test("recall on an empty namespace reports empty results, not an auth error", as
         !/401|unauthorized|signed out/i.test(text),
         `empty namespace must not read as an auth failure, got: ${text}`,
     );
+});
+
+/**
+ * Relayer that 401s one specific delegate key and accepts every other one —
+ * what a revoked key looks like once `memwal_login` has registered a fresh one.
+ * Sessions that DO open answer `tools/call` with an ordinary empty result, so
+ * "recovered" is distinguishable from "still refusing".
+ */
+function startRevokedKeyRelayer(revokedBearer) {
+    let sseRes = null;
+    let rejections = 0;
+    let accepted = 0;
+    const server = http.createServer((req, res) => {
+        const url = new URL(req.url, "http://127.0.0.1");
+        if (req.method === "GET" && url.pathname === "/version") {
+            serveVersion(res);
+            return;
+        }
+        if (req.method === "GET" && url.pathname === "/api/mcp/sse") {
+            const bearer = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
+            if (bearer === revokedBearer) {
+                rejections += 1;
+                res.writeHead(401, { "content-type": "application/json" });
+                res.end(JSON.stringify({ error: "delegate key is not registered" }));
+                return;
+            }
+            res.writeHead(200, {
+                "content-type": "text/event-stream",
+                "cache-control": "no-cache",
+                connection: "keep-alive",
+            });
+            accepted += 1;
+            res.write("event: endpoint\ndata: /api/mcp/messages?sessionId=recovered\n\n");
+            const heartbeat = setInterval(() => res.write(": keepalive\n\n"), 250);
+            heartbeat.unref?.();
+            res.on("close", () => clearInterval(heartbeat));
+            sseRes = res;
+            return;
+        }
+        if (req.method === "POST" && url.pathname === "/api/mcp/messages") {
+            let body = "";
+            req.on("data", (c) => (body += c));
+            req.on("end", () => {
+                res.writeHead(202);
+                res.end();
+                let msg;
+                try {
+                    msg = JSON.parse(body);
+                } catch {
+                    return;
+                }
+                if (msg.id == null) return;
+                sseRes?.write(
+                    `event: message\ndata: ${JSON.stringify({
+                        jsonrpc: "2.0",
+                        id: msg.id,
+                        result:
+                            msg.method === "tools/call"
+                                ? {
+                                      content: [
+                                          { type: "text", text: "No matching memories found." },
+                                      ],
+                                      isError: false,
+                                  }
+                                : {},
+                    })}\n\n`,
+                );
+            });
+            return;
+        }
+        res.writeHead(404);
+        res.end();
+    });
+    return new Promise((ready) => {
+        server.listen(0, "127.0.0.1", () => {
+            const { port } = server.address();
+            ready({
+                server,
+                base: `http://127.0.0.1:${port}`,
+                rejections: () => rejections,
+                accepted: () => accepted,
+            });
+        });
+    });
+}
+
+/** Drive the browser half of `memwal_login` against the bridge's own localhost
+ * listener — same handshake the dashboard performs (preflight, then callback).
+ * Mirrors `live-login-credentials.test.mjs`. */
+async function completeLogin(connectUrl, accountId) {
+    const url = new URL(connectUrl);
+    const callbackBase = `http://127.0.0.1:${url.searchParams.get("port")}`;
+    const headers = { origin: url.origin, "content-type": "application/json" };
+    const body = {
+        state: url.searchParams.get("connectState"),
+        publicKey: url.searchParams.get("publicKey"),
+        relayer: url.searchParams.get("relayer"),
+    };
+
+    const preflight = await fetch(`${callbackBase}/preflight`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+    });
+    assert.equal(preflight.status, 200);
+
+    const callback = await fetch(`${callbackBase}/callback`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+            state: body.state,
+            accountId,
+            walletAddress: "0x" + "2".repeat(64),
+            packageId: "0x" + "4".repeat(64),
+        }),
+    });
+    assert.equal(callback.status, 200);
+}
+
+/** Poll until `predicate` holds. Same shape as `live-login-credentials`. */
+async function waitUntil(predicate, timeoutMs = 10_000) {
+    const started = Date.now();
+    while (!predicate()) {
+        if (Date.now() - started > timeoutMs) throw new Error("timed out waiting for condition");
+        await new Promise((r) => setTimeout(r, 25));
+    }
+}
+
+test("a rejected key keeps failing fast, and memwal_login restores service", async (t) => {
+    const relayer = await startRevokedKeyRelayer(BEARER);
+    const { server, base } = relayer;
+    const bridge = startBridge(base);
+    t.after(() => {
+        bridge.cleanup();
+        server.close();
+    });
+
+    bridge.send({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            clientInfo: { name: "test", version: "0" },
+        },
+    });
+    await bridge.waitFor((m) => m.id === 1 && m.result, 15000);
+
+    const recall = (id) => {
+        bridge.send({
+            jsonrpc: "2.0",
+            id,
+            method: "tools/call",
+            params: { name: "memwal_recall", arguments: { query: "anything", limit: 5 } },
+        });
+        return bridge.waitFor((m) => m.id === id && (m.result || m.error), 20000);
+    };
+
+    const first = await recall(2);
+    assert.ok(first.result?.isError || first.error, "first recall must be an auth error");
+
+    // The bridge must still be reading stdin after the 401 answered the first
+    // call. A second recall is refused ON ARRIVAL, so it comes back well inside
+    // CALL_TIMEOUT_MS — anything near that deadline means it parked instead.
+    const startedAt = Date.now();
+    const second = await recall(3);
+    const elapsed = Date.now() - startedAt;
+    assert.ok(
+        second.result?.isError || second.error,
+        `second recall must also be an auth error, got: ${JSON.stringify(second)}`,
+    );
+    assert.ok(
+        elapsed < CALL_TIMEOUT_MS / 2,
+        `second recall must fail fast, took ${elapsed}ms (deadline ${CALL_TIMEOUT_MS}ms)`,
+    );
+
+    // Let the background connect back off a few times before signing in — a
+    // real user takes seconds to click the link. By the 4th rejection the loop
+    // is asleep for ~4s, which is long enough that "the pump woke because the
+    // login published a session" and "the pump woke because the backoff
+    // happened to expire" are no longer the same measurement.
+    await waitUntil(() => relayer.rejections() >= 4, 15_000);
+
+    // `memwal_login` is answered locally, so it must still work while the saved
+    // key is being refused — it is the only way back in.
+    bridge.send({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: { name: "memwal_login", arguments: {} },
+    });
+    const loginReply = await bridge.waitFor((m) => m.id === 4 && m.result, 20000);
+    const connectUrl = /\*\*URL:\*\* (\S+)/.exec(textOf(loginReply))?.[1];
+    assert.ok(connectUrl, `memwal_login must return the browser URL, got: ${textOf(loginReply)}`);
+    await completeLogin(connectUrl, ACCOUNT);
+    // The login's own reconnect owns the new handshake; wait for the relayer to
+    // accept it before asking for the recall, so the assertion below is about
+    // the flag being cleared and not about who won a race.
+    await waitUntil(() => relayer.accepted() > 0);
+
+    // The new key is accepted, so the bridge must resume normal buffering: an
+    // ordinary empty result, not the credentials-rejected refusal. It must also
+    // land promptly: the login's own reconnect has to release the server pump,
+    // because nothing else is draining this stream until the background
+    // connect's backoff — up to 15s in production — next expires.
+    const recoveredAt = Date.now();
+    const recovered = await recall(5);
+    const recoveredIn = Date.now() - recoveredAt;
+    assert.equal(
+        recovered.error,
+        undefined,
+        `recall after re-login must not error: ${JSON.stringify(recovered)}`,
+    );
+    assert.notEqual(
+        recovered.result?.isError,
+        true,
+        `recall after re-login must not be refused: ${JSON.stringify(recovered)}`,
+    );
+    assert.match(textOf(recovered), /no matching memories/i);
+    assert.ok(
+        recoveredIn < 1500,
+        `recall after re-login must not wait for the connect backoff, took ${recoveredIn}ms`,
+    );
+    // The saved key really was refused throughout, rather than the relayer
+    // having quietly accepted it at some point.
+    assert.ok(relayer.rejections() > 0, "the revoked key must have been 401'd");
+});
+
+/**
+ * Relayer whose key is revoked WHILE a session is live: the open stream is cut
+ * and every later handshake 401s. `restore()` puts it back, standing in for a
+ * WAF or rate-limit 401 that clears on its own.
+ */
+function startMidSessionRevokeRelayer() {
+    let sseRes = null;
+    let rejecting = false;
+    let parkCalls = false;
+    let accepted = 0;
+    let rejections = 0;
+    let calls = 0;
+
+    const server = http.createServer((req, res) => {
+        const url = new URL(req.url, "http://127.0.0.1");
+        if (req.method === "GET" && url.pathname === "/version") {
+            serveVersion(res);
+            return;
+        }
+        if (req.method === "GET" && url.pathname === "/api/mcp/sse") {
+            if (rejecting) {
+                rejections += 1;
+                res.writeHead(401, { "content-type": "application/json" });
+                res.end(JSON.stringify({ error: "delegate key was revoked" }));
+                return;
+            }
+            accepted += 1;
+            res.writeHead(200, {
+                "content-type": "text/event-stream",
+                "cache-control": "no-cache",
+                connection: "keep-alive",
+            });
+            res.write(`event: endpoint\ndata: /api/mcp/messages?sessionId=s${accepted}\n\n`);
+            const heartbeat = setInterval(() => res.write(": keepalive\n\n"), 250);
+            heartbeat.unref?.();
+            res.on("close", () => clearInterval(heartbeat));
+            sseRes = res;
+            return;
+        }
+        if (req.method === "POST" && url.pathname === "/api/mcp/messages") {
+            let body = "";
+            req.on("data", (c) => (body += c));
+            req.on("end", () => {
+                res.writeHead(202);
+                res.end();
+                let msg;
+                try {
+                    msg = JSON.parse(body);
+                } catch {
+                    return;
+                }
+                if (msg.id == null) return;
+                if (msg.method === "tools/call") {
+                    calls += 1;
+                    // Park it: the point of the revocation case is a call that
+                    // is already in flight when the key stops being accepted.
+                    if (parkCalls) return;
+                }
+                sseRes?.write(
+                    `event: message\ndata: ${JSON.stringify({
+                        jsonrpc: "2.0",
+                        id: msg.id,
+                        result:
+                            msg.method === "tools/call"
+                                ? {
+                                      content: [
+                                          { type: "text", text: "No matching memories found." },
+                                      ],
+                                      isError: false,
+                                  }
+                                : {},
+                    })}\n\n`,
+                );
+            });
+            return;
+        }
+        res.writeHead(404);
+        res.end();
+    });
+
+    return new Promise((ready) => {
+        server.listen(0, "127.0.0.1", () => {
+            const { port } = server.address();
+            ready({
+                server,
+                base: `http://127.0.0.1:${port}`,
+                accepted: () => accepted,
+                rejections: () => rejections,
+                calls: () => calls,
+                park: () => {
+                    parkCalls = true;
+                },
+                revoke: () => {
+                    rejecting = true;
+                    parkCalls = false;
+                    sseRes?.destroy();
+                    sseRes = null;
+                },
+                restore: () => {
+                    rejecting = false;
+                },
+            });
+        });
+    });
+}
+
+test("a key revoked mid-session answers the in-flight call instead of orphaning it", async (t) => {
+    const relayer = await startMidSessionRevokeRelayer();
+    const bridge = startBridge(relayer.base);
+    t.after(() => {
+        bridge.cleanup();
+        relayer.server.close();
+    });
+
+    bridge.send({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            clientInfo: { name: "test", version: "0" },
+        },
+    });
+    await bridge.waitFor((m) => m.id === 1 && m.result, 15000);
+    await waitUntil(() => relayer.accepted() > 0);
+
+    // In flight against a live session, with no reply coming.
+    relayer.park();
+    bridge.send({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "memwal_recall", arguments: { query: "anything", limit: 5 } },
+    });
+    await waitUntil(() => relayer.calls() > 0);
+
+    // The key is revoked underneath it: the stream is cut and the reconnect
+    // that follows is 401'd.
+    const revokedAt = Date.now();
+    relayer.revoke();
+
+    const reply = await bridge.waitFor((m) => m.id === 2 && (m.result || m.error), 20000);
+    const elapsed = Date.now() - revokedAt;
+    const text = `${textOf(reply)} ${reply?.error?.message ?? ""}`.toLowerCase();
+
+    assert.ok(reply.error || reply.result?.isError, "the in-flight call must be answered as error");
+    assert.match(
+        text,
+        /401|credential|unauthorized|memwal_login/,
+        `the in-flight call must name the rejection, got: ${text}`,
+    );
+    assert.ok(
+        !text.includes("please retry"),
+        `"please retry" is the orphan sweeper's advice and cannot work here, got: ${text}`,
+    );
+    assert.ok(
+        elapsed < CALL_TIMEOUT_MS,
+        `must beat the orphan sweeper's ${CALL_TIMEOUT_MS}ms deadline, took ${elapsed}ms`,
+    );
+});
+
+test("a transient mid-session 401 recovers on its own, without memwal_login", async (t) => {
+    const relayer = await startMidSessionRevokeRelayer();
+    const bridge = startBridge(relayer.base);
+    t.after(() => {
+        bridge.cleanup();
+        relayer.server.close();
+    });
+
+    bridge.send({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            clientInfo: { name: "test", version: "0" },
+        },
+    });
+    await bridge.waitFor((m) => m.id === 1 && m.result, 15000);
+    await waitUntil(() => relayer.accepted() > 0);
+
+    // A WAF or rate-limit blip: 401 for a while, then fine again. Nothing here
+    // calls `memwal_login` — the saved key was always good.
+    relayer.revoke();
+    await waitUntil(() => relayer.rejections() >= 2, 15_000);
+    relayer.restore();
+
+    // The server pump keeps driving `reconnect()` on the dead stream, so the
+    // bridge must find its own way back without the client intervening.
+    await waitUntil(() => relayer.accepted() >= 2, 20_000);
+
+    bridge.send({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "memwal_recall", arguments: { query: "anything", limit: 5 } },
+    });
+    const reply = await bridge.waitFor((m) => m.id === 3 && (m.result || m.error), 20000);
+    assert.equal(reply.error, undefined, `recovered recall must not error: ${JSON.stringify(reply)}`);
+    assert.notEqual(
+        reply.result?.isError,
+        true,
+        `recovered recall must not still be refused: ${JSON.stringify(reply)}`,
+    );
+    assert.match(textOf(reply), /no matching memories/i);
 });
