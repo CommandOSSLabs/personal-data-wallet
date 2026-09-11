@@ -1,11 +1,19 @@
 # memwal
 
+## 0.1.10
+
+### Added
+
+- `restore()` results include `failed` (default `0`) for permanent decrypt/UTF-8 failures instead of folding them into `skipped` or dropping them silently.
+
 ## 0.1.9
 
 ### Fixed
 
+- HTTP 503 with `x-auth-error: AUTH_UPSTREAM_UNAVAILABLE` is reported as a retryable credential-verification outage, not a sign-in failure. Other 503s keep the generic sanitized body.
 - `remember_bulk_async` rejects an empty `items` list before the request and raises when the relayer returns a `job_ids` length that does not match the batch.
 - restore `truncated` docs now match WALM-431 retryable semantics.
+- Warn when `server_url` uses plaintext `http://` against a non-localhost host, matching the TypeScript SDK `normalizeServerUrl` guard. Localhost, `127.0.0.1`, `::1`, and `*.localhost` are exempt; invalid URLs are left for the HTTP client to surface. The warning logs only scheme, host, and port so URL userinfo is not written to logs.
 
 ## 0.1.8
 

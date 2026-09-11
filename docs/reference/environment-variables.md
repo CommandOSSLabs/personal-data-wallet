@@ -146,11 +146,12 @@ These are not all enforced at boot, but most real deployments need them.
 | `WALLET_BALANCE_LOW_THRESHOLD_SUI` | `5000000000` | Uploader SUI address-balance threshold in MIST (5 SUI). Load-bearing during phase 1, when durable register pays gas from the uploader wallet |
 | `SPONSOR_BALANCE_LOW_THRESHOLD_SUI` | `5000000000` | Sponsor wallet SUI address-balance threshold in MIST (5 SUI) |
 | `WALLET_BALANCE_LOW_ALERT_DEDUP_SECS` | `43200` | Dedup window for wallet low-balance Slack alerts, per `(network, wallet type, token, address)` |
-| `MEMWAL_RELAYER_URL` | `http://127.0.0.1:$PORT` | Relayer URL passed from the Rust server to the sidecar for MCP tool calls |
+| `MEMWAL_RELAYER_URL` | `http://127.0.0.1:$PORT` | Relayer URL passed from the Rust server to the sidecar for MCP tool calls. Setting it explicitly also makes `memwal_health` report it as the network the session is bound to |
 | `MCP_MAX_TOTAL_SESSIONS` | `1000` | Maximum active MCP sessions across SSE and Streamable HTTP transports |
 | `MCP_MAX_SESSIONS_PER_IP` | `16` | Maximum active MCP sessions from one source IP |
 | `MCP_MAX_NEW_SESSIONS_PER_IP_PER_MIN` | `30` | Maximum new MCP sessions opened by one source IP per minute |
 | `TRUSTED_PROXY_HOPS` | `0` | Number of trusted reverse-proxy hops to walk from the right of `X-Forwarded-For`; `0` ignores XFF and uses the TCP peer |
+| `WRITES_PAUSED` | `false` | When `1` / `true` / `yes` / `on`, write routes (`POST /api/remember`, `/api/remember/manual`, `/api/remember/bulk`, `/api/analyze`) return HTTP 503 `{"error":"writes are paused"}`. `GET /health` stays HTTP 200 with `status: "ok"` and `writes: "paused"`. Reads (`recall`, `restore`, health) stay available |
 
 ### Notes
 
@@ -174,6 +175,7 @@ These are not all enforced at boot, but most real deployments need them.
 - `MEMWAL_PACKAGE_ID` and `MEMWAL_REGISTRY_ID` are server env vars. Do not replace them with `VITE_*` app env vars.
 - For network-specific `MEMWAL_PACKAGE_ID` and `MEMWAL_REGISTRY_ID` values, see [Contract Overview](/contract/overview).
 - `MEMWAL_RELAYER_URL` is only needed when the sidecar should call a different relayer URL than the Rust server's local port. The Rust server sets it automatically to `http://127.0.0.1:$PORT` for the managed sidecar when it starts.
+- Set `MEMWAL_RELAYER_URL` to the deployment's public origin if you want `memwal_health` to name the network it answered on. The Rust server forwards an operator-supplied value to the sidecar as `MEMWAL_PUBLIC_RELAYER_URL`, and only that value is reported; the loopback default is not, because an address that names no network would make a client bound to the wrong relayer read as correctly configured. Hosted OAuth deployments already set this, because it is the issuer. Clients run through the `memwal-mcp` stdio package always see the relayer that package dialled, whether or not this is set.
 
 ## Frontend apps
 

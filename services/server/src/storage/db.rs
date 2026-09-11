@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use pgvector::Vector;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 
+use crate::alerts::AlertManager;
 use crate::types::{AppError, SearchHit};
 
 /// Tombstone retention for both the read-API `must_resync` clock and the
@@ -10,12 +13,32 @@ pub const TOMBSTONE_RETENTION: chrono::Duration = chrono::Duration::days(30);
 
 pub struct VectorDb {
     pool: PgPool,
+    storage_alerts: Option<(Arc<AlertManager>, String)>,
+}
+
+impl VectorDb {
+    pub fn with_storage_alerts(self, alerts: Arc<AlertManager>, sui_network: String) -> Self {
+        Self {
+            storage_alerts: Some((alerts, sui_network)),
+            ..self
+        }
+    }
+
+    async fn maybe_alert_storage_exhausted(&self, err: &sqlx::Error) {
+        let Some((alerts, network)) = &self.storage_alerts else {
+            return;
+        };
+        crate::alerts::maybe_alert_sqlx_postgres_storage_exhausted(alerts, network, err).await;
+    }
 }
 
 #[cfg(test)]
 impl VectorDb {
     pub(crate) fn from_pool(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            storage_alerts: None,
+        }
     }
 }
 
@@ -89,7 +112,10 @@ mod tests {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
         }
 
-        Some(VectorDb { pool })
+        Some(VectorDb {
+            pool,
+            storage_alerts: None,
+        })
     }
 
     /// Regression test for the migration-order fixes: batched Rust
@@ -1491,7 +1517,10 @@ impl VectorDb {
 
         tracing::info!("database connected and migrations applied");
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            storage_alerts: None,
+        })
     }
 
     /// Expose a reference to the underlying `PgPool` so job handlers
@@ -1556,10 +1585,17 @@ impl VectorDb {
         .bind(package_id)
         .bind(end_epoch)
         .execute(&mut *tx)
-        .await
-        .map_err(|e| AppError::Internal(format!("Failed to insert vector: {}", e)));
-        crate::observability::observe_db("vector.insert", db_status(&result), started.elapsed());
-        result?;
+        .await;
+        if let Err(e) = result {
+            drop(tx);
+            self.maybe_alert_storage_exhausted(&e).await;
+            crate::observability::observe_db("vector.insert", "error", started.elapsed());
+            return Err(AppError::Internal(format!(
+                "Failed to insert vector: {}",
+                e
+            )));
+        }
+        crate::observability::observe_db("vector.insert", "ok", started.elapsed());
         sqlx::query("DELETE FROM memory_tombstones WHERE memory_id = $1")
             .bind(id)
             .execute(&mut *tx)
@@ -2199,10 +2235,12 @@ impl VectorDb {
 
     /// Immediately remove a single stale/revoked delegate key from the cache.
     ///
-    /// Called when `verify_delegate_key_onchain` returns `Err` for a cached entry,
-    /// meaning the key has been revoked on-chain. Without this, every subsequent
-    /// request with the revoked key would hit the cache, fail the RPC verify, log
-    /// noise, and waste an RPC call — in an infinite loop until TTL expiry.
+    /// Called when a cached entry's on-chain re-verify returns a *definitive*
+    /// miss (`KeyNotFound` / `AccountDeactivated` / `WrongObjectType`). Do
+    /// **not** call this for `RpcError` / `ScanCapExceeded` — those mean Sui
+    /// could not be consulted (WALM-429). Evicting on a 429 made every later
+    /// request miss the cache, burn a second GetObject, and 401 a still-valid
+    /// key.
     pub async fn delete_cached_key(&self, public_key_hex: &str) -> Result<u64, AppError> {
         let result = sqlx::query("DELETE FROM delegate_key_cache WHERE public_key = $1")
             .bind(public_key_hex)

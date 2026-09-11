@@ -1,5 +1,14 @@
 # @mysten-incubation/memwal-mcp
 
+## 0.0.13
+
+### Fixed
+
+- `memwal_restore` reports `failed` and retries the same page when `truncated` is a download/embed blip (`restored=0` and `skipped+failed < total`), instead of always telling the agent to raise `limit` (WALM-480).
+- Unrecognised options now warn on stderr and in the structured log (`cli.unrecognised_arg`) instead of being dropped in silence, so a typo'd `--namesapce work` no longer writes to the default namespace with nothing to say it had. The warning names the option key only, keeping a mistyped value-taking flag (`--tokenn=hunter2`) from putting the secret on stderr, and it warns rather than exits so an option from a newer config cannot brick the server. (#630)
+- `--help` now lists the network presets (`--prod`, `--dev`, `--staging`, `--local`) with the relayer and web URLs each resolves to, rendered from the preset table rather than retyped so a new preset cannot ship undocumented the way `--prod` did. The `--label` default is corrected to "MCP Client", which is what the code actually falls back to. (#630)
+- `memwal_health` reports `relayer=<url>`, naming the origin this process dialled, so a client bound to the wrong network finds out there instead of by noticing its memories are missing. The URL is captured when the call is sent rather than when the reply lands, so a reconnect mid-flight cannot label the answer with a relayer it did not come from. (#630)
+
 ## 0.0.12
 
 ### Added

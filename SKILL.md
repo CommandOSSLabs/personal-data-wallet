@@ -155,7 +155,7 @@ const stored = await memwal.waitForRememberJob(accepted.job_id, {
 | `recall({ query, limit?, topK?, namespace?, maxDistance? })` *(preferred)* or `recall(query, limit?, namespace?)` | Semantic search for memories | `{ results: [{ blob_id, text, distance }], total }` |
 | `analyze(text, namespace?)` | Extract facts and accept one memory job per fact | `{ job_ids, facts, fact_count, status, owner }` |
 | `analyzeAndWait(text, namespace?, opts?)` | Extract facts and wait for all fact jobs to complete | `{ results, facts, total, succeeded, failed, owner }` |
-| `restore(namespace, limit?)` | Rebuild missing index entries from Walrus | `{ restored, skipped, total, namespace, owner }` |
+| `restore(namespace, limit?)` | Rebuild missing index entries from Walrus | `{ restored, skipped, failed, total, namespace, owner, truncated }` |
 | `health()` | Check relayer health | `{ status, version }` |
 | `getPublicKeyHex()` | Get hex-encoded public key | `string` |
 
@@ -271,9 +271,11 @@ interface EmbedResult {
 interface RestoreResult {
   restored: number;
   skipped: number;
+  failed: number;
   total: number;
   namespace: string;
   owner: string;
+  truncated: boolean;
 }
 
 interface HealthResult {
@@ -315,9 +317,16 @@ A namespace is an **opaque, flat string label** scoped to a single owner. It is 
 
 #### Validation
 
-The server accepts any non-empty string as a namespace. There is no length cap, no character whitelist, no normalization (whitespace, case, Unicode). Whatever you send is stored verbatim and matched with exact equality. If you omit the namespace, the server falls back to the literal string `"default"`.
+Omit `namespace` and the server uses the literal string `"default"`. An explicit empty string is rejected with HTTP 400 (`namespace cannot be empty`).
 
-> **Implication:** `"my-app"`, `" my-app"` (leading space), `"My-App"`, and `"my-app/"` are four distinct namespaces. Pick a convention and stick to it.
+The server then accepts any non-empty UTF-8 string except:
+
+- more than **255 bytes** (UTF-8 byte length, not character count — Rust `str::len()`) → HTTP 400 `namespace exceeds maximum length of 255 bytes`
+- a NUL byte (`\0`) → HTTP 400 `namespace contains a NUL byte` (WALM-439). Tabs, newlines, and other control characters are still allowed so older namespaces stay readable.
+
+There is no character whitelist, no case folding, no trim, and no Unicode normalization. Whatever passes validation is stored verbatim and matched with exact equality.
+
+> **Implication:** `"my-app"`, `" my-app"` (leading space), `"My-App"`, and `"my-app/"` are four distinct namespaces. Pick a convention and stick to it. Multi-byte characters (CJK, emoji) consume more than one byte each, so they hit the 255-byte cap sooner than a character count would suggest.
 
 #### Flat, not hierarchical
 
@@ -355,18 +364,22 @@ Cross-namespace and cross-owner reads are not just filtered out of results — t
 | Field | Counts | Notes |
 |---|---|---|
 | `restored` | Blobs the relayer just rebuilt this call | Pulled from Walrus → SEAL decrypted → re-embedded → inserted as a new row |
-| `skipped` | On-chain blobs already in the local index | No work needed; relayer left them as-is |
+| `skipped` | On-chain blobs already in the local **success** index | No work needed; relayer left them as-is. Does not include decrypt/UTF-8 failures. |
+| `failed` | Permanent decrypt/UTF-8 failures | On-chain blobs in this page that are negative-cached, plus new permanent failures this call. Older relayers omit the field; SDKs default it to `0`. |
 | `total` | All on-chain blobs the relayer saw for `(owner, namespace)` | Before the limit was applied |
 | `namespace` | Echo of the request | |
 | `owner` | Resolved owner address | |
+| `truncated` | Known-retryable-incomplete | `true` is not a hard failure; `false` is not completeness |
 
-**Silent drops.** A blob that *cannot* be decrypted or embedded (e.g. wrong delegate key, malformed ciphertext, embedding API down) is dropped without counting in `restored` *or* `skipped`. `restored + skipped` is therefore a lower bound on healthy entries, not a strict equality with `total`.
+`truncated=true` means this restore is **known-retryable-incomplete**: more missing blobs than `limit` allowed this call to restore, **or** the sidecar's owner-wide candidate fetch hit its cap **and** raising `limit` can still expand that fetch (`limit < 20`). Once the sidecar cap is saturated (`limit >= 20`, cap pinned at 100), truncation follows this call's missing-blob page length, not onchain `total`. A fully restored namespace does not loop. `truncated=false` is **not** proof the sidecar saw every onchain blob; blobs beyond the owner-wide sidecar candidate cap can still be missing. WALM-451 tracks a `sourceCapped` field for that case. Relayers older than WALM-319 omit `truncated`; SDKs default it to `false`.
+
+Permanent decrypt or invalid-UTF-8 failures count in `failed`, not `skipped`. Transient download/decrypt/embed errors are still not counted in `restored`, `skipped`, or `failed` and may be retried (`truncated=true` when a page yields only those). `restored + skipped + failed` therefore never exceeds `total`, and falls short of it whenever transient errors leave blobs uncounted.
 
 #### Default and limit
 
 * `limit` defaults to `10` in both TypeScript and Python SDKs and matches the server-side default. The Python SDK historically defaulted to `50`; it is now realigned with the server.
 * `limit` caps the **inspected** blob set, newest-first. It does not cap `restored` independently — if all 10 inspected blobs are already indexed, `restored = 0` and `skipped = 10`.
-* There is no enforced server-side maximum, but very large limits will dominate latency (see below).
+* The relayer clamps `limit` to 1–100 (values outside that range are clamped, not rejected).
 
 #### Pagination
 

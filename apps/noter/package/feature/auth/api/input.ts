@@ -8,24 +8,21 @@
  */
 
 import { z } from "zod";
-import {
-  uuidv7Schema,
-  walletSessionInsertSchema,
-} from "@/shared/db/type";
+import { walletSessionInsertSchema } from "@/shared/db/type";
+
+// Session id is deliberately absent here: getSession and logout take it from the
+// x-session-id header via the tRPC context, so it can never be supplied as input.
 
 // ═══════════════════════════════════════════════════════════════
-// Session Management Inputs
+// Shared Field Schemas
 // ═══════════════════════════════════════════════════════════════
 
-/**
- * Input for validating existing session
- * Uses common idInputSchema pattern, aliased as sessionId
- */
-export const validateSessionInput = z.object({
-  sessionId: uuidv7Schema, // Same as idInputSchema.shape.id
-});
-
-export type ValidateSessionInput = z.infer<typeof validateSessionInput>;
+// Canonical Sui address: 0x + 64 hex. Reject malformed input at the boundary so
+// it never reaches normalizeSuiAddress (which would silently left-pad garbage
+// into a valid-looking-but-wrong address) or a DB lookup.
+export const suiAddressSchema = z
+  .string()
+  .regex(/^0x[0-9a-f]{64}$/i, "Invalid Sui address");
 
 // ═══════════════════════════════════════════════════════════════
 // Wallet Auth Inputs
@@ -34,13 +31,19 @@ export type ValidateSessionInput = z.infer<typeof validateSessionInput>;
 /**
  * Input for wallet authentication
  * Derives field types from walletSessionInsertSchema
- * Uses client-friendly names (address/message instead of walletAddress/signedMessage)
+ * Uses client-friendly names (address instead of walletAddress)
+ *
+ * The caller does NOT supply the message that was signed: it proves ownership of
+ * `address` by signing a server-issued single-use challenge (issueWalletChallenge)
+ * and returning that challenge's id. Accepting a caller-chosen message would let
+ * anyone replay one captured {message, signature, address} triple into an
+ * unlimited number of 24-hour sessions.
  */
 export const connectWalletInput = z.object({
   walletType: walletSessionInsertSchema.shape.walletType.pipe(z.enum(["slush"])), // Subset validation
-  address: walletSessionInsertSchema.shape.walletAddress, // Maps to walletAddress in DB
-  signature: walletSessionInsertSchema.shape.signature,
-  message: walletSessionInsertSchema.shape.signedMessage, // Maps to signedMessage in DB
+  address: suiAddressSchema, // Maps to walletAddress in DB
+  challengeId: z.string().min(1),
+  signature: z.string().min(1),
 });
 
 export type ConnectWalletInput = z.infer<typeof connectWalletInput>;
