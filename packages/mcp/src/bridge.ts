@@ -325,6 +325,35 @@ class RelayerThrottledError extends Error {
     }
 }
 
+/** Deadline for a request that is still buffered while the handshake has been
+ * failing for at least this long — i.e. one we can prove never left this
+ * process.
+ *
+ * It is much shorter than `callTimeoutMs` because the two cases carry
+ * different risk, not because the wait is less important. A request that was
+ * SENT might have been executed, so failing it early invites the agent to
+ * retry a `remember` that already landed. A request that was never sent
+ * cannot have executed: failing it is provably a no-op, and the agent's retry
+ * costs one round trip.
+ *
+ * 90s is well past a relayer cold start and past six reconnect attempts at the
+ * capped 15s backoff, so it does not fire on a slow-but-recovering relayer —
+ * and it does not apply at all while the handshake is healthy (a request
+ * buffered behind an in-progress flush keeps the full deadline). What it ends
+ * is the case from WALM-618: no working connection, nothing sent, and four
+ * minutes of silence before the user is told anything. */
+const DEFAULT_STALLED_HANDSHAKE_MS = 90_000;
+
+/** Same override shape as the call timeout, mostly for tests. Never longer
+ * than the call timeout itself: this deadline exists to fire sooner. */
+function resolveStalledHandshakeMs(callTimeoutMs: number): number {
+    const raw = process.env.MEMWAL_MCP_STALLED_HANDSHAKE_MS;
+    const n = raw ? Number(raw) : DEFAULT_STALLED_HANDSHAKE_MS;
+    const resolved =
+        Number.isFinite(n) && n >= MIN_CALL_TIMEOUT_MS ? n : DEFAULT_STALLED_HANDSHAKE_MS;
+    return Math.min(resolved, callTimeoutMs);
+}
+
 interface RpcMessage {
     jsonrpc: "2.0";
     id?: number | string | null;
@@ -1040,6 +1069,7 @@ export async function runBridge(
     // would otherwise keep pushing the deadline out.
     const inFlight = new Map<string | number, InFlightEntry>();
     const callTimeoutMs = resolveCallTimeoutMs();
+    const stalledHandshakeMs = resolveStalledHandshakeMs(callTimeoutMs);
 
     /** IDs of `tools/list` requests we've forwarded to the relayer. When
      * the response comes back through the SSE pump, we splice in the
@@ -1899,21 +1929,31 @@ export async function runBridge(
         for (const entry of Array.from(inFlight.values())) failRequest(entry.msg, reason);
     }
 
+    /** How long the current run of handshake failures has lasted, or `null`
+     * when the last attempt succeeded. */
+    function handshakeStalledForMs(now: number): number | null {
+        return handshakeFailingSince === null ? null : now - handshakeFailingSince;
+    }
+
     /** How a request that just hit its deadline should be explained.
      *
-     * Both cases are the same expiry, but they are not the same event and the
-     * old wording only described one of them. A request still sitting in
-     * `pendingForward` never left this process: no session ever existed to
-     * send it on. Telling the user the connection "dropped before the result
+     * Three cases, where the old wording only described one. A request still
+     * sitting in `pendingForward` never left this process: no session ever
+     * carried it. Telling the user the connection "dropped before the result
      * came back" points them at the relayer, or at a half-written memory, when
-     * the truth is that the MCP handshake has been failing and the call never
-     * ran (WALM-618 — the bridge retried in silence, so a `remember` looked
-     * like it was merely slow for minutes).
+     * the truth is that nothing was attempted (WALM-618 — the bridge retried
+     * in silence, so a `remember` looked like it was merely slow for minutes).
+     * And a buffered request is only evidence of a *failing* connection when
+     * one is actually failing: post-connect, `handleClientLine` also buffers
+     * behind an in-progress flush, on a perfectly healthy session.
      *
      * Pure: the caller is responsible for dropping a `neverSent` message from
      * the buffer, which it must, or a later flush would run the call we just
      * said never ran. */
-    function expiredRequestReport(msg: RpcMessage): {
+    function expiredRequestReport(
+        msg: RpcMessage,
+        now: number,
+    ): {
         neverSent: boolean;
         reason: string;
         opts: { toolText: string; errorMessage: string };
@@ -1933,10 +1973,26 @@ export async function runBridge(
             };
         }
 
-        const stalledForMs = handshakeFailingSince ? Date.now() - handshakeFailingSince : null;
-        const waited = stalledForMs
-            ? `for ${Math.round(stalledForMs / 1000)}s`
-            : `for over ${Math.round(callTimeoutMs / 1000)}s`;
+        const stalledForMs = handshakeStalledForMs(now);
+        if (stalledForMs === null) {
+            // Buffered on a live session (a flush was draining) and still
+            // unsent at the deadline. Nothing ran, but nothing is failing
+            // either — do not invent an outage.
+            return {
+                neverSent: true,
+                reason: "never left the queue",
+                opts: {
+                    toolText:
+                        "❌ Walrus Memory never sent this call — it was still queued when " +
+                        "the call timed out, so nothing was stored. Please retry.",
+                    errorMessage:
+                        "Walrus Memory call was still queued when it timed out and was " +
+                        "never sent. Please retry.",
+                },
+            };
+        }
+
+        const waited = `for ${Math.round(stalledForMs / 1000)}s`;
         const detail = lastHandshakeError ? ` Last handshake error: ${lastHandshakeError}` : "";
         return {
             neverSent: true,
@@ -1963,10 +2019,22 @@ export async function runBridge(
     );
     const orphanSweeper = setInterval(() => {
         const now = Date.now();
+        const handshakeStalledMs = handshakeStalledForMs(now);
         for (const [id, entry] of Array.from(inFlight.entries())) {
             const elapsedMs = now - entry.startedAt;
-            if (elapsedMs <= callTimeoutMs) continue;
-            const { neverSent, reason, opts } = expiredRequestReport(entry.msg);
+            const { neverSent, reason, opts } = expiredRequestReport(entry.msg, now);
+            // A call we can prove never left this process, while no working
+            // connection has existed for `stalledHandshakeMs`, does not need
+            // the full `callTimeoutMs`: it cannot have executed, so answering
+            // it early is a no-op the agent can safely retry. Anything that
+            // was actually sent — or that is queued on a healthy session —
+            // keeps the full deadline, because there a premature failure
+            // invites a duplicate write.
+            const handshakeIsStalled =
+                handshakeStalledMs !== null && handshakeStalledMs > stalledHandshakeMs;
+            const deadlineMs =
+                neverSent && handshakeIsStalled ? stalledHandshakeMs : callTimeoutMs;
+            if (elapsedMs <= deadlineMs) continue;
             // Drop it from the buffer before answering: a later successful
             // connect would otherwise flush and actually run the call we are
             // about to report as never having run.
@@ -1983,7 +2051,9 @@ export async function runBridge(
                 id,
                 method: entry.msg.method ?? null,
                 elapsedMs,
+                deadlineMs,
                 reason,
+                handshakeStalledMs,
                 lastHandshakeError,
             });
             failRequest(entry.msg, reason, opts);
@@ -2001,8 +2071,11 @@ export async function runBridge(
     // NOT fail buffered requests between attempts: a request that the next
     // attempt would serve must not get a spurious "unavailable" error (that
     // would also drop the auth-required hot-handoff request). Buffered tool
-    // calls stay queued and are flushed on the first SUCCESS; if they never
-    // connect, the client's own per-tool timeout fires (graceful) — and on
+    // calls stay queued and are flushed on the first SUCCESS. They are no
+    // longer left to the client's own per-tool timeout, though: once no
+    // connection has existed for `stalledHandshakeMs` the orphan sweeper
+    // answers them (see `DEFAULT_STALLED_HANDSHAKE_MS`), because a call that
+    // was never sent cannot have executed and silence helps nobody. On
     // shutdown `failPendingForward` closes out anything still open. `initialize`
     // is answered locally, so it never blocks and is only forwarded, not failed.
     // First connect stays on `openSseStream` + `flushPendingForward` so a
