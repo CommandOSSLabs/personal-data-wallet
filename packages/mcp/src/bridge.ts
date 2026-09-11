@@ -15,7 +15,7 @@
  * Re-auth requires an explicit `memwal-mcp login` from the user.
  */
 import type { MemWalCredentials } from "./auth.js";
-import { clearCreds, credsPath, loadCreds } from "./auth.js";
+import { clearCreds, clearPendingLogin, credsPath, loadCreds } from "./auth.js";
 import { TOOL_DEFINITIONS } from "./auth-required.js";
 import {
     clientInfoHeaders,
@@ -659,6 +659,11 @@ async function handleLocalLogin(
                 },
             });
         },
+        // This tool call has already returned "here is your URL, go sign in",
+        // so a later failure has no response left to ride home on. Without an
+        // out-of-band notification the agent sits waiting on a flow that is
+        // already dead. MCP logging notifications are fire-and-forget and safe
+        // to emit at any point in the session.
         (err) => {
             const msg = err instanceof Error ? err.message : String(err);
             log.warn("memwal_login.bridge.failed", { msg });
@@ -668,7 +673,13 @@ async function handleLocalLogin(
                 params: {
                     level: "warning",
                     logger: "memwal-mcp",
-                    data: `Walrus Memory sign-in did not complete: ${msg}. Existing credentials are unchanged; call memwal_login again to retry.`,
+                    // The last clause is only true because of the write-ahead
+                    // record (WALM-332): a key the browser already paid to
+                    // register is no longer lost with the process.
+                    data:
+                        `Walrus Memory sign-in did not complete: ${msg}. Existing credentials are ` +
+                        `unchanged; call memwal_login again to retry. If a delegate key was already ` +
+                        `registered on-chain, the next start reclaims it.`,
                 },
             });
         },
@@ -710,6 +721,15 @@ async function handleLocalLogin(
 function handleLocalLogout(): { text: string; isError: boolean } {
     try {
         const cleared = clearCreds();
+        // Explicit sign-out discards the write-ahead record too. Without this
+        // an interrupted re-login leaves `login-pending.json` behind, and the
+        // next start's `recoverPendingLogin` signs the user straight back in.
+        //
+        // Kept out of `clearCreds()` so only a deliberate sign-out discards a
+        // key that may still be reclaimable. `clearCreds` is exported, and a
+        // 401 deliberately does NOT wipe credentials (see the relayer-401
+        // handling above), so the two are not the same decision.
+        clearPendingLogin();
         log.info("memwal_logout.bridge.success", {
             removedPath: cleared.removedPath ?? null,
             fallbackPath: cleared.fallbackPath ?? null,
