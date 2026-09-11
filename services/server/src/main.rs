@@ -706,14 +706,27 @@ async fn main() {
     let scripts_dir = std::env::var("SIDECAR_SCRIPTS_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts"));
-    let mcp_relayer_url = std::env::var("MEMWAL_RELAYER_URL")
-        .unwrap_or_else(|_| format!("http://127.0.0.1:{}", config.port));
-    let mut sidecar_child = tokio::process::Command::new("npx")
+    // Two different things, deliberately kept apart. `MEMWAL_RELAYER_URL` is
+    // the address the sidecar DIALS, and falls back to loopback because that
+    // is where this process listens. Only an operator-supplied value is also
+    // a public origin, so only that one is forwarded as the network identity
+    // `memwal_health` may report; loopback names no network, and reporting it
+    // as one is how a client bound to the wrong relayer looks healthy.
+    let operator_relayer_url = std::env::var("MEMWAL_RELAYER_URL").ok();
+    let mcp_relayer_url = operator_relayer_url
+        .clone()
+        .unwrap_or_else(|| format!("http://127.0.0.1:{}", config.port));
+    let mut sidecar_command = tokio::process::Command::new("npx");
+    sidecar_command
         .args(["tsx", "sidecar-server.ts"])
         .current_dir(&scripts_dir)
         .env("MEMWAL_RELAYER_URL", mcp_relayer_url)
         .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit());
+    if let Some(public_relayer_url) = operator_relayer_url {
+        sidecar_command.env("MEMWAL_PUBLIC_RELAYER_URL", public_relayer_url);
+    }
+    let mut sidecar_child = sidecar_command
         .spawn()
         .expect("Failed to start TS sidecar. Is Node.js installed?");
 

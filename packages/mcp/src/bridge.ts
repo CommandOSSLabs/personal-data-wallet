@@ -66,6 +66,38 @@ const NAMESPACE_TOOLS = new Set([
  *   - the caller already supplied a non-empty `namespace` — an explicit
  *     per-call namespace always wins over the configured default.
  */
+/**
+ * Name the relayer this process dialled in a `memwal_health` result.
+ *
+ * The relayer-side text can only report an origin its deployment published, and
+ * stays silent on a self-hosted or local one, where the sidecar knows nothing
+ * but the loopback address it dials. This side always knows the URL it
+ * connected to — it is exactly what `--prod` / `--relayer` / `MEMWAL_SERVER_URL`
+ * selected — so a client bound to the wrong network sees that here instead of
+ * by noticing its memories are missing.
+ *
+ * Rewrites an existing `relayer=` field rather than appending a second one: when
+ * both sides know the origin they describe the same session, and two
+ * conflicting fields would be worse than neither.
+ */
+export function annotateHealthResult(
+    result: { content?: unknown; isError?: unknown },
+    relayerUrl: string,
+): void {
+    // A failed health call has no session to describe; naming a relayer beside
+    // an error reads as though that relayer answered.
+    if (result.isError) return;
+    if (!Array.isArray(result.content)) return;
+    const block = (result.content as { type?: string; text?: string }[]).find(
+        (c) => c?.type === "text" && typeof c.text === "string",
+    );
+    if (!block || typeof block.text !== "string") return;
+    const existing = /\brelayer=\S+/;
+    block.text = existing.test(block.text)
+        ? block.text.replace(existing, `relayer=${relayerUrl}`)
+        : `${block.text} relayer=${relayerUrl}`;
+}
+
 export function applyDefaultNamespace(msg: RpcMessage, namespace?: string): RpcMessage {
     if (!namespace) return msg;
     if (msg.method !== "tools/call") return msg;
@@ -915,6 +947,12 @@ export async function runBridge(
      * client surfaces them in its tool palette. */
     const pendingListIds = new Set<string | number>();
 
+    /** IDs of forwarded `memwal_health` calls, each against the relayer URL the
+     * call went out on. Captured at send time rather than read at reply time so
+     * a reconnect that swapped credentials mid-flight cannot label the answer
+     * with a relayer it did not come from. */
+    const pendingHealthIds = new Map<string | number, string>();
+
     /** Reopen the SSE stream and replay outstanding `inFlight` requests against
      * the fresh session. All callers await the SAME reconnect via
      * `reconnectPromise` — returning immediately while one is active would let
@@ -1119,6 +1157,7 @@ export async function runBridge(
             const purge = (msg: RpcMessage): void => {
                 if (msg.id == null) return; // notification — nothing to reply to
                 pendingListIds.delete(msg.id);
+                pendingHealthIds.delete(msg.id);
                 if (msg.method === "initialize") {
                     return;
                 }
@@ -1324,6 +1363,23 @@ export async function runBridge(
                             result.tools = [...upstream, ...LOCAL_TOOL_DEFINITIONS];
                         }
                     }
+                    if (
+                        value &&
+                        value.id !== undefined &&
+                        value.id !== null &&
+                        pendingHealthIds.has(value.id) &&
+                        value.result &&
+                        typeof value.result === "object"
+                    ) {
+                        const dialled = pendingHealthIds.get(value.id);
+                        pendingHealthIds.delete(value.id);
+                        if (dialled !== undefined) {
+                            annotateHealthResult(
+                                value.result as { content?: unknown; isError?: unknown },
+                                dialled,
+                            );
+                        }
+                    }
                     writeStdoutMessage(value);
                 }
             } catch (err) {
@@ -1472,6 +1528,16 @@ export async function runBridge(
                 // our local tools into the upstream response.
                 if (msg.method === "tools/list" && msg.id != null) {
                     pendingListIds.add(msg.id);
+                }
+
+                // Same idea for `memwal_health`: record the relayer this
+                // session is bound to so the pump can name it on the reply.
+                if (
+                    msg.method === "tools/call" &&
+                    msg.id != null &&
+                    (msg.params as { name?: string } | undefined)?.name === "memwal_health"
+                ) {
+                    pendingHealthIds.set(msg.id, creds?.relayerUrl ?? config.relayerUrl);
                 }
 
                 // Track requests (have both method and id) so we can replay
