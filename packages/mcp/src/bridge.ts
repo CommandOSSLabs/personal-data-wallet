@@ -15,7 +15,7 @@
  * Re-auth requires an explicit `memwal-mcp login` from the user.
  */
 import type { MemWalCredentials } from "./auth.js";
-import { clearCreds, credsPath } from "./auth.js";
+import { clearCreds, credsPath, loadCreds } from "./auth.js";
 import { TOOL_DEFINITIONS } from "./auth-required.js";
 import {
     clientInfoHeaders,
@@ -26,6 +26,12 @@ import { ensureCompatibleRelayer, resolveConnectTimeoutMs } from "./compatibilit
 import { PROACTIVE_INSTRUCTIONS } from "./instructions.js";
 import { startOrReuseLoginFlow, resolveLoginTimeoutMs } from "./login.js";
 import { log, note } from "./logger.js";
+import {
+    loginPrompt,
+    loginSuccessNotice,
+    loginSuccessNotification,
+    type LoginSuccessInfo,
+} from "./messages.js";
 import { MEMWAL_MCP_VERSION } from "./version.js";
 
 /** Bridge mode runtime config — the URLs / label resolved at boot from
@@ -599,6 +605,14 @@ function readStdinLines(onLine: (line: string) => void): Promise<void> {
         });
         process.stdin.on("end", () => resolve());
         process.stdin.on("close", () => resolve());
+        // Attaching a `data` listener only starts the flow on a stream that was
+        // never explicitly paused. The auth-required stub hands off by calling
+        // `process.stdin.pause()`, and a stream paused that way stays paused no
+        // matter how many listeners attach — so after an in-session
+        // `memwal_login` the bridge read NOTHING beyond the requests replayed
+        // from `pendingLines`, and every later call hung unanswered. Harmless
+        // on the cold path, where stdin is already flowing.
+        process.stdin.resume();
     });
 }
 
@@ -627,6 +641,22 @@ async function handleLocalLogin(
             log.info("memwal_login.bridge.success", {
                 accountId: creds.accountId,
                 delegateAddress: creds.delegateAddress,
+            });
+            // The tool call returned the URL long ago, so — exactly as on the
+            // failure path below — this notification and the banner on the next
+            // tool result are the only ways left to say the sign-in landed.
+            writeStdoutMessage({
+                jsonrpc: "2.0",
+                method: "notifications/message",
+                params: {
+                    level: "info",
+                    logger: "memwal-mcp",
+                    data: loginSuccessNotification({
+                        accountId: creds.accountId,
+                        delegateAddress: creds.delegateAddress,
+                        credentialsPath: credsPath(),
+                    }),
+                },
             });
         },
         (err) => {
@@ -663,27 +693,15 @@ async function handleLocalLogin(
 
     return {
         isError: false,
-        text: [
-            `## ⚠️ ACTION REQUIRED: User must click this URL to sign in`,
-            ``,
-            `**URL:** ${url}`,
-            ``,
-            `\`\`\``,
+        // Read from disk, never assumed from the mode. The bridge usually runs
+        // with credentials, but `memwal_logout` in this same session deletes
+        // them and login is intercepted before the signed-out guard — claiming
+        // "already signed in" there tells the user logout did not take.
+        text: loginPrompt({
             url,
-            `\`\`\``,
-            ``,
-            `[Click here to open Walrus Memory sign-in](${url})`,
-            ``,
-            `**IMPORTANT for the assistant**: do NOT summarize or omit the URL above.`,
-            `Surface it verbatim so the user can click it.`,
-            ``,
-            `Steps:`,
-            `1. Open the URL in any browser`,
-            `2. Click **Connect Sui Wallet** and approve the on-chain \`add_delegate_key\` transaction`,
-            `3. Once "Connected" appears, retry the previous request — credentials at \`~/.memwal/credentials.json\` get overwritten with the new wallet's delegate key`,
-            ``,
-            `_The login link stays valid for 5 minutes._`,
-        ].join("\n"),
+            credentialsPath: credsPath(),
+            signedIn: loadCreds() !== null,
+        }),
     };
 }
 
@@ -733,6 +751,52 @@ function handleLocalLogout(): { text: string; isError: boolean } {
             text: `❌ Logout failed: ${err instanceof Error ? err.message : String(err)}`,
         };
     }
+}
+
+/**
+ * A completed sign-in waiting to be reported to the client.
+ *
+ * Set when credentials are adopted — either mid-session via `adoptCredentials`
+ * or on the cold hand-off from the auth-required stub, which is why this is
+ * module state with a setter rather than a local inside `runBridge`: on the
+ * cold path the sign-in happens before the bridge exists.
+ *
+ * Consumed by {@link takePendingLoginSuccess}, so it can only ever be reported
+ * once.
+ */
+let pendingLoginSuccess: LoginSuccessInfo | null = null;
+
+/** Record a completed sign-in for the next tool result to carry. */
+export function notePendingLoginSuccess(info: LoginSuccessInfo): void {
+    pendingLoginSuccess = info;
+}
+
+/** Read the pending sign-in AND clear it — the read is the consumption. */
+function takePendingLoginSuccess(): LoginSuccessInfo | null {
+    const pending = pendingLoginSuccess;
+    pendingLoginSuccess = null;
+    return pending;
+}
+
+/**
+ * Prefix the sign-in banner onto a tool result, if one is pending.
+ *
+ * Only ever called for a `tools/call` reply. A `tools/list` or `ping` response
+ * would consume the banner into somewhere the user never reads it, so the
+ * caller checks which request is being answered first.
+ */
+function applyPendingLoginSuccess(value: RpcMessage): void {
+    const result = value.result as { content?: unknown } | undefined;
+    if (!result || typeof result !== "object" || !Array.isArray(result.content)) return;
+
+    const first = result.content[0] as { type?: string; text?: string } | undefined;
+    if (!first || first.type !== "text" || typeof first.text !== "string") return;
+
+    const pending = takePendingLoginSuccess();
+    if (!pending) return;
+
+    first.text = `${loginSuccessNotice(pending)}${first.text}`;
+    log.info("bridge.login_success_notice_attached", { accountId: pending.accountId });
 }
 
 /**
@@ -1213,6 +1277,15 @@ export async function runBridge(
         releaseLogoutPark?.();
         releaseLogoutPark = null;
         logoutPark = null;
+
+        // Queue the confirmation only once the session is actually live, so
+        // the banner cannot claim an authenticated connection before there is
+        // one. It rides out on the next `tools/call` result.
+        notePendingLoginSuccess({
+            accountId: creds.accountId,
+            delegateAddress: creds.delegateAddress,
+            credentialsPath: credsPath(),
+        });
     }
 
     /**
@@ -1330,6 +1403,16 @@ export async function runBridge(
                         inFlight.delete(value.id);
                         continue;
                     }
+                    // Which request this reply answers. Captured BEFORE the
+                    // `inFlight.delete` below drops the entry, so the sign-in
+                    // banner can tell a `tools/call` result from a `tools/list`
+                    // or a `ping` and avoid being consumed by a response the
+                    // user never reads.
+                    const answeredMethod =
+                        value && value.id !== undefined && value.id !== null
+                            ? inFlight.get(value.id)?.msg.method
+                            : undefined;
+
                     // Clear in-flight tracking once the response lands.
                     if (
                         value &&
@@ -1379,6 +1462,14 @@ export async function runBridge(
                                 dialled,
                             );
                         }
+                    }
+                    // Health annotation runs BEFORE the sign-in banner. Both
+                    // rewrite the same first text block, and annotateHealthResult
+                    // replaces the first `relayer=` it finds — so a banner
+                    // prefixed first would be the thing it rewrote if that text
+                    // ever names a relayer.
+                    if (answeredMethod === "tools/call") {
+                        applyPendingLoginSuccess(value);
                     }
                     writeStdoutMessage(value);
                 }
