@@ -894,6 +894,21 @@ export async function runBridge(
     /** One "we are being throttled" note per throttle episode. A sustained cap
      * would otherwise print a line per retry cycle for as long as it lasts. */
     let throttleNoticed = false;
+    /** Why the last handshake attempt failed, and when the run of failures
+     * started. Kept so a request that ages out while buffered can say what
+     * it was actually waiting on instead of a generic "unavailable" — the
+     * user-visible half of WALM-618, where the bridge retried in silence and
+     * a `remember` looked like it was just slow. Cleared on every success. */
+    let lastHandshakeError: string | null = null;
+    let handshakeFailingSince: number | null = null;
+    const noteHandshakeFailure = (reason: string): void => {
+        lastHandshakeError = reason;
+        handshakeFailingSince ??= Date.now();
+    };
+    const clearHandshakeFailure = (): void => {
+        lastHandshakeError = null;
+        handshakeFailingSince = null;
+    };
     /** Bumped when the live SSE session is aborted or replaced so queued
      * POSTs captured against a stale URL are skipped (reconnect replays). */
     let sessionEpoch = 0;
@@ -1156,6 +1171,7 @@ export async function runBridge(
                     reconnectAttempt = 0;
                     throttledUntilMs = 0;
                     throttleNoticed = false;
+                    clearHandshakeFailure();
                     log.info("bridge.reconnected", {
                         relayer: openingCreds.relayerUrl,
                         replayCount: inFlight.size,
@@ -1231,13 +1247,13 @@ export async function runBridge(
                     break;
                 }
             } catch (err) {
+                const reason = err instanceof Error ? err.message : String(err);
                 // A 429 must outlive this call: reconnect() gives up after one
                 // failure, so without recording the deadline the next caller
                 // would compute a fresh sub-second backoff and hammer the cap.
                 if (err instanceof RelayerThrottledError) noteThrottled(err);
-                log.error("bridge.reconnect_failed", {
-                    err: err instanceof Error ? err.message : String(err),
-                });
+                noteHandshakeFailure(reason);
+                log.error("bridge.reconnect_failed", { err: reason });
                 // Try again on the next stdin message rather than spinning.
             }
         })();
@@ -1883,6 +1899,61 @@ export async function runBridge(
         for (const entry of Array.from(inFlight.values())) failRequest(entry.msg, reason);
     }
 
+    /** How a request that just hit its deadline should be explained.
+     *
+     * Both cases are the same expiry, but they are not the same event and the
+     * old wording only described one of them. A request still sitting in
+     * `pendingForward` never left this process: no session ever existed to
+     * send it on. Telling the user the connection "dropped before the result
+     * came back" points them at the relayer, or at a half-written memory, when
+     * the truth is that the MCP handshake has been failing and the call never
+     * ran (WALM-618 — the bridge retried in silence, so a `remember` looked
+     * like it was merely slow for minutes).
+     *
+     * Pure: the caller is responsible for dropping a `neverSent` message from
+     * the buffer, which it must, or a later flush would run the call we just
+     * said never ran. */
+    function expiredRequestReport(msg: RpcMessage): {
+        neverSent: boolean;
+        reason: string;
+        opts: { toolText: string; errorMessage: string };
+    } {
+        if (!pendingForward.includes(msg)) {
+            return {
+                neverSent: false,
+                reason: "no response",
+                opts: {
+                    toolText:
+                        "❌ Walrus Memory did not answer this call. The connection to " +
+                        "the relayer dropped before the result came back. Please retry.",
+                    errorMessage:
+                        "Walrus Memory call was orphaned by a reconnect and never " +
+                        "received a response. Please retry.",
+                },
+            };
+        }
+
+        const stalledForMs = handshakeFailingSince ? Date.now() - handshakeFailingSince : null;
+        const waited = stalledForMs
+            ? `for ${Math.round(stalledForMs / 1000)}s`
+            : `for over ${Math.round(callTimeoutMs / 1000)}s`;
+        const detail = lastHandshakeError ? ` Last handshake error: ${lastHandshakeError}` : "";
+        return {
+            neverSent: true,
+            reason: "never reached the relayer",
+            opts: {
+                toolText:
+                    `❌ Walrus Memory could not reach the relayer — the MCP connection has ` +
+                    `been failing ${waited}, so this call never ran and nothing was stored.` +
+                    `${detail} Check the relayer, or run \`memwal-mcp login\` if the delegate ` +
+                    `key was revoked, then retry.`,
+                errorMessage:
+                    `Walrus Memory call never reached the relayer: the MCP connection has ` +
+                    `been failing ${waited}.${detail}`,
+            },
+        };
+    }
+
     /** Close out requests whose deadline has passed. Without this a reply lost
      * on a still-healthy stream leaves its request tracked forever. */
     // Same shape as the SSE watchdog's check interval, but capped.
@@ -1895,19 +1966,27 @@ export async function runBridge(
         for (const [id, entry] of Array.from(inFlight.entries())) {
             const elapsedMs = now - entry.startedAt;
             if (elapsedMs <= callTimeoutMs) continue;
+            const { neverSent, reason, opts } = expiredRequestReport(entry.msg);
+            // Drop it from the buffer before answering: a later successful
+            // connect would otherwise flush and actually run the call we are
+            // about to report as never having run.
+            //
+            // `initialize` is the exception, as everywhere else here: it was
+            // answered locally and is only buffered so the relayer session can
+            // still negotiate capabilities, and `failRequest` writes it no
+            // reply. Removing it would silently cost that negotiation on the
+            // first connect after a long outage.
+            if (neverSent && entry.msg.method !== "initialize") {
+                pendingForward.splice(pendingForward.indexOf(entry.msg), 1);
+            }
             log.warn("bridge.call_orphaned", {
                 id,
                 method: entry.msg.method ?? null,
                 elapsedMs,
+                reason,
+                lastHandshakeError,
             });
-            failRequest(entry.msg, "no response", {
-                toolText:
-                    "❌ Walrus Memory did not answer this call. The connection to " +
-                    "the relayer dropped before the result came back. Please retry.",
-                errorMessage:
-                    "Walrus Memory call was orphaned by a reconnect and never " +
-                    "received a response. Please retry.",
-            });
+            failRequest(entry.msg, reason, opts);
         }
     }, sweepIntervalMs);
     // unref so the sweeper never holds the event loop open during shutdown.
@@ -1969,6 +2048,7 @@ export async function runBridge(
                 firstConnectDone = true;
                 throttledUntilMs = 0;
                 throttleNoticed = false;
+                clearHandshakeFailure();
                 note(`Connected. Bridging stdio MCP ↔ ${creds.relayerUrl}`);
                 log.info("bridge.connected", { relayer: creds.relayerUrl });
                 signalFirstConnect();
@@ -1976,6 +2056,7 @@ export async function runBridge(
                 return;
             } catch (err) {
                 const reason = err instanceof Error ? err.message : String(err);
+                noteHandshakeFailure(reason);
                 attempt += 1;
                 if (err instanceof RelayerThrottledError) noteThrottled(err);
                 log.error("bridge.initial_connect_failed", { err: reason, attempt });
