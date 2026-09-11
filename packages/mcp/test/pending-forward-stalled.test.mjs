@@ -40,10 +40,16 @@ const BIN = resolve(__dirname, "../dist/bin/memwal-mcp.js");
 const EXPECTED_BEARER = "a".repeat(64);
 const EXPECTED_ACCOUNT_ID = "0x" + "3".repeat(64);
 
-/** The deadline under test. Short enough to run, long enough that several
- * connect-retry cycles fit inside it — otherwise "not eager-failed between
- * retries" would pass for the wrong reason. */
-const CALL_TIMEOUT_MS = 3_000;
+/** The deadline under test: the short one that applies only to a call which
+ * never left the bridge while no connection has existed. Short enough to run,
+ * long enough that several connect-retry cycles fit inside it — otherwise
+ * "not eager-failed between retries" would pass for the wrong reason. */
+const STALLED_HANDSHAKE_MS = 3_000;
+
+/** Deliberately far larger, so an answer arriving near STALLED_HANDSHAKE_MS
+ * proves the stalled-handshake deadline fired and not the ordinary call
+ * timeout, which is what used to leave the user waiting ~4 minutes. */
+const CALL_TIMEOUT_MS = 60_000;
 const CONNECT_TIMEOUT_MS = 400;
 
 function hasBridgeAuth(req) {
@@ -179,6 +185,7 @@ test("a call buffered behind a failing handshake is answered, and says why", asy
             USERPROFILE: home,
             MEMWAL_MCP_CONNECT_TIMEOUT_MS: String(CONNECT_TIMEOUT_MS),
             MEMWAL_MCP_CALL_TIMEOUT_MS: String(CALL_TIMEOUT_MS),
+            MEMWAL_MCP_STALLED_HANDSHAKE_MS: String(STALLED_HANDSHAKE_MS),
         },
         stdio: ["pipe", "pipe", "pipe"],
     });
@@ -252,7 +259,7 @@ test("a call buffered behind a failing handshake is answered, and says why", asy
     // Half the deadline in, several connect attempts have already failed and
     // the call must still be waiting — the fix adds a deadline, it does not
     // eager-fail a call the next attempt might serve.
-    await new Promise((r) => setTimeout(r, CALL_TIMEOUT_MS / 2));
+    await new Promise((r) => setTimeout(r, STALLED_HANDSHAKE_MS / 2));
     assert.ok(
         mock.getSseGetCount() >= 2,
         `expected the handshake to have been retried by now, saw ${mock.getSseGetCount()} attempts`,
@@ -266,8 +273,13 @@ test("a call buffered behind a failing handshake is answered, and says why", asy
     const reply = await waitFor((m) => m.id === 2, 15_000);
     const waitedMs = Date.now() - sentAt;
     assert.ok(
-        waitedMs >= CALL_TIMEOUT_MS,
+        waitedMs >= STALLED_HANDSHAKE_MS,
         `must not be answered before its deadline; waited only ${waitedMs}ms`,
+    );
+    assert.ok(
+        waitedMs < CALL_TIMEOUT_MS,
+        `must be answered on the stalled-handshake deadline, not the ordinary ${CALL_TIMEOUT_MS}ms ` +
+            `call timeout — that long wait with no feedback is the reported bug; waited ${waitedMs}ms`,
     );
 
     assert.equal(
