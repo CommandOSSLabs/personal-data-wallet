@@ -23,13 +23,18 @@ export function registerHealthTool(
         },
         wrapTool<Record<string, never>>(session, "memwal_health", async () => {
             const result = await session.memwal.health();
-            const extra = result as { write_ready?: boolean };
-            const writeNote =
+            const extra = result as {
+                write_ready?: boolean;
+                writes?: string;
+            };
+            const readyNote =
                 extra.write_ready === false
-                    ? " write_ready=false (relayer is up; encryption sidecar did not answer health)"
+                    ? " write_ready=false (writes unavailable)"
                     : extra.write_ready === true
                       ? " write_ready=true"
                       : "";
+            const pausedNote = extra.writes === "paused" ? " writes=paused" : "";
+            const writeNote = `${readyNote}${pausedNote}`;
             return {
                 content: [
                     {
