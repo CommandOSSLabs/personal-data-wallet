@@ -171,8 +171,7 @@ def _polling_delay_ms(base_ms: int, attempt: int) -> int:
     """Jittered poll delay matching TS ``pollingDelayMs``.
 
     ``base_ms <= 0`` means no wait (``poll_interval_ms: 0``). Attempt 0 is
-    immediate so the first GET is not delayed. Later polls cap at 1500ms
-    with ±25% jitter.
+    immediate so the first GET is not delayed.
     """
 
     if base_ms <= 0:
