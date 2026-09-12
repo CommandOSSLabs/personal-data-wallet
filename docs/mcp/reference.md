@@ -199,6 +199,73 @@ The stdio package accepts CLI flags and environment variables. **CLI takes prece
 
 Set `MEMWAL_MCP_DEBUG=1` to enable verbose stderr logging.
 
+### Call timeouts and retries
+
+The bridge forwards each tool call to the relayer and waits for the reply on a
+separate stream. These environment variables bound that wait. They have no CLI
+flag, and the defaults suit normal use.
+
+| **Environment variable** | **Default** | **Description** |
+| --- | --- | --- |
+| `MEMWAL_MCP_CALL_TIMEOUT_MS` | `240000` | How long one forwarded call may go unanswered before the bridge stops waiting for it. The default covers the slowest server-side tool (`memwal_analyze`) plus overhead, so expiry means the reply was lost rather than merely late. |
+| `MEMWAL_MCP_CALL_RETRIES` | `2` | How many times a timed-out **read** is replayed on a fresh session before the bridge gives up. Set `0` to disable retrying. |
+
+Only reads are replayed: `memwal_recall` and `memwal_health`, the tools marked
+`readOnlyHint: true`. A call times out only after the relayer already accepted
+the POST, so the work may have run; replaying a write could apply it twice.
+Writes still get the error below, they just never get a silent retry.
+
+<Note>
+Retries reuse the bridge's existing reconnect path, which reopens the session
+with exponential backoff and replays outstanding requests. There is no separate
+backoff to configure.
+</Note>
+
+When the retries run out, the bridge answers the call itself instead of leaving
+the host to hit its own tool-call timeout with no explanation. The reply is a
+tool result with `isError: true` whose text names the failure, plus a
+`structuredContent` object for agents that read it:
+
+```json
+{
+  "code": "MEMWAL_CALL_TIMEOUT",
+  "class": "relayer_overload",
+  "tool": "memwal_recall",
+  "attempts": 3,
+  "elapsedMs": 720000,
+  "timeoutMs": 240000,
+  "retryable": true,
+  "nextStep": "The relayer accepted this call but never returned a result. Wait a few seconds and retry the same call."
+}
+```
+
+`class` says what went wrong:
+
+| **Class** | **Meaning** |
+| --- | --- |
+| `relayer_overload` | The stream is healthy and the relayer accepted the call, but no result came back. It also covers an explicit `429` or `503`. |
+| `transient_network` | The connection dropped before a result arrived. Retrying, or reaching Walrus Memory another way such as the SDK, may work. |
+| `bridge_misconfigured` | The relayer rejected the credentials, answered with something that is not an event stream, or is too old for this client. Retrying will not help; check the relayer URL and run `memwal-mcp login`. |
+
+`retryable` is the field to branch on, and it is not decided by `class` alone.
+A call times out only after the relayer accepted its POST, so a write with
+`attempts` above `0` may already have been applied even though no result came
+back. Repeating it would store the memory a second time, so such a call is
+reported as `retryable: false` whatever its class, and `nextStep` asks you to
+check with `memwal_recall` before re-sending. Reads (`memwal_recall`,
+`memwal_health`) and any call with `attempts: 0` carry the plain retry advice
+for their class, because repeating those cannot duplicate anything.
+
+`attempts` counts the calls the bridge actually sent to the relayer, not the
+retries it was configured for. A retry whose reconnect never finished is not
+counted, so this can be lower than `MEMWAL_MCP_CALL_RETRIES + 1`, and `0` means
+the call never left the bridge at all. The same payload also answers a call
+that fails at the transport before any reply is possible, with `elapsedMs: 0`;
+that case reports `attempts: 1`, because a socket torn down after the relayer
+read the request body is indistinguishable from one that never left.
+
+Non-tool requests get the same payload as JSON-RPC `error.data` instead.
+
 ## Default namespace
 
 Set a default memory namespace once in your client config instead of having the agent pass `namespace` on every call. The package injects it into `memwal_remember`, `memwal_remember_bulk`, `memwal_recall`, `memwal_analyze`, and `memwal_restore` calls that don't already carry one.
