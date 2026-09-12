@@ -115,6 +115,29 @@ static ERRORS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
     .expect("register memwal_errors_total")
 });
 
+static MCP_HANDSHAKE_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    prometheus::register_int_counter_vec!(
+        "memwal_mcp_handshake_total",
+        "MCP handshake attempts by outcome and, when refused, why.",
+        &["outcome", "reason"]
+    )
+    .expect("register memwal_mcp_handshake_total")
+});
+
+static MCP_TIME_TO_SESSION_SECONDS: LazyLock<Histogram> = LazyLock::new(|| {
+    prometheus::register_histogram!(HistogramOpts::new(
+        "memwal_mcp_time_to_session_seconds",
+        "Wall-clock from a client's first handshake attempt to the one that \
+         succeeded, keyed by its connect-episode id. This is the number a user \
+         experiences as \"nothing is happening\": no single request is slow, so \
+         the per-request latency histogram cannot show it."
+    )
+    .buckets(vec![
+        0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0
+    ]))
+    .expect("register memwal_mcp_time_to_session_seconds")
+});
+
 static RATE_LIMIT_DENIALS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
     prometheus::register_int_counter_vec!(
         "memwal_rate_limit_denials_total",
@@ -586,6 +609,47 @@ impl Injector for HeaderInjector<'_> {
 pub fn record_app_error(kind: &'static str) {
     let route = current_route();
     ERRORS_TOTAL.with_label_values(&[kind, &route]).inc();
+}
+
+/// Count one MCP handshake. `reason` is `"none"` on success — Prometheus
+/// label sets must be uniform, and an empty string reads as missing data.
+// ── MCP connect episodes ────────────────────────────────────────────
+//
+// State for `time_to_session`. Lives here rather than in `mcp_proxy`
+// because `AppState` is in the library crate and `mcp_proxy` is not.
+
+/// Longest an unfinished connect episode is remembered. A client that gives
+/// up, or is killed, leaves an entry behind; past this it is swept. Also the
+/// ceiling on any single `time_to_session` observation.
+pub const MCP_CONNECT_EPISODE_TTL: std::time::Duration = std::time::Duration::from_secs(900);
+
+/// Hard ceiling on tracked episodes, for the same reason the rejection cache
+/// has one: the key comes from the caller. At the cap new episodes are simply
+/// not timed — the metric loses samples, nothing else degrades.
+pub const MCP_CONNECT_EPISODE_MAX: usize = 4_096;
+
+pub type McpConnectEpisodes =
+    std::sync::Arc<tokio::sync::RwLock<HashMap<String, std::time::Instant>>>;
+
+pub fn new_mcp_connect_episodes() -> McpConnectEpisodes {
+    std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new()))
+}
+
+pub fn connect_episode_is_fresh(started: std::time::Instant) -> bool {
+    started.elapsed() < MCP_CONNECT_EPISODE_TTL
+}
+
+
+pub fn record_mcp_handshake(outcome: &str, reason: &str) {
+    MCP_HANDSHAKE_TOTAL
+        .with_label_values(&[outcome, reason])
+        .inc();
+}
+
+/// Record how long a client spent getting a session. Only called on the
+/// attempt that succeeded, so the histogram counts episodes, not requests.
+pub fn record_mcp_time_to_session(elapsed: std::time::Duration) {
+    MCP_TIME_TO_SESSION_SECONDS.observe(elapsed.as_secs_f64());
 }
 
 pub fn record_rate_limit_denial(bucket: &str) {

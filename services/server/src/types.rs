@@ -219,6 +219,8 @@ pub struct AppState {
     /// (WALM-618).
     pub delegate_verify_cache: crate::storage::sui::DelegateVerifyCache,
     pub delegate_reject_cache: crate::storage::sui::DelegateRejectCache,
+    /// In-flight MCP connect episodes, for `time_to_session`.
+    pub mcp_connect_episodes: crate::observability::McpConnectEpisodes,
     /// Alert dispatchers for operational notifications. Individual alert
     /// paths decide when failures are terminal enough to notify.
     pub alerts: Arc<AlertManager>,

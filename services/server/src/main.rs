@@ -1169,6 +1169,7 @@ async fn main() {
         delegate_keys_cache: crate::storage::sui::new_delegate_keys_cache(),
         delegate_verify_cache: crate::storage::sui::new_delegate_verify_cache(),
         delegate_reject_cache: crate::storage::sui::new_delegate_reject_cache(),
+        mcp_connect_episodes: crate::observability::new_mcp_connect_episodes(),
         key_pool,
         alerts,
         engine,
@@ -1482,6 +1483,25 @@ async fn main() {
             if evicted > 0 {
                 tracing::debug!(
                     "delegate_reject_cache sweep: evicted {} expired entries ({} remaining)",
+                    evicted,
+                    before - evicted
+                );
+            }
+
+            // Connect episodes whose client gave up (or was killed) never see
+            // the success that would remove them. Sweeping is what keeps an
+            // abandoned episode from holding a slot against the cap.
+            let mut episodes = delegate_cache_sweep_state
+                .mcp_connect_episodes
+                .write()
+                .await;
+            let before = episodes.len();
+            episodes.retain(|_, started| observability::connect_episode_is_fresh(*started));
+            let evicted = before - episodes.len();
+            drop(episodes);
+            if evicted > 0 {
+                tracing::debug!(
+                    "mcp_connect_episodes sweep: evicted {} abandoned episodes ({} remaining)",
                     evicted,
                     before - evicted
                 );

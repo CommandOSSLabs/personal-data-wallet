@@ -22,6 +22,7 @@ import {
     lastClientInfoHeaders,
     rememberInitializeClientInfo,
 } from "./client-info.js";
+import { randomUUID } from "node:crypto";
 import { ensureCompatibleRelayer, resolveConnectTimeoutMs } from "./compatibility.js";
 import { PROACTIVE_INSTRUCTIONS } from "./instructions.js";
 import { startOrReuseLoginFlow, resolveLoginTimeoutMs } from "./login.js";
@@ -930,6 +931,32 @@ export async function runBridge(
      * a `remember` looked like it was just slow. Cleared on every success. */
     let lastHandshakeError: string | null = null;
     let handshakeFailingSince: number | null = null;
+    /** Identifies one "I need a session" episode, and stays the same across
+     * every retry inside it. Sent on each handshake as `x-memwal-connect-id`.
+     *
+     * Without it the relayer sees N unrelated sub-second requests and cannot
+     * tell they were one user waiting: its per-request id is minted fresh each
+     * time, so a four-minute wait leaves no four-minute anything in its logs,
+     * only a scatter of fast 401s and 429s. With it, one grep returns the
+     * whole episode and the span between first and last line IS the wait.
+     * Cleared on success, so the next outage starts a new episode. */
+    let connectEpisodeId: string | null = null;
+    const connectHeaders = (): Record<string, string> => {
+        connectEpisodeId ??= randomUUID();
+        return {
+            // `x-memwal-client` is only known after `initialize`, and a first
+            // connect happens before stdin is even wired — so on the attempt
+            // that matters most the relayer has no idea who is calling. The
+            // bridge's own version it always knows, and "which build is
+            // looping" is the actionable half anyway.
+            "x-memwal-bridge-version": MEMWAL_MCP_VERSION,
+            ...extraHeaders,
+            "x-memwal-connect-id": connectEpisodeId,
+        };
+    };
+    const endConnectEpisode = (): void => {
+        connectEpisodeId = null;
+    };
     const noteHandshakeFailure = (reason: string): void => {
         lastHandshakeError = reason;
         handshakeFailingSince ??= Date.now();
@@ -1169,7 +1196,7 @@ export async function runBridge(
                     const candidate = await openSseStream(
                         openingCreds.relayerUrl,
                         openingCreds,
-                        extraHeaders,
+                        connectHeaders(),
                     );
 
                     // Logout can also land mid-handshake. Same reasoning as the
@@ -1202,6 +1229,7 @@ export async function runBridge(
                     throttledUntilMs = 0;
                     throttleNoticed = false;
                     clearHandshakeFailure();
+                    endConnectEpisode();
                     log.info("bridge.reconnected", {
                         relayer: openingCreds.relayerUrl,
                         replayCount: inFlight.size,
@@ -2099,7 +2127,7 @@ export async function runBridge(
             }
             const openingGeneration = credentialGeneration;
             try {
-                const candidate = await openSseStream(creds.relayerUrl, creds, extraHeaders);
+                const candidate = await openSseStream(creds.relayerUrl, creds, connectHeaders());
                 if (stdinClosed) {
                     candidate.abort();
                     break;
@@ -2122,6 +2150,7 @@ export async function runBridge(
                 throttledUntilMs = 0;
                 throttleNoticed = false;
                 clearHandshakeFailure();
+                endConnectEpisode();
                 note(`Connected. Bridging stdio MCP ↔ ${creds.relayerUrl}`);
                 log.info("bridge.connected", { relayer: creds.relayerUrl });
                 signalFirstConnect();
