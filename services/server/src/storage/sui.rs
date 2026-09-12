@@ -325,6 +325,54 @@ impl TimedVerifiedOwner {
 /// `expected_type_origin_package_id` is deliberately not part of the key:
 /// it comes from `Config::package_id`, which is fixed for the life of the
 /// process, so it cannot vary between a cache write and a later hit.
+/// Borrowed view of an `(account_object_id, public_key_bytes)` key.
+///
+/// `HashMap<(String, Vec<u8>), _>` cannot be probed with `(&str, &[u8])`, and
+/// this lookup now runs on every signed request *and* every MCP envelope, so
+/// both caches below are keyed through this trait object rather than
+/// allocating a `String` and a `Vec` per hit. `(String, Vec<u8>)` and
+/// `(&str, &[u8])` hash identically — tuples hash element-wise, `String`
+/// hashes as its `str`, and `Vec<u8>` as its `[u8]` — so the borrowed probe
+/// finds the owned key. Same shape as `DelegatePairKey` in #882; this is the
+/// two-map version, since the verify cache and the rejection cache share a
+/// key. `Send + Sync` because the probe is held across an `.await`, and a
+/// non-`Sync` referent there would make the surrounding futures non-`Send`.
+pub trait DelegateAccountKey: Send + Sync {
+    fn parts(&self) -> (&str, &[u8]);
+}
+
+impl DelegateAccountKey for (String, Vec<u8>) {
+    fn parts(&self) -> (&str, &[u8]) {
+        (self.0.as_str(), self.1.as_slice())
+    }
+}
+
+impl DelegateAccountKey for (&str, &[u8]) {
+    fn parts(&self) -> (&str, &[u8]) {
+        (self.0, self.1)
+    }
+}
+
+impl std::hash::Hash for dyn DelegateAccountKey + '_ {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.parts().hash(state);
+    }
+}
+
+impl PartialEq for dyn DelegateAccountKey + '_ {
+    fn eq(&self, other: &Self) -> bool {
+        self.parts() == other.parts()
+    }
+}
+
+impl Eq for dyn DelegateAccountKey + '_ {}
+
+impl<'a> std::borrow::Borrow<dyn DelegateAccountKey + 'a> for (String, Vec<u8>) {
+    fn borrow(&self) -> &(dyn DelegateAccountKey + 'a) {
+        self
+    }
+}
+
 pub struct DelegateVerifyCacheState {
     pub entries:
         tokio::sync::RwLock<std::collections::HashMap<(String, Vec<u8>), TimedVerifiedOwner>>,
@@ -423,9 +471,17 @@ pub async fn verify_delegate_key_cached(
     public_key_bytes: &[u8],
     expected_type_origin_package_id: &str,
 ) -> Result<String, OnchainVerifyError> {
-    let key = (account_object_id.to_string(), public_key_bytes.to_vec());
+    // Borrowed probe: a hit — the common case on both hot paths — allocates
+    // nothing. The owned key is built only where the map is actually written.
+    let probe: &dyn DelegateAccountKey = &(account_object_id, public_key_bytes);
 
-    if let Some(cached) = cache.entries.read().await.get(&key).filter(|c| c.is_fresh()) {
+    if let Some(cached) = cache
+        .entries
+        .read()
+        .await
+        .get(probe)
+        .filter(|c| c.is_fresh())
+    {
         return Ok(cached.owner.clone());
     }
 
@@ -441,7 +497,7 @@ pub async fn verify_delegate_key_cached(
     if reject_cache
         .read()
         .await
-        .get(&key)
+        .get(probe)
         .copied()
         .is_some_and(reject_entry_is_fresh)
     {
@@ -461,7 +517,8 @@ pub async fn verify_delegate_key_cached(
     .await
     {
         Ok(owner) => {
-            reject_cache.write().await.remove(&key);
+            let key = (account_object_id.to_string(), public_key_bytes.to_vec());
+            reject_cache.write().await.remove(probe);
             let mut entries = cache.entries.write().await;
             if may_store_verification(
                 generation_before,
@@ -483,7 +540,7 @@ pub async fn verify_delegate_key_cached(
         }
         Err(err) => {
             if verify_cache_miss_action(&err) == VerifyCacheMissAction::Evict {
-                cache.entries.write().await.remove(&key);
+                cache.entries.write().await.remove(probe);
                 cache
                     .evictions
                     .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
@@ -492,9 +549,12 @@ pub async fn verify_delegate_key_cached(
                 // At the cap we simply do not record it — the next attempt
                 // reads the chain exactly as it does today.
                 let mut rejects = reject_cache.write().await;
-                let present = rejects.contains_key(&key);
+                let present = rejects.contains_key(probe);
                 if should_record_rejection(rejects.len(), present) {
-                    rejects.insert(key, std::time::Instant::now());
+                    rejects.insert(
+                        (account_object_id.to_string(), public_key_bytes.to_vec()),
+                        std::time::Instant::now(),
+                    );
                 }
                 return Err(err);
             }
@@ -506,7 +566,7 @@ pub async fn verify_delegate_key_cached(
                 .entries
                 .read()
                 .await
-                .get(&key)
+                .get(probe)
                 .filter(|c| c.is_servable_while_unavailable())
                 .map(|c| (c.owner.clone(), c.verified_at.elapsed()));
             match stale {
@@ -2090,6 +2150,36 @@ mod tests {
             result.is_err(),
             "past TTL + grace the entry must not be served, outage or not"
         );
+    }
+
+    #[test]
+    fn a_borrowed_probe_finds_the_key_an_owned_insert_wrote() {
+        // If `(String, Vec<u8>)` and `(&str, &[u8])` ever hashed differently,
+        // every lookup would miss silently: no error, no panic, just a cache
+        // that never hits and a `GetObject` per request — the exact thing this
+        // PR exists to remove. Worth an explicit assertion rather than trust.
+        use std::collections::HashMap;
+
+        let mut map: HashMap<(String, Vec<u8>), &str> = HashMap::new();
+        map.insert(("0xaccount".to_string(), vec![7u8; 32]), "owner");
+
+        let probe: &dyn DelegateAccountKey = &("0xaccount", &[7u8; 32][..]);
+        assert_eq!(map.get(probe).copied(), Some("owner"));
+
+        let wrong_account: &dyn DelegateAccountKey = &("0xother", &[7u8; 32][..]);
+        assert_eq!(map.get(wrong_account), None);
+
+        let wrong_key: &dyn DelegateAccountKey = &("0xaccount", &[9u8; 32][..]);
+        assert_eq!(
+            map.get(wrong_key),
+            None,
+            "a different delegate key on the same account must not collide"
+        );
+
+        // Removal through the borrowed probe has to reach the owned entry too,
+        // or a revoke would be observed and then quietly not applied.
+        assert_eq!(map.remove(probe), Some("owner"));
+        assert!(map.is_empty());
     }
 
     #[test]
