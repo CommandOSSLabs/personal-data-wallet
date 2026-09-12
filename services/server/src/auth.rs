@@ -448,6 +448,7 @@ async fn resolve_account(
         match cache_reverify_action(
             verify_delegate_key_cached(
                 &state.delegate_verify_cache,
+                &state.delegate_reject_cache,
                 &state.http_client,
                 &state.config.sui_rpc_url,
                 state.sui_grpc_client.as_ref(),
@@ -497,6 +498,7 @@ async fn resolve_account(
     {
         match verify_delegate_key_cached(
             &state.delegate_verify_cache,
+            &state.delegate_reject_cache,
             &state.http_client,
             &state.config.sui_rpc_url,
             state.sui_grpc_client.as_ref(),

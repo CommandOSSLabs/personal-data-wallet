@@ -218,6 +218,7 @@ pub struct AppState {
     /// the same credentials costs one `GetObject` instead of one each
     /// (WALM-618).
     pub delegate_verify_cache: crate::storage::sui::DelegateVerifyCache,
+    pub delegate_reject_cache: crate::storage::sui::DelegateRejectCache,
     /// Alert dispatchers for operational notifications. Individual alert
     /// paths decide when failures are terminal enough to notify.
     pub alerts: Arc<AlertManager>,

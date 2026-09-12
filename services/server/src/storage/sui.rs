@@ -345,6 +345,63 @@ pub fn new_delegate_verify_cache() -> DelegateVerifyCache {
     std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()))
 }
 
+// ── Rejections ──────────────────────────────────────────────────────────
+//
+// Caching successes alone leaves the larger half of the traffic uncached.
+// On production `/api/mcp/sse` answers 784,627 × 401 against 50,958 × 200,
+// and `GetObject` volume (1,147,414) tracks total requests (1,119,744)
+// almost 1:1 — so roughly 70% of the load the public fullnode is throttling
+// comes from requests that were always going to be refused.
+//
+// They are not 784,627 people. A bridge holding a key the relayer will never
+// accept treats the 401 as a transient connect failure and retries on a
+// backoff capped at 15s, forever. The client-side fix for that loop is
+// separate (#894); this is the half that works no matter what version a
+// caller is running, including the ones already installed.
+
+/// How long a definitive rejection is remembered.
+///
+/// Deliberately much shorter than the positive TTL, because the cost of
+/// being wrong is asymmetric: a stale positive authenticates a revoked key,
+/// while a stale negative only delays a key that just became valid.
+///
+/// It does not delay an ordinary `memwal_login`: that registers a freshly
+/// generated delegate key, so the `(account, pk)` pair has never been
+/// rejected and has no entry. What it can delay by up to this long is the
+/// narrower case of retrying a key that was tried *before* its registration
+/// landed — the interrupted-login path.
+pub const DELEGATE_REJECT_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Hard ceiling on remembered rejections.
+///
+/// Unlike the positive cache, this one is keyed by what *callers send*, not
+/// by what exists on chain, so it would otherwise grow one entry per made-up
+/// `(account, key)` pair anyone cares to try. At the cap we stop inserting
+/// and fall back to the live read — degrading to today's behaviour rather
+/// than trading a throttle for unbounded memory.
+pub const DELEGATE_REJECT_CACHE_MAX_ENTRIES: usize = 4_096;
+
+pub type DelegateRejectCache = std::sync::Arc<
+    tokio::sync::RwLock<std::collections::HashMap<(String, Vec<u8>), std::time::Instant>>,
+>;
+
+pub fn new_delegate_reject_cache() -> DelegateRejectCache {
+    std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()))
+}
+
+/// Whether a rejection recorded at `rejected_at` may still be reused.
+pub fn reject_entry_is_fresh(rejected_at: std::time::Instant) -> bool {
+    rejected_at.elapsed() < DELEGATE_REJECT_CACHE_TTL
+}
+
+/// Whether a fresh rejection may be recorded, given the map's current size
+/// and whether this pair is already present. Pure so the cap is testable
+/// without a chain: refreshing an existing entry is always allowed (it
+/// cannot grow the map), a new one only below the cap.
+pub fn should_record_rejection(current_len: usize, already_present: bool) -> bool {
+    already_present || current_len < DELEGATE_REJECT_CACHE_MAX_ENTRIES
+}
+
 /// Cached wrapper around `verify_delegate_key_onchain`.
 ///
 /// A hit within `DELEGATE_VERIFY_CACHE_TTL` returns the recorded owner
@@ -363,6 +420,7 @@ pub fn new_delegate_verify_cache() -> DelegateVerifyCache {
 /// actually behave (WALM-618).
 pub async fn verify_delegate_key_cached(
     cache: &DelegateVerifyCache,
+    reject_cache: &DelegateRejectCache,
     http_client: &reqwest::Client,
     rpc_url: &str,
     grpc_client: Option<&sui_rpc::Client>,
@@ -376,6 +434,21 @@ pub async fn verify_delegate_key_cached(
         return Ok(cached.owner.clone());
     }
 
+    // A pair we refused moments ago is refused again without a chain read.
+    // Checked after the positive lookup so a key that has since been
+    // registered and verified is never held back by an older rejection.
+    if reject_cache
+        .read()
+        .await
+        .get(&key)
+        .copied()
+        .is_some_and(reject_entry_is_fresh)
+    {
+        return Err(OnchainVerifyError::KeyNotFound(format!(
+            "delegate key not registered on account {account_object_id} (cached)"
+        )));
+    }
+
     match verify_delegate_key_onchain(
         http_client,
         rpc_url,
@@ -387,6 +460,7 @@ pub async fn verify_delegate_key_cached(
     .await
     {
         Ok(owner) => {
+            reject_cache.write().await.remove(&key);
             cache.write().await.insert(
                 key,
                 TimedVerifiedOwner {
@@ -399,6 +473,15 @@ pub async fn verify_delegate_key_cached(
         Err(err) => {
             if verify_cache_miss_action(&err) == VerifyCacheMissAction::Evict {
                 cache.write().await.remove(&key);
+                // Remember the refusal so a client looping on a key that can
+                // never be accepted stops costing one fullnode read per retry.
+                // At the cap we simply do not record it — the next attempt
+                // reads the chain exactly as it does today.
+                let mut rejects = reject_cache.write().await;
+                let present = rejects.contains_key(&key);
+                if should_record_rejection(rejects.len(), present) {
+                    rejects.insert(key, std::time::Instant::now());
+                }
                 return Err(err);
             }
             // Unavailable: the chain proved nothing about this key, so a
@@ -1840,6 +1923,7 @@ mod tests {
         let client = reqwest::Client::new();
         let result = verify_delegate_key_cached(
             &cache,
+            &new_delegate_reject_cache(),
             &client,
             unreachable_rpc_url(),
             None,
@@ -1882,6 +1966,7 @@ mod tests {
         let client = reqwest::Client::new();
         let _ = verify_delegate_key_cached(
             &cache,
+            &new_delegate_reject_cache(),
             &client,
             unreachable_rpc_url(),
             None,
@@ -1922,6 +2007,7 @@ mod tests {
         let client = reqwest::Client::new();
         let result = verify_delegate_key_cached(
             &cache,
+            &new_delegate_reject_cache(),
             &client,
             unreachable_rpc_url(),
             None,
@@ -1959,6 +2045,7 @@ mod tests {
         let client = reqwest::Client::new();
         let result = verify_delegate_key_cached(
             &cache,
+            &new_delegate_reject_cache(),
             &client,
             unreachable_rpc_url(),
             None,
@@ -1994,6 +2081,143 @@ mod tests {
         );
     }
 
+    async fn seed_reject_cache(
+        cache: &DelegateRejectCache,
+        account_id: &str,
+        pk: &[u8],
+        age: std::time::Duration,
+    ) {
+        cache.write().await.insert(
+            (account_id.to_string(), pk.to_vec()),
+            std::time::Instant::now() - age,
+        );
+    }
+
+    #[tokio::test]
+    async fn a_remembered_rejection_is_reused_without_touching_the_chain() {
+        // The 401 loop: ~70% of `/api/mcp/sse` traffic is a bridge retrying a
+        // key that will never be accepted, and each retry cost one fullnode
+        // read. `KeyNotFound` here (rather than the `RpcError` the
+        // unreachable URL would produce) proves no read was attempted.
+        let cache = new_delegate_verify_cache();
+        let rejects = new_delegate_reject_cache();
+        let account_id = "0xaccount-reject-fresh";
+        let pk = sample_pk();
+        seed_reject_cache(&rejects, account_id, &pk, std::time::Duration::ZERO).await;
+
+        let client = reqwest::Client::new();
+        let err = verify_delegate_key_cached(
+            &cache,
+            &rejects,
+            &client,
+            unreachable_rpc_url(),
+            None,
+            account_id,
+            &pk,
+            "0xpkg",
+        )
+        .await
+        .expect_err("a remembered rejection must still be a rejection");
+
+        assert!(
+            !err.is_unavailable(),
+            "served from the reject cache, so it must not look like an RPC failure: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_expired_rejection_goes_back_to_the_chain() {
+        let cache = new_delegate_verify_cache();
+        let rejects = new_delegate_reject_cache();
+        let account_id = "0xaccount-reject-expired";
+        let pk = sample_pk();
+        seed_reject_cache(
+            &rejects,
+            account_id,
+            &pk,
+            DELEGATE_REJECT_CACHE_TTL + std::time::Duration::from_secs(1),
+        )
+        .await;
+
+        let client = reqwest::Client::new();
+        let err = verify_delegate_key_cached(
+            &cache,
+            &rejects,
+            &client,
+            unreachable_rpc_url(),
+            None,
+            account_id,
+            &pk,
+            "0xpkg",
+        )
+        .await
+        .expect_err("the unreachable RPC still fails");
+
+        assert!(
+            err.is_unavailable(),
+            "past the TTL the chain must be consulted again, so the error is the RPC's: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_registered_key_is_never_held_back_by_an_older_rejection() {
+        // Ordering guard: the positive lookup runs first, so a key that was
+        // refused before its registration landed starts working the moment a
+        // verification succeeds, without waiting out the rejection TTL.
+        let cache = new_delegate_verify_cache();
+        let rejects = new_delegate_reject_cache();
+        let account_id = "0xaccount-reject-then-registered";
+        let pk = sample_pk();
+        let owner = seed_verify_cache(&cache, account_id, &pk, std::time::Duration::ZERO).await;
+        seed_reject_cache(&rejects, account_id, &pk, std::time::Duration::ZERO).await;
+
+        let client = reqwest::Client::new();
+        let result = verify_delegate_key_cached(
+            &cache,
+            &rejects,
+            &client,
+            unreachable_rpc_url(),
+            None,
+            account_id,
+            &pk,
+            "0xpkg",
+        )
+        .await;
+
+        assert_eq!(result.ok(), Some(owner), "the positive entry must win");
+    }
+
+    #[test]
+    fn the_rejection_cache_cap_bounds_what_callers_can_grow() {
+        // Keyed by what callers send, so without a cap anyone could grow it
+        // one entry per made-up pair. Refreshing an entry that already exists
+        // cannot grow the map and stays allowed at the cap.
+        assert!(should_record_rejection(0, false));
+        assert!(should_record_rejection(
+            DELEGATE_REJECT_CACHE_MAX_ENTRIES - 1,
+            false
+        ));
+        assert!(
+            !should_record_rejection(DELEGATE_REJECT_CACHE_MAX_ENTRIES, false),
+            "a new pair at the cap must fall back to the live read, not evict something"
+        );
+        assert!(
+            should_record_rejection(DELEGATE_REJECT_CACHE_MAX_ENTRIES, true),
+            "refreshing an existing entry does not grow the map"
+        );
+    }
+
+    #[test]
+    fn a_rejection_is_forgotten_sooner_than_a_success_is_trusted() {
+        // The asymmetry that makes the negative cache safe: a stale positive
+        // authenticates a revoked key, a stale negative only delays one that
+        // just became valid.
+        assert!(
+            DELEGATE_REJECT_CACHE_TTL < DELEGATE_VERIFY_CACHE_TTL,
+            "a rejection must never outlive the trust window for a success"
+        );
+    }
+
     #[test]
     fn stale_grace_outlives_the_ttl_so_the_sweeper_has_something_to_serve() {
         // `main.rs` sweeps on `is_servable_while_unavailable`. If that ever
@@ -2024,6 +2248,7 @@ mod tests {
         assert!(
             verify_delegate_key_cached(
                 &cache,
+                &new_delegate_reject_cache(),
                 &client,
                 unreachable_rpc_url(),
                 None,
@@ -2039,6 +2264,7 @@ mod tests {
         assert!(
             verify_delegate_key_cached(
                 &cache,
+                &new_delegate_reject_cache(),
                 &client,
                 unreachable_rpc_url(),
                 None,
@@ -2068,6 +2294,7 @@ mod tests {
         let client = reqwest::Client::new();
         let _ = verify_delegate_key_cached(
             &cache,
+            &new_delegate_reject_cache(),
             &client,
             unreachable_rpc_url(),
             None,
@@ -2147,6 +2374,7 @@ mod tests {
         for i in 0..5 {
             let _ = verify_delegate_key_cached(
                 &cache,
+                &new_delegate_reject_cache(),
                 &client,
                 unreachable_rpc_url(),
                 None,

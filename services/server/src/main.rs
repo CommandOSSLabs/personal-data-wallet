@@ -1168,6 +1168,7 @@ async fn main() {
         sui_grpc_client,
         delegate_keys_cache: crate::storage::sui::new_delegate_keys_cache(),
         delegate_verify_cache: crate::storage::sui::new_delegate_verify_cache(),
+        delegate_reject_cache: crate::storage::sui::new_delegate_reject_cache(),
         key_pool,
         alerts,
         engine,
@@ -1461,6 +1462,26 @@ async fn main() {
             if evicted > 0 {
                 tracing::debug!(
                     "delegate_verify_cache sweep: evicted {} stale entries ({} remaining)",
+                    evicted,
+                    before - evicted
+                );
+            }
+
+            // The rejection cache is keyed by what callers send rather than
+            // by what exists on chain, so sweeping it is what keeps its cap
+            // from being reached by ordinary churn instead of by abuse.
+            let mut reject_cache = delegate_cache_sweep_state
+                .delegate_reject_cache
+                .write()
+                .await;
+            let before = reject_cache.len();
+            reject_cache
+                .retain(|_, rejected_at| storage::sui::reject_entry_is_fresh(*rejected_at));
+            let evicted = before - reject_cache.len();
+            drop(reject_cache);
+            if evicted > 0 {
+                tracing::debug!(
+                    "delegate_reject_cache sweep: evicted {} expired entries ({} remaining)",
                     evicted,
                     before - evicted
                 );
