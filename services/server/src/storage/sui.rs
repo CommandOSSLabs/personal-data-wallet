@@ -282,6 +282,25 @@ pub async fn list_delegate_keys_cached(
 /// and is the deliberate trade for removing the retry amplifier.
 pub const DELEGATE_VERIFY_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How far past `DELEGATE_VERIFY_CACHE_TTL` an entry may still be served —
+/// but *only* when the chain itself is unreachable.
+///
+/// The 30s TTL assumes dense traffic: several requests carrying the same
+/// credentials inside one window. Real MCP usage is not dense. A user who
+/// calls a tool every few minutes misses the cache every single time, so
+/// while the public fullnode is throttling they take a 503 on each attempt
+/// even though their key verified cleanly minutes ago — measured on
+/// production as 155,874 × 503 against 50,958 × 200 on `/api/mcp/sse`, and
+/// six consecutive failed handshakes with a valid registered key.
+///
+/// Serving the stale entry in exactly that case turns a hard 503 into a
+/// successful call. The trade is bounded and narrow: revocation latency
+/// stays 30s whenever the chain answers, and stretches to 10 minutes only
+/// while the chain cannot be read at all — a window in which the relayer
+/// could not have observed the revoke anyway.
+pub const DELEGATE_VERIFY_STALE_GRACE: std::time::Duration =
+    std::time::Duration::from_secs(600);
+
 #[derive(Clone)]
 pub struct TimedVerifiedOwner {
     /// Owner address returned by the verification that populated this entry.
@@ -290,14 +309,19 @@ pub struct TimedVerifiedOwner {
 }
 
 impl TimedVerifiedOwner {
-    /// Whether this entry may still be served. Also the sweep predicate:
-    /// the TTL gates trust-on-hit, and an entry past it can never be
-    /// returned again, so there is nothing to keep it alive for. (The
-    /// `/agents` cache next door keeps a separate, longer
-    /// `DELEGATE_KEYS_CACHE_MAX_AGE` for its sweep; a second threshold
-    /// here would only hold dead entries in memory for no benefit.)
+    /// Whether this entry may be served on the ordinary path — the window
+    /// in which a verification is trusted without re-reading the chain.
+    /// The sweeper uses `is_servable_while_unavailable` instead, because an
+    /// entry past this point is still worth keeping for the outage path.
     pub fn is_fresh(&self) -> bool {
         self.verified_at.elapsed() < DELEGATE_VERIFY_CACHE_TTL
+    }
+
+    /// Whether this entry may be served *because the chain is unreachable*.
+    /// Never consulted on the healthy path: a caller reaches this only after
+    /// a live read already failed with an unavailable error.
+    pub fn is_servable_while_unavailable(&self) -> bool {
+        self.verified_at.elapsed() < DELEGATE_VERIFY_CACHE_TTL + DELEGATE_VERIFY_STALE_GRACE
     }
 }
 
@@ -329,6 +353,14 @@ pub fn new_delegate_verify_cache() -> DelegateVerifyCache {
 /// takes effect immediately rather than after a TTL. A definitive
 /// rejection also evicts any entry for that pair, so an observed revoke
 /// cannot be overtaken by a positive still inside its window.
+///
+/// When the live read fails *because the chain is unreachable*, a stale
+/// entry within `DELEGATE_VERIFY_STALE_GRACE` is served rather than
+/// surfacing the outage to a caller whose key is known good. Only an
+/// unavailable error takes this path — a definitive rejection is still
+/// returned, and still evicts. Without it the TTL helps only callers who
+/// repeat inside 30s, which is not how the MCP clients that hit this
+/// actually behave (WALM-618).
 pub async fn verify_delegate_key_cached(
     cache: &DelegateVerifyCache,
     http_client: &reqwest::Client,
@@ -367,8 +399,30 @@ pub async fn verify_delegate_key_cached(
         Err(err) => {
             if verify_cache_miss_action(&err) == VerifyCacheMissAction::Evict {
                 cache.write().await.remove(&key);
+                return Err(err);
             }
-            Err(err)
+            // Unavailable: the chain proved nothing about this key, so a
+            // recent success is still the best evidence we have. Serving it
+            // is what keeps a valid caller working through a fullnode
+            // throttle instead of collecting a 503 per attempt.
+            let stale = cache
+                .read()
+                .await
+                .get(&key)
+                .filter(|c| c.is_servable_while_unavailable())
+                .map(|c| (c.owner.clone(), c.verified_at.elapsed()));
+            match stale {
+                Some((owner, age)) => {
+                    tracing::warn!(
+                        account_id = %account_object_id,
+                        age_secs = age.as_secs(),
+                        error = %err,
+                        "serving stale delegate verification while Sui is unavailable"
+                    );
+                    Ok(owner)
+                }
+                None => Err(err),
+            }
         }
     }
 }
@@ -382,8 +436,10 @@ pub enum VerifyCacheMissAction {
     /// revoke we just observed.
     Evict,
     /// An unavailable RPC proves nothing about the key, so leave the entry
-    /// alone. It is expired anyway — a live entry would have been served
-    /// before the call was made.
+    /// alone. The entry is necessarily past its TTL — a fresh one would have
+    /// been served before the call was made — but it is not dead: this is
+    /// exactly the entry `DELEGATE_VERIFY_STALE_GRACE` then serves, which is
+    /// why keeping it is load-bearing rather than merely harmless.
     Keep,
 }
 
@@ -1802,6 +1858,10 @@ mod tests {
 
     #[tokio::test]
     async fn verify_delegate_key_cached_reverifies_after_ttl_expiry() {
+        // An expired entry must not be served on the ordinary path: the read
+        // is attempted for real. Here the RPC is unreachable, so the attempt
+        // fails and the stale-grace path below decides what happens next —
+        // this test only pins that the live read was actually made.
         let cache = new_delegate_verify_cache();
         let account_id = "0xaccount-verify-stale";
         let pk = sample_pk();
@@ -1810,6 +1870,89 @@ mod tests {
             account_id,
             &pk,
             DELEGATE_VERIFY_CACHE_TTL + std::time::Duration::from_secs(1),
+        )
+        .await;
+
+        let before = cache
+            .read()
+            .await
+            .get(&(account_id.to_string(), pk.clone()))
+            .map(|c| c.verified_at);
+
+        let client = reqwest::Client::new();
+        let _ = verify_delegate_key_cached(
+            &cache,
+            &client,
+            unreachable_rpc_url(),
+            None,
+            account_id,
+            &pk,
+            "0xpkg",
+        )
+        .await;
+
+        let after = cache
+            .read()
+            .await
+            .get(&(account_id.to_string(), pk.clone()))
+            .map(|c| c.verified_at);
+        assert_eq!(
+            before, after,
+            "a failed re-verify must not refresh the entry's timestamp — otherwise a key \
+             could be renewed indefinitely by an outage and never re-checked"
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_delegate_key_cached_serves_stale_entry_while_chain_unavailable() {
+        // The WALM-618 case: a valid key, verified minutes ago, used again
+        // while the public fullnode is throttling. Before this, every such
+        // call was a 503 even though nothing about the key had changed.
+        let cache = new_delegate_verify_cache();
+        let account_id = "0xaccount-verify-grace";
+        let pk = sample_pk();
+        let owner = seed_verify_cache(
+            &cache,
+            account_id,
+            &pk,
+            DELEGATE_VERIFY_CACHE_TTL + std::time::Duration::from_secs(60),
+        )
+        .await;
+
+        let client = reqwest::Client::new();
+        let result = verify_delegate_key_cached(
+            &cache,
+            &client,
+            unreachable_rpc_url(),
+            None,
+            account_id,
+            &pk,
+            "0xpkg",
+        )
+        .await;
+
+        assert_eq!(
+            result.ok(),
+            Some(owner),
+            "an entry inside the stale grace must be served when the chain cannot be read"
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_delegate_key_cached_refuses_stale_entry_past_the_grace() {
+        // The grace is bounded. Past it the outage is no longer an excuse and
+        // the caller gets the unavailable error, so a key revoked during a
+        // long outage cannot authenticate forever.
+        let cache = new_delegate_verify_cache();
+        let account_id = "0xaccount-verify-past-grace";
+        let pk = sample_pk();
+        seed_verify_cache(
+            &cache,
+            account_id,
+            &pk,
+            DELEGATE_VERIFY_CACHE_TTL
+                + DELEGATE_VERIFY_STALE_GRACE
+                + std::time::Duration::from_secs(1),
         )
         .await;
 
@@ -1827,9 +1970,44 @@ mod tests {
 
         assert!(
             result.is_err(),
-            "an expired entry must trigger a real re-verify (which fails against the \
-             unreachable RPC URL here) — Ok would mean a stale positive was served, i.e. \
-             revocation latency past the TTL"
+            "past TTL + grace the entry must not be served, outage or not"
+        );
+    }
+
+    #[test]
+    fn stale_grace_is_only_reachable_through_the_unavailable_branch() {
+        // Guards the pairing the outage path depends on: the only error class
+        // that keeps an entry is the one the stale read is allowed to serve.
+        // If a definitive rejection ever became `Keep`, a revoked key would
+        // start riding the grace window.
+        assert_eq!(
+            verify_cache_miss_action(&OnchainVerifyError::KeyNotFound("k".into())),
+            VerifyCacheMissAction::Evict
+        );
+        assert_eq!(
+            verify_cache_miss_action(&OnchainVerifyError::AccountDeactivated("a".into())),
+            VerifyCacheMissAction::Evict
+        );
+        assert_eq!(
+            verify_cache_miss_action(&OnchainVerifyError::RpcError("throttled".into())),
+            VerifyCacheMissAction::Keep
+        );
+    }
+
+    #[test]
+    fn stale_grace_outlives_the_ttl_so_the_sweeper_has_something_to_serve() {
+        // `main.rs` sweeps on `is_servable_while_unavailable`. If that ever
+        // collapsed back to the TTL the outage path would still compile and
+        // still be dead, because the entry would already have been evicted.
+        let entry = TimedVerifiedOwner {
+            owner: "0xowner".into(),
+            verified_at: std::time::Instant::now()
+                - (DELEGATE_VERIFY_CACHE_TTL + std::time::Duration::from_secs(1)),
+        };
+        assert!(!entry.is_fresh(), "past the TTL on the ordinary path");
+        assert!(
+            entry.is_servable_while_unavailable(),
+            "but still held for the outage path"
         );
     }
 
