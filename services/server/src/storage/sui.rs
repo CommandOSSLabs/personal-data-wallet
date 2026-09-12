@@ -2093,6 +2093,25 @@ mod tests {
     }
 
     #[test]
+    fn an_unavailable_error_never_evicts_so_a_concurrent_success_survives() {
+        // The race this pins: thread A misses (no entry, or a stale one),
+        // thread B verifies successfully and writes a FRESH entry, then A's
+        // own read fails with an unavailable RPC. Evicting on that error
+        // would delete B's valid entry on the strength of a failure that says
+        // nothing about the key. `Keep` is unconditional, so no interleaving
+        // is needed to guarantee it — the policy itself is the guarantee.
+        assert_eq!(
+            verify_cache_miss_action(&OnchainVerifyError::RpcError("throttled".into())),
+            VerifyCacheMissAction::Keep,
+            "an unavailable read must never remove an entry it did not observe"
+        );
+        assert_eq!(
+            verify_cache_miss_action(&OnchainVerifyError::ScanCapExceeded("cap".into())),
+            VerifyCacheMissAction::Keep
+        );
+    }
+
+    #[test]
     fn stale_grace_is_only_reachable_through_the_unavailable_branch() {
         // Guards the pairing the outage path depends on: the only error class
         // that keeps an entry is the one the stale read is allowed to serve.
