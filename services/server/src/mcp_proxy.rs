@@ -194,17 +194,25 @@ fn refuse(
     headers: &HeaderMap,
     oauth_err: Option<crate::oauth::OAuthBearerError>,
 ) -> McpAuthOutcome {
-    tracing::warn!(
-        reason = reason.code(),
-        account_id = account_id_header(headers).unwrap_or("-"),
-        connect_id = header_str(headers, CONNECT_ID_HEADER).unwrap_or("-"),
-        client = %sanitized_client(headers, CLIENT_NAME_HEADER),
-        client_version = %sanitized_client(headers, CLIENT_VERSION_HEADER),
-        bridge_version = %sanitized_client(headers, BRIDGE_VERSION_HEADER),
-        "mcp handshake refused"
-    );
+    // Counter first and unconditionally — it is the signal a dashboard reads,
+    // and it must not depend on whether this particular refusal was sampled.
     crate::observability::record_mcp_handshake("unauthorized", reason.code());
     crate::observability::record_app_error("mcp_unauthorized");
+    // The line carries what the counter cannot, but this route has no rate
+    // limit in front of it and a stuck client retries forever, so it is
+    // sampled per account rather than written per request.
+    let account_id = account_id_header(headers).unwrap_or("-");
+    if crate::observability::should_log_refusal(account_id) {
+        tracing::warn!(
+            reason = reason.code(),
+            account_id = %account_id,
+            connect_id = header_str(headers, CONNECT_ID_HEADER).unwrap_or("-"),
+            client = %sanitized_client(headers, CLIENT_NAME_HEADER),
+            client_version = %sanitized_client(headers, CLIENT_VERSION_HEADER),
+            bridge_version = %sanitized_client(headers, BRIDGE_VERSION_HEADER),
+            "mcp handshake refused (sampled; see memwal_mcp_handshake_total for the rate)"
+        );
+    }
     McpAuthOutcome::Unauthorized(oauth_err)
 }
 
@@ -307,9 +315,8 @@ async fn legacy_delegate_registered(
     let Some(pk) = public_key_from_delegate_hex(token) else {
         return refuse(HandshakeRejection::MalformedDelegateKey, headers, None);
     };
-    // Cached: this runs on the SSE handshake *and* on every JSON-RPC
-    // envelope, so an uncached read here is what turned one MCP tool call
-    // into ~10 fullnode `GetObject`s (WALM-618).
+    // Cached: this runs on the SSE handshake and on every JSON-RPC envelope,
+    // so an uncached read here is one fullnode call per envelope.
     match crate::storage::sui::verify_delegate_key_cached(
         &state.delegate_verify_cache,
         &state.delegate_reject_cache,
@@ -339,7 +346,7 @@ async fn legacy_delegate_registered(
             McpAuthOutcome::Unavailable
         }
         Err(err) => {
-            tracing::warn!(error = %err, "mcp delegate rejected on chain");
+            tracing::debug!(error = %err, "mcp delegate rejected on chain");
             refuse(HandshakeRejection::NotRegistered, headers, None)
         }
     }

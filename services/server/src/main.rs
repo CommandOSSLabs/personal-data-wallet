@@ -1454,6 +1454,7 @@ async fn main() {
             // exactly the entries that outage path exists to serve.
             let mut verify_cache = delegate_cache_sweep_state
                 .delegate_verify_cache
+                .entries
                 .write()
                 .await;
             let before = verify_cache.len();

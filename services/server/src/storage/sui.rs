@@ -255,23 +255,11 @@ pub async fn list_delegate_keys_cached(
 // Delegate key verification — short-TTL in-memory result cache
 // ============================================================
 //
-// Every authenticated path re-verified the delegate key on-chain on every
-// single request: `auth.rs::resolve_account` on each signed API call (the
-// Postgres `delegate_key_cache` only saves the registry *scan*, never the
-// `GetObject`), and `mcp_proxy.rs` on every MCP request — the SSE
-// handshake AND each JSON-RPC POST. One `memwal_remember` through MCP is
-// therefore ~10 `GetObject` calls: SSE open, initialize, tools/list,
-// tools/call, `POST /api/remember`, and one per status poll.
-//
-// Against a public fullnode that load throttles into `RpcError`, which is
-// (correctly) a 503 — and a 503 makes clients reconnect and poll again,
-// which issues more verifies. That feedback loop is the amplifier behind
-// WALM-618: ~200 uncached verify calls/min from stuck bridges, degrading
-// every other user on the instance.
-//
-// Caching the *positive* result for a short window collapses a burst of
-// requests carrying the same credentials into one on-chain read. Same
-// `Timed`-value shape as `DelegateKeysCache` above.
+// Positive verifications are trusted for `DELEGATE_VERIFY_CACHE_TTL`, so a
+// burst of requests carrying the same credentials costs one `GetObject`
+// rather than one each. Only `Ok` is stored, keyed by
+// `(account_object_id, public_key_bytes)`. An unavailable RPC does not
+// evict; see `VerifyCacheMissAction`.
 
 /// How long a successful on-chain verification is trusted without
 /// re-reading the account object. Matches `DELEGATE_KEYS_CACHE_TTL`.
@@ -337,27 +325,34 @@ impl TimedVerifiedOwner {
 /// `expected_type_origin_package_id` is deliberately not part of the key:
 /// it comes from `Config::package_id`, which is fixed for the life of the
 /// process, so it cannot vary between a cache write and a later hit.
-pub type DelegateVerifyCache = std::sync::Arc<
-    tokio::sync::RwLock<std::collections::HashMap<(String, Vec<u8>), TimedVerifiedOwner>>,
->;
+pub struct DelegateVerifyCacheState {
+    pub entries:
+        tokio::sync::RwLock<std::collections::HashMap<(String, Vec<u8>), TimedVerifiedOwner>>,
+    /// Bumped by every definitive eviction.
+    ///
+    /// Cold misses are deliberately not single-flighted, so two requests for
+    /// the same pair can be in the chain at once. Without this, request A can
+    /// start a read, request B can observe a revoke and evict, and A's older
+    /// success can then land and re-open a full trust window on a key that is
+    /// already gone. An insert refuses when the generation moved under it, so
+    /// the revoke wins and the next caller reads the chain again.
+    pub evictions: std::sync::atomic::AtomicU64,
+}
+
+pub type DelegateVerifyCache = std::sync::Arc<DelegateVerifyCacheState>;
 
 pub fn new_delegate_verify_cache() -> DelegateVerifyCache {
-    std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()))
+    std::sync::Arc::new(DelegateVerifyCacheState {
+        entries: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        evictions: std::sync::atomic::AtomicU64::new(0),
+    })
 }
 
 // ── Rejections ──────────────────────────────────────────────────────────
 //
-// Caching successes alone leaves the larger half of the traffic uncached.
-// On production `/api/mcp/sse` answers 784,627 × 401 against 50,958 × 200,
-// and `GetObject` volume (1,147,414) tracks total requests (1,119,744)
-// almost 1:1 — so roughly 70% of the load the public fullnode is throttling
-// comes from requests that were always going to be refused.
-//
-// They are not 784,627 people. A bridge holding a key the relayer will never
-// accept treats the 401 as a transient connect failure and retries on a
-// backoff capped at 15s, forever. The client-side fix for that loop is
-// separate (#894); this is the half that works no matter what version a
-// caller is running, including the ones already installed.
+// Definitive rejections are cached too, briefly. A client holding a key the
+// relayer will never accept retries forever, and an uncached rejection makes
+// each retry another fullnode read.
 
 /// How long a definitive rejection is remembered.
 ///
@@ -430,9 +425,15 @@ pub async fn verify_delegate_key_cached(
 ) -> Result<String, OnchainVerifyError> {
     let key = (account_object_id.to_string(), public_key_bytes.to_vec());
 
-    if let Some(cached) = cache.read().await.get(&key).filter(|c| c.is_fresh()) {
+    if let Some(cached) = cache.entries.read().await.get(&key).filter(|c| c.is_fresh()) {
         return Ok(cached.owner.clone());
     }
+
+    // Read before the chain call, compared after it. See `evictions`.
+    let generation_before = cache.evictions.load(std::sync::atomic::Ordering::Acquire);
+    // Stamped from BEFORE the read, not after: a slow `GetObject` would
+    // otherwise extend the stated revocation bound by its own duration.
+    let verify_started = std::time::Instant::now();
 
     // A pair we refused moments ago is refused again without a chain read.
     // Checked after the positive lookup so a key that has since been
@@ -461,18 +462,31 @@ pub async fn verify_delegate_key_cached(
     {
         Ok(owner) => {
             reject_cache.write().await.remove(&key);
-            cache.write().await.insert(
-                key,
-                TimedVerifiedOwner {
-                    owner: owner.clone(),
-                    verified_at: std::time::Instant::now(),
-                },
-            );
+            let mut entries = cache.entries.write().await;
+            if may_store_verification(
+                generation_before,
+                cache.evictions.load(std::sync::atomic::Ordering::Acquire),
+            ) {
+                entries.insert(
+                    key,
+                    TimedVerifiedOwner {
+                        owner: owner.clone(),
+                        verified_at: verify_started,
+                    },
+                );
+            }
+            // Otherwise a concurrent request saw something definitive while
+            // this read was in flight. Answer this caller — the read did
+            // succeed — but do not cache a result the chain has since
+            // contradicted.
             Ok(owner)
         }
         Err(err) => {
             if verify_cache_miss_action(&err) == VerifyCacheMissAction::Evict {
-                cache.write().await.remove(&key);
+                cache.entries.write().await.remove(&key);
+                cache
+                    .evictions
+                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
                 // Remember the refusal so a client looping on a key that can
                 // never be accepted stops costing one fullnode read per retry.
                 // At the cap we simply do not record it — the next attempt
@@ -489,6 +503,7 @@ pub async fn verify_delegate_key_cached(
             // is what keeps a valid caller working through a fullnode
             // throttle instead of collecting a 503 per attempt.
             let stale = cache
+                .entries
                 .read()
                 .await
                 .get(&key)
@@ -519,11 +534,25 @@ pub enum VerifyCacheMissAction {
     /// revoke we just observed.
     Evict,
     /// An unavailable RPC proves nothing about the key, so leave the entry
-    /// alone. The entry is necessarily past its TTL — a fresh one would have
-    /// been served before the call was made — but it is not dead: this is
-    /// exactly the entry `DELEGATE_VERIFY_STALE_GRACE` then serves, which is
-    /// why keeping it is load-bearing rather than merely harmless.
+    /// alone. Load-bearing in two distinct ways, neither of them obvious:
+    ///
+    /// - The entry this thread missed on is what
+    ///   `DELEGATE_VERIFY_STALE_GRACE` goes on to serve, so evicting here
+    ///   would delete exactly what the outage path exists to use.
+    /// - A *different* request may have verified successfully in the window
+    ///   between this thread's miss and its failed read. Evicting on an
+    ///   unavailable error would throw away that fresh, valid entry on the
+    ///   strength of an RPC failure that says nothing about the key.
     Keep,
+}
+
+/// Whether a completed verification may still be stored.
+///
+/// False when a definitive eviction landed while the read was in flight: the
+/// chain has since contradicted this answer, so caching it would re-open a
+/// trust window on a key another request already saw revoked.
+pub fn may_store_verification(generation_before: u64, generation_now: u64) -> bool {
+    generation_before == generation_now
 }
 
 pub fn verify_cache_miss_action(err: &OnchainVerifyError) -> VerifyCacheMissAction {
@@ -1903,7 +1932,7 @@ mod tests {
         age: std::time::Duration,
     ) -> String {
         let owner = "0xowner-from-cache".to_string();
-        cache.write().await.insert(
+        cache.entries.write().await.insert(
             (account_id.to_string(), pk.to_vec()),
             TimedVerifiedOwner {
                 owner: owner.clone(),
@@ -1958,6 +1987,7 @@ mod tests {
         .await;
 
         let before = cache
+            .entries
             .read()
             .await
             .get(&(account_id.to_string(), pk.clone()))
@@ -1977,6 +2007,7 @@ mod tests {
         .await;
 
         let after = cache
+            .entries
             .read()
             .await
             .get(&(account_id.to_string(), pk.clone()))
@@ -2208,6 +2239,18 @@ mod tests {
     }
 
     #[test]
+    fn a_verification_overtaken_by_an_eviction_is_not_stored() {
+        // Cold misses are not single-flighted, so A can be reading while B
+        // observes a revoke and evicts. Without this check A's older success
+        // lands afterwards and re-opens a full trust window on a dead key.
+        assert!(may_store_verification(7, 7), "nothing moved, safe to store");
+        assert!(
+            !may_store_verification(7, 8),
+            "an eviction landed mid-read; the chain has contradicted this answer"
+        );
+    }
+
+    #[test]
     fn a_rejection_is_forgotten_sooner_than_a_success_is_trusted() {
         // The asymmetry that makes the negative cache safe: a stale positive
         // authenticates a revoked key, a stale negative only delays one that
@@ -2306,6 +2349,7 @@ mod tests {
 
         assert!(
             cache
+                .entries
                 .read()
                 .await
                 .contains_key(&(account_id.to_string(), pk.clone())),
@@ -2355,9 +2399,9 @@ mod tests {
         // the TTL itself, not a second longer one: an entry past the TTL can
         // never be served again (`is_fresh` is the same predicate the lookup
         // uses), so holding it would cost memory for nothing.
-        cache.write().await.retain(|_, v| v.is_fresh());
+        cache.entries.write().await.retain(|_, v| v.is_fresh());
 
-        let remaining = cache.read().await;
+        let remaining = cache.entries.read().await;
         assert!(!remaining.contains_key(&("0xstale".to_string(), sample_pk())));
         assert!(remaining.contains_key(&("0xfresh".to_string(), sample_pk())));
     }
@@ -2385,7 +2429,7 @@ mod tests {
             .await;
         }
         assert!(
-            cache.read().await.is_empty(),
+            cache.entries.read().await.is_empty(),
             "a failed verification must leave no entry behind"
         );
     }
