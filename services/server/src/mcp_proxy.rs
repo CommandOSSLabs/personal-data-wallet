@@ -195,7 +195,7 @@ async fn legacy_delegate_registered(
             McpAuthOutcome::Unavailable
         }
         Err(err) => {
-            tracing::debug!("mcp delegate rejected: {err}");
+            tracing::warn!(account_id = %account_id, error = %err, "mcp delegate rejected");
             McpAuthOutcome::Unauthorized(None)
         }
     }
