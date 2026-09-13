@@ -170,14 +170,20 @@ fn endpoint_weight(path: &str) -> i64 {
 // Redis Client
 // ============================================================
 
-/// Create a Redis client that reconnects after a dropped connection.
-/// A one-shot multiplexed connection never recovers, which fail-closes
-/// unauthenticated sponsor/accounts traffic for the process lifetime.
+/// Reconnect so a dropped Redis connection does not fail-close
+/// unauthenticated limiters for the process lifetime.
 pub async fn create_redis_client(redis_url: &str) -> Result<redis::aio::ConnectionManager, String> {
     let client = redis::Client::open(redis_url)
         .map_err(|e| format!("Failed to create Redis client: {}", e))?;
 
-    redis::aio::ConnectionManager::new(client)
+    // Bound reconnect so a dead Redis still 503s promptly instead of
+    // stalling fail-closed routes.
+    let config = redis::aio::ConnectionManagerConfig::new()
+        .set_connection_timeout(Duration::from_secs(2))
+        .set_response_timeout(Duration::from_secs(2))
+        .set_max_delay(2_000)
+        .set_number_of_retries(3);
+    redis::aio::ConnectionManager::new_with_config(client, config)
         .await
         .map_err(|e| format!("Failed to connect to Redis: {}", e))
 }
@@ -1167,8 +1173,7 @@ pub async fn sponsor_rate_limit_middleware(
 
     // XFF is ignored by default. Only walk back through the explicitly
     // configured number of trusted proxy hops, using the same resolver as
-    // the MCP proxy path. Missing ConnectInfo is a shared 0.0.0.0 bucket,
-    // not a 503 — see `rate_limit_peer_addr`.
+    // the MCP proxy path.
     let ip = rate_limit_peer_addr(&request, state.config.trusted_proxy_hops).to_string();
 
     let config = &state.config.sponsor_rate_limit;
@@ -1381,8 +1386,7 @@ pub async fn accounts_rate_limit_middleware(
 
     // XFF is ignored by default. Only walk back through the explicitly
     // configured number of trusted proxy hops, using the same resolver as
-    // the sponsor and MCP proxy paths. Missing ConnectInfo is a shared
-    // 0.0.0.0 bucket, not a 503 — see `rate_limit_peer_addr`.
+    // the sponsor and MCP proxy paths.
     let ip = rate_limit_peer_addr(&request, state.config.trusted_proxy_hops).to_string();
 
     let config = &state.config.accounts_rate_limit;
